@@ -1,0 +1,21 @@
+[package]
+name = "failforge-runner"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+
+[dependencies]
+tokio.workspace = true
+libc.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[[bin]]
+name = "failforge-process-fixture"
+path = "tests/support/process_fixture.rs"
+test = true
+bench = false
+
+[[example]]
+name = "microbench"
+test = true

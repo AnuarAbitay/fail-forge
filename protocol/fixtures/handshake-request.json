@@ -1,0 +1,6 @@
+{
+  "protocolVersion": 1,
+  "requestId": "shared-1",
+  "command": "handshake",
+  "payload": {}
+}

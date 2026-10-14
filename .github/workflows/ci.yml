@@ -1,0 +1,148 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Source archives are downloaded anonymously. No repository token or personal
+# account is used for checkout, and this workflow never publishes artifacts.
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  stable:
+    name: Stable / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Download public source without authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --max-time 60 \
+            --output "$RUNNER_TEMP/failforge-source.tar.gz" \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/archive/$GITHUB_SHA.tar.gz"
+          tar -xzf "$RUNNER_TEMP/failforge-source.tar.gz" \
+            --strip-components=1 -C "$GITHUB_WORKSPACE"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Toolchain
+        run: rustc --version --verbose
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Check
+        run: cargo check --workspace --all-targets --locked
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Tests
+        run: cargo test --workspace --all-targets --locked -- --test-threads=1
+      - name: Benchmark statistics and protocol tests
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
+  msrv:
+    name: Rust 1.85.1 / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Download public source without authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --max-time 60 \
+            --output "$RUNNER_TEMP/failforge-source.tar.gz" \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/archive/$GITHUB_SHA.tar.gz"
+          tar -xzf "$RUNNER_TEMP/failforge-source.tar.gz" \
+            --strip-components=1 -C "$GITHUB_WORKSPACE"
+      - uses: dtolnay/rust-toolchain@1.85.1
+      - name: Toolchain
+        run: rustc --version --verbose
+      - name: Check locked dependencies on MSRV
+        run: cargo check --workspace --all-targets --locked
+      - name: Tests on MSRV
+        run: cargo test --workspace --all-targets --locked -- --test-threads=1
+
+  documentation:
+    name: Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download public source without authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --max-time 60 \
+            --output "$RUNNER_TEMP/failforge-source.tar.gz" \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/archive/$GITHUB_SHA.tar.gz"
+          tar -xzf "$RUNNER_TEMP/failforge-source.tar.gz" \
+            --strip-components=1 -C "$GITHUB_WORKSPACE"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Doctests
+        run: cargo test --workspace --doc --locked
+      - name: API documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps --locked
+
+  dart-adapter:
+    name: Dart adapter / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Download public source without authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --max-time 60 \
+            --output "$RUNNER_TEMP/failforge-source.tar.gz" \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/archive/$GITHUB_SHA.tar.gz"
+          tar -xzf "$RUNNER_TEMP/failforge-source.tar.gz" \
+            --strip-components=1 -C "$GITHUB_WORKSPACE"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned official Flutter SDK and verify archive digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/install_test_flutter.py --destination "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+          echo "PUB_CACHE=$RUNNER_TEMP/pub-cache" >> "$GITHUB_ENV"
+          echo "FLUTTER_SUPPRESS_ANALYTICS=true" >> "$GITHUB_ENV"
+      - name: Prepare tooling dependencies and explicit example
+        shell: bash
+        run: |
+          dart --suppress-analytics pub get --enforce-lockfile --directory adapters/dart
+          (cd examples/flutter_fixture && flutter --suppress-analytics pub get --enforce-lockfile)
+      - name: Dart formatting, analysis and tests
+        env:
+          FAILFORGE_OPERATOR_SCALING_PROBE: ${{ runner.temp }}/operator-scaling.json
+        shell: bash
+        run: |
+          dart --suppress-analytics format --output=none --set-exit-if-changed adapters/dart examples/flutter_fixture
+          (cd adapters/dart && dart --suppress-analytics analyze && dart --suppress-analytics test --concurrency 1)
+      - name: Rust integration and actual Flutter mutation fixture
+        shell: bash
+        run: |
+          cargo build --workspace --examples --locked
+          cargo build --workspace --locked
+          cargo test -p failforge-dart --all-targets --locked -- --test-threads=1
+          python3 -m unittest discover -s scripts -p 'test_dart_adapter_e2e.py'
+          python3 scripts/dart_adapter_e2e.py --flutter-sdk "$RUNNER_TEMP/flutter" --output "$RUNNER_TEMP/adapter-e2e" --p1

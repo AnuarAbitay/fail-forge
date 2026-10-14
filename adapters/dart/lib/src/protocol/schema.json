@@ -1,0 +1,600 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://failforge.invalid/protocol/dart-adapter-v1.schema.json",
+  "title": "FailForge Dart adapter protocol version 1",
+  "description": "UTF-8 JSON Lines; each input/output record is at most 8388608 bytes before LF. Runtime additionally checks filesystem containment, hashes, canonical IDs, UTF-8 byte boundaries and expected bytes.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/response"
+    },
+    {
+      "$ref": "#/$defs/mutant"
+    }
+  ],
+  "$defs": {
+    "target": {
+      "type": "string",
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*//)(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))[^\\u0000]+\\.dart$"
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxMutants": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "includePaths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 10000
+        },
+        "excludePaths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 10000
+        },
+        "classes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 10000
+        },
+        "methods": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 10000
+        },
+        "operators": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "ARGUMENT_PERMUTATION",
+              "ARGUMENT_REPLACEMENT",
+              "ARITHMETIC_OPERAND_REMOVAL",
+              "ARITHMETIC_OPERATOR_REPLACEMENT",
+              "BITWISE_NEGATION",
+              "BITWISE_OPERATOR_REPLACEMENT",
+              "BOOLEAN_LITERAL_FLIP",
+              "BOOLEAN_NEGATION",
+              "BRANCH_BODY_REMOVAL",
+              "BREAK_CONTINUE_MUTATION",
+              "COLLECTION_LITERAL_MUTATION",
+              "COMPARISON_NEGATION",
+              "COMPARISON_OPERATOR_REPLACEMENT",
+              "COMPOUND_ASSIGNMENT_REPLACEMENT",
+              "CONDITIONAL_EXPRESSION_MUTATION",
+              "CONDITIONAL_NEGATION",
+              "CONDITION_FORCING",
+              "EXCEPTION_AT_ENTRY",
+              "EXCEPTION_REPLACEMENT",
+              "FUNCTION_CALL_REMOVAL",
+              "INCREMENT_DECREMENT_REPLACEMENT",
+              "LOGICAL_CONNECTOR_SWAP",
+              "LOGICAL_OPERAND_REMOVAL",
+              "METHOD_CHANNEL_ERROR",
+              "NUMERIC_LITERAL_REPLACEMENT",
+              "NUMERIC_NEGATION",
+              "RELATIONAL_BOUNDARY",
+              "RETURN_VALUE_REPLACEMENT",
+              "SHIFT_OPERATOR_REPLACEMENT",
+              "STATEMENT_DELETION",
+              "STRING_LITERAL_REPLACEMENT",
+              "SWITCH_CASE_MUTATION",
+              "THROW_REMOVAL",
+              "VARIABLE_REPLACEMENT"
+            ]
+          },
+          "maxItems": 10000
+        },
+        "generatedPatterns": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 10000
+        },
+        "generatedHeaders": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 10000
+        },
+        "components": {
+          "type": "array",
+          "maxItems": 10000,
+          "description": "Empty components means no component restriction. A component's empty operator list enables none.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "includePaths": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "maxItems": 10000
+              },
+              "excludePaths": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "maxItems": 10000
+              },
+              "classes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "maxItems": 10000
+              },
+              "methods": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "maxItems": 10000
+              },
+              "operators": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "ARGUMENT_PERMUTATION",
+                    "ARGUMENT_REPLACEMENT",
+                    "ARITHMETIC_OPERAND_REMOVAL",
+                    "ARITHMETIC_OPERATOR_REPLACEMENT",
+                    "BITWISE_NEGATION",
+                    "BITWISE_OPERATOR_REPLACEMENT",
+                    "BOOLEAN_LITERAL_FLIP",
+                    "BOOLEAN_NEGATION",
+                    "BRANCH_BODY_REMOVAL",
+                    "BREAK_CONTINUE_MUTATION",
+                    "COLLECTION_LITERAL_MUTATION",
+                    "COMPARISON_NEGATION",
+                    "COMPARISON_OPERATOR_REPLACEMENT",
+                    "COMPOUND_ASSIGNMENT_REPLACEMENT",
+                    "CONDITIONAL_EXPRESSION_MUTATION",
+                    "CONDITIONAL_NEGATION",
+                    "CONDITION_FORCING",
+                    "EXCEPTION_AT_ENTRY",
+                    "EXCEPTION_REPLACEMENT",
+                    "FUNCTION_CALL_REMOVAL",
+                    "INCREMENT_DECREMENT_REPLACEMENT",
+                    "LOGICAL_CONNECTOR_SWAP",
+                    "LOGICAL_OPERAND_REMOVAL",
+                    "METHOD_CHANNEL_ERROR",
+                    "NUMERIC_LITERAL_REPLACEMENT",
+                    "NUMERIC_NEGATION",
+                    "RELATIONAL_BOUNDARY",
+                    "RETURN_VALUE_REPLACEMENT",
+                    "SHIFT_OPERATOR_REPLACEMENT",
+                    "STATEMENT_DELETION",
+                    "STRING_LITERAL_REPLACEMENT",
+                    "SWITCH_CASE_MUTATION",
+                    "THROW_REMOVAL",
+                    "VARIABLE_REPLACEMENT"
+                  ]
+                },
+                "maxItems": 10000
+              }
+            }
+          }
+        }
+      }
+    },
+    "discoverPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspaceRoot",
+        "packageRoot",
+        "dartSdkPath"
+      ],
+      "properties": {
+        "workspaceRoot": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "packageRoot": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Canonical workspace-relative directory; '.' selects the workspace root. Traversal and symlink escape reject."
+        },
+        "dartSdkPath": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "flutterSdkPath": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "files": {
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "rules": {
+          "$ref": "#/$defs/rules"
+        },
+        "limits": {
+          "$ref": "#/$defs/limits"
+        }
+      }
+    },
+    "validatePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspaceRoot",
+        "packageRoot",
+        "dartSdkPath",
+        "mutant"
+      ],
+      "properties": {
+        "workspaceRoot": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "packageRoot": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Canonical workspace-relative directory; '.' selects the workspace root. Traversal and symlink escape reject."
+        },
+        "dartSdkPath": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "flutterSdkPath": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "files": {
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "rules": {
+          "$ref": "#/$defs/rules"
+        },
+        "limits": {
+          "$ref": "#/$defs/limits"
+        },
+        "mutant": {
+          "$ref": "#/$defs/mutant"
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "requestId",
+        "command",
+        "payload"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "command": {
+          "enum": [
+            "handshake",
+            "discover",
+            "validate"
+          ]
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "command": {
+              "const": "handshake"
+            },
+            "payload": {
+              "type": "object",
+              "maxProperties": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "command": {
+              "const": "discover"
+            },
+            "payload": {
+              "$ref": "#/$defs/discoverPayload"
+            }
+          }
+        },
+        {
+          "properties": {
+            "command": {
+              "const": "validate"
+            },
+            "payload": {
+              "$ref": "#/$defs/validatePayload"
+            }
+          }
+        }
+      ]
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "requestId",
+        "kind"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "maxLength": 256,
+          "description": "Empty only when no safe request ID is available."
+        },
+        "kind": {
+          "enum": [
+            "handshake",
+            "discover",
+            "validate",
+            "error"
+          ]
+        },
+        "payload": {
+          "type": "object"
+        },
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "minLength": 1
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            },
+            "details": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "payload"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "handshake",
+                "discover",
+                "validate"
+              ]
+            }
+          },
+          "not": {
+            "required": [
+              "error"
+            ]
+          }
+        },
+        {
+          "required": [
+            "error"
+          ],
+          "properties": {
+            "kind": {
+              "const": "error"
+            }
+          },
+          "not": {
+            "required": [
+              "payload"
+            ]
+          }
+        }
+      ]
+    },
+    "edit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "offsetBytes",
+        "lengthBytes",
+        "expected",
+        "replacement"
+      ],
+      "properties": {
+        "offsetBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "lengthBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expected": {
+          "type": "string"
+        },
+        "replacement": {
+          "type": "string"
+        }
+      },
+      "description": "UTF-8 bytes from the beginning of the unmodified file, including BOM. expected encodes to lengthBytes; replacement differs. No fuzzy application."
+    },
+    "mutant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "operatorId",
+        "operatorVersion",
+        "family",
+        "file",
+        "sourceHash",
+        "components",
+        "edit",
+        "symbol",
+        "validation"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "operatorId": {
+          "enum": [
+            "ARGUMENT_PERMUTATION",
+            "ARGUMENT_REPLACEMENT",
+            "ARITHMETIC_OPERAND_REMOVAL",
+            "ARITHMETIC_OPERATOR_REPLACEMENT",
+            "BITWISE_NEGATION",
+            "BITWISE_OPERATOR_REPLACEMENT",
+            "BOOLEAN_LITERAL_FLIP",
+            "BOOLEAN_NEGATION",
+            "BRANCH_BODY_REMOVAL",
+            "BREAK_CONTINUE_MUTATION",
+            "COLLECTION_LITERAL_MUTATION",
+            "COMPARISON_NEGATION",
+            "COMPARISON_OPERATOR_REPLACEMENT",
+            "COMPOUND_ASSIGNMENT_REPLACEMENT",
+            "CONDITIONAL_EXPRESSION_MUTATION",
+            "CONDITIONAL_NEGATION",
+            "CONDITION_FORCING",
+            "EXCEPTION_AT_ENTRY",
+            "EXCEPTION_REPLACEMENT",
+            "FUNCTION_CALL_REMOVAL",
+            "INCREMENT_DECREMENT_REPLACEMENT",
+            "LOGICAL_CONNECTOR_SWAP",
+            "LOGICAL_OPERAND_REMOVAL",
+            "METHOD_CHANNEL_ERROR",
+            "NUMERIC_LITERAL_REPLACEMENT",
+            "NUMERIC_NEGATION",
+            "RELATIONAL_BOUNDARY",
+            "RETURN_VALUE_REPLACEMENT",
+            "SHIFT_OPERATOR_REPLACEMENT",
+            "STATEMENT_DELETION",
+            "STRING_LITERAL_REPLACEMENT",
+            "SWITCH_CASE_MUTATION",
+            "THROW_REMOVAL",
+            "VARIABLE_REPLACEMENT"
+          ]
+        },
+        "operatorVersion": {
+          "const": 1
+        },
+        "family": {
+          "enum": [
+            "classic",
+            "failure_mode"
+          ]
+        },
+        "file": {
+          "$ref": "#/$defs/target"
+        },
+        "sourceHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 10000,
+          "uniqueItems": true
+        },
+        "edit": {
+          "$ref": "#/$defs/edit"
+        },
+        "symbol": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "className": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "methodName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        "validation": {
+          "enum": [
+            "unvalidated",
+            "valid",
+            "invalid"
+          ]
+        }
+      },
+      "description": "ID = SHA256(UTF8(compact JSON [1,file,sourceHash,operatorId,operatorVersion,family,offsetBytes,lengthBytes,expected,replacement])). Paths and hashes exclude absolute snapshot location."
+    }
+  }
+}

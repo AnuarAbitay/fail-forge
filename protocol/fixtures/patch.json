@@ -1,0 +1,25 @@
+{
+  "sourceUtf8": "﻿// Кириллица 😀\r\nbool flag() => true;\r\n",
+  "mutant": {
+    "id": "31bda7911aecdf91778e3ba954638c16c1fc9bf7b3aac433278a0079e8668e79",
+    "operatorId": "BOOLEAN_LITERAL_FLIP",
+    "operatorVersion": 1,
+    "family": "classic",
+    "file": "lib/subject.dart",
+    "sourceHash": "13ef4a4afd24d7483d852cba2f9eaf5234165a224a1a7398663233ed97f33313",
+    "components": [
+      "logic"
+    ],
+    "edit": {
+      "offsetBytes": 46,
+      "lengthBytes": 4,
+      "expected": "true",
+      "replacement": "false"
+    },
+    "symbol": {
+      "methodName": "flag"
+    },
+    "validation": "unvalidated"
+  },
+  "patchedUtf8": "﻿// Кириллица 😀\r\nbool flag() => false;\r\n"
+}

@@ -1,0 +1,23 @@
+[package]
+name = "failforge-cli"
+version = "0.1.0"
+edition = "2024"
+rust-version.workspace = true
+
+[dependencies]
+failforge-runner = { path = "../failforge-runner" }
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+libc.workspace = true
+
+[[bin]]
+name = "failforge"
+path = "src/main.rs"
+
+[[bin]]
+name = "failforge-cli-process-fixture"
+path = "../failforge-runner/tests/support/process_fixture.rs"
+test = false
+bench = false

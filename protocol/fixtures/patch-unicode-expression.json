@@ -1,0 +1,25 @@
+{
+  "sourceUtf8": "﻿// 😀\r\nbool flag(String label) { if (label == 'Привет 😀 ') return true; return false; }\r\n",
+  "mutant": {
+    "id": "02301d6bacabbfe81e31366f97152242acb1d0f30c50770a04b2c1bfc0d810e0",
+    "operatorId": "CONDITIONAL_NEGATION",
+    "operatorVersion": 1,
+    "family": "classic",
+    "file": "lib/данные 😀.dart",
+    "sourceHash": "b97c54cc224c19a9febff60e2ad9905bff2ee0df1cdb3806231b45ff876d8d9c",
+    "components": [
+      "логика"
+    ],
+    "edit": {
+      "offsetBytes": 42,
+      "lengthBytes": 31,
+      "expected": "label == 'Привет 😀 '",
+      "replacement": "!(label == 'Привет 😀 ')"
+    },
+    "symbol": {
+      "methodName": "flag"
+    },
+    "validation": "unvalidated"
+  },
+  "patchedUtf8": "﻿// 😀\r\nbool flag(String label) { if (!(label == 'Привет 😀 ')) return true; return false; }\r\n"
+}

@@ -1,0 +1,13 @@
+name: failforge_dart_adapter
+version: 0.1.0
+publish_to: none
+description: Read-only AST mutation tooling adapter for FailForge.
+environment:
+  sdk: '>=3.13.0 <3.14.0'
+dependencies:
+  analyzer: 14.5.0
+  crypto: ^3.0.6
+  glob: ^2.1.3
+  path: ^1.9.1
+dev_dependencies:
+  test: ^1.26.3
