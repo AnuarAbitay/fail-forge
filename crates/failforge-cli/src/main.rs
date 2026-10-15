@@ -13,7 +13,9 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::Parser;
-use failforge_runner::{CancelReason, CaptureIssue, CommandResult, CompletionCause, Runner};
+use failforge_runner::{
+    CancelReason, CaptureIssue, CommandResult, CompletionCause, Runner, WorkspaceLease,
+};
 use tokio::signal::unix::{SignalKind, signal};
 
 use args::{Cli, Commands};
@@ -48,13 +50,28 @@ fn main() -> ExitCode {
         Commands::Run(arguments) => arguments,
         Commands::Mutate(arguments) => return mutate::execute(*arguments, &invocation_cwd),
     };
-    let spec = match arguments.into_spec(&invocation_cwd) {
+    // Retain the optional inherited capability until the runtime and Runner
+    // have finished cleanup. Child exec must not inherit either descriptor.
+    let workspace_lease = match WorkspaceLease::from_env() {
+        Ok(lease) => lease,
+        Err(_) => {
+            let _ = writeln!(
+                std::io::stderr(),
+                "failforge: invalid workspace lease capability"
+            );
+            return ExitCode::from(125);
+        }
+    };
+    let mut spec = match arguments.into_spec(&invocation_cwd) {
         Ok(spec) => spec,
         Err(error) => {
             let _ = error.print();
             return ExitCode::from(2);
         }
     };
+    if let Some(lease) = &workspace_lease {
+        lease.protect_child(&mut spec);
+    }
     let diagnostics = match Diagnostics::new() {
         Ok(diagnostics) => diagnostics,
         Err(_) => {

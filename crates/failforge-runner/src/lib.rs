@@ -40,6 +40,7 @@ mod prepare;
 mod result;
 mod spec;
 mod supervisor;
+mod workspace_lease;
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 compile_error!("FailForge's first-stage process backend supports Linux and macOS only");
@@ -51,3 +52,4 @@ pub use result::{
 };
 pub use spec::{CapturePolicy, CommandSpec, EnvSpec, OutputMode, SpecError, TimeoutPolicy};
 pub use supervisor::{RunHandle, RunOutcome, Runner};
+pub use workspace_lease::{WORKSPACE_LEASE_ENV, WORKSPACE_LEASE_MAGIC, WorkspaceLease};

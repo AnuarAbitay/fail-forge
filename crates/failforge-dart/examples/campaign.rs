@@ -12,7 +12,7 @@ use failforge_dart::{
     AdapterClient, ClientOptions, MAX_LINE_BYTES, Mutant, ValidationState, read_and_apply_mutant,
     sha256_hex, validate_relative_target,
 };
-use failforge_runner::{CommandSpec, Runner};
+use failforge_runner::{CommandSpec, EnvSpec, Runner, WORKSPACE_LEASE_ENV, WorkspaceLease};
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -47,6 +47,8 @@ impl Configuration {
     }
 
     fn spec(&self) -> CommandSpec {
+        let mut environment = EnvSpec::default();
+        environment.remove.insert(WORKSPACE_LEASE_ENV.into());
         CommandSpec {
             program: self.dart.clone(),
             args: vec![
@@ -62,7 +64,7 @@ impl Configuration {
                     .into_os_string(),
             ],
             cwd: self.adapter.clone(),
-            env: Default::default(),
+            env: environment,
             timeout_policy: Default::default(),
             capture_policy: Default::default(),
         }
@@ -144,6 +146,9 @@ struct SessionEvidence {
 
 #[tokio::main]
 pub async fn main() -> Result<(), Failure> {
+    // This owner outlives Python on controller death; do not unlock its shared
+    // open description or pass the lease capability into the Dart adapter.
+    let _workspace_lease = WorkspaceLease::from_env()?;
     let configuration = Configuration::from_args(std::env::args_os().skip(1).collect())?;
     let mut stdout = io::stdout().lock();
     execute(configuration, &mut stdout).await
@@ -299,7 +304,23 @@ fn emit(output: &mut dyn Write, step: &str, payload: &Value) -> Result<(), Failu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsStr;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn adapter_spec_removes_private_workspace_control_environment() {
+        let configuration = Configuration {
+            dart: "/dart/bin/dart".into(),
+            adapter: "/adapter".into(),
+            package: "/subject".into(),
+            payload: json!({}),
+            candidate_limit: 0,
+        };
+        let spec = configuration.spec();
+        assert!(spec.env.remove.contains(OsStr::new(WORKSPACE_LEASE_ENV)));
+        assert!(!spec.env.set.contains_key(OsStr::new(WORKSPACE_LEASE_ENV)));
+        assert!(spec.validate().is_ok());
+    }
 
     #[test]
     fn payload_read_and_candidate_limits_are_bounded_and_strict() {

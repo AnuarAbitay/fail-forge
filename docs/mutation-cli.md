@@ -154,6 +154,40 @@ Rust CLI owners to stop and waits for their cleanup; it does not kill them. The
 adapter helper drains its own Runner after a closed consumer pipe. The retained
 report is marked incomplete, with no final score.
 
+## Recovery of abandoned working copies
+
+Before allocating working copies, each valid `mutate` campaign scans FailForge's
+private per-user registry, `<system-temporary-directory>/failforge-workspaces-<uid>`.
+Snapshots and attempts are created inside a registered campaign directory. The
+registry must be outside the target project, dependencies, SDK and controller
+inputs; a `TMPDIR` inside those trees is rejected before creating the registry.
+The controller and its native Rust cleanup owners hold an operating-system file lock
+on that campaign. A new campaign removes a registered directory only after it can
+acquire the lock, so killing the controller does not make a live Runner's working
+copies eligible for deletion. This also permits recovery after a reboot once all
+owners are gone, if the operating system has retained the temporary directory.
+
+Recovery validates directory ownership, private permissions, protocol metadata
+and lock files. Deletion stays relative to opened directory descriptors and never
+follows payload symlinks. Active and unrecognized entries are retained; unsafe
+registry roots are rejected. Recovery does not search arbitrary temporary folders
+by prefix or age, and does not delete working copies from older FailForge versions
+that have no registry metadata. Failed directory removal is not reported as a
+successful recovery. Payload trees deeper than 128 levels are retained with the
+explicit reason `workspace_depth_limit`; they cannot prevent other campaigns
+from starting. Control files are opened without blocking on special files.
+
+The event journal records recovery and the newly allocated workspace directory;
+the final summary includes `workspaceRecovery`, `workspaceDirectory` and
+`workspaceCleanupDeferred`. Reports and captures remain in the configured output
+directory and are not deleted by recovery. Restarting starts a fresh campaign;
+recovery does not reuse mutation results or resume a previous campaign.
+
+The lease protects the controller and its native cleanup owners. It is not a
+system sandbox or a replacement for Runner process supervision. The private
+lease descriptor is closed on exec into the tested program. Force-killing a Rust
+cleanup owner itself bypasses that owner's cleanup protocol.
+
 ## Verify
 
 ```sh
@@ -164,4 +198,5 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked -- --test-threads=1
 # Requires the prepared tooling and Flutter example described above:
 python3 scripts/mutate_cli_e2e.py --output /absolute/new-evidence-directory --flutter-sdk /absolute/flutter
+python3 scripts/workspace_recovery_e2e.py --output /absolute/new-crash-evidence-directory
 ```

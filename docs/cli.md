@@ -1,8 +1,9 @@
 # CLI contract
 
-FailForge's first stage runs external commands on Linux and macOS. It is not a
-sandbox, mutation engine, workspace manager, or interactive terminal. The child
-can access files, the network, and other resources allowed by its OS credentials.
+The `run` subcommand runs external commands on Linux and macOS. The child can
+access files, the network, and other resources allowed by its OS credentials;
+`run` does not provide a system sandbox or interactive terminal. Mutation campaigns
+and their isolated working copies are handled by [`mutate`](mutation-cli.md).
 Windows has no backend in this stage.
 
 Build the workspace, then run the `failforge` binary:

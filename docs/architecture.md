@@ -330,6 +330,12 @@ The adapter's syntax/type analysis and safe-patch contract are described in the
 `python/failforge_campaign`, which normalizes explicit YAML or CLI settings,
 snapshots prepared standalone packages, schedules fresh isolated attempts and
 publishes family-specific evidence and scores. Each native test process keeps
-the same Rust Runner ownership. Named profiles, persistent resume and Pub
+the same Rust Runner ownership. Working copies live in a private per-user
+registry protected by campaign leases. Startup recovery removes only validated
+unlocked campaigns; inherited lease descriptors keep a live Rust cleanup owner
+protected after a controller crash. Native owners mark those descriptors
+close-on-exec before starting tested code. Recursive deletion keeps lease and
+metadata intact, then uses a bounded empty-directory protocol so interrupted
+recovery itself can be retried. Named profiles, persistent resume and Pub
 workspace support remain outside this implementation. See the
 [mutation CLI](mutation-cli.md).
