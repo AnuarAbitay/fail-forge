@@ -326,8 +326,10 @@ Cancelled request futures poison client reuse, and closing one client does not
 shut down other runs admitted by the shared Runner.
 
 The adapter's syntax/type analysis and safe-patch contract are described in the
-[Dart adapter guide](dart-adapter.md). The repository still has no production
-snapshot/workspace manager, mutation scheduler, YAML/profile normalization or
-mutation score orchestration. The executable Flutter fixture harness demonstrates
-these integration steps on test copies without claiming to implement those core
-services.
+[Dart adapter guide](dart-adapter.md). The `mutate` CLI dispatches to
+`python/failforge_campaign`, which normalizes explicit YAML or CLI settings,
+snapshots prepared standalone packages, schedules fresh isolated attempts and
+publishes family-specific evidence and scores. Each native test process keeps
+the same Rust Runner ownership. Named profiles, persistent resume and Pub
+workspace support remain outside this implementation. See the
+[mutation CLI](mutation-cli.md).

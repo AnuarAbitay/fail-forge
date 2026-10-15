@@ -4,9 +4,12 @@ FailForge's first stage is a Rust library and CLI for running external commands
 on Linux and macOS with bounded output capture, timeout handling, cancellation,
 and explicit Unix process cleanup. It runs tools such as `dart test`, `flutter
 test`, Cargo, or a project-specific executable. The Dart/Flutter development adapter adds AST mutation discovery, in-memory
-static validation and a Rust patch/protocol contract. A production mutation engine
-and workspace management remain outside this stage; see the
-[Dart adapter guide](docs/dart-adapter.md).
+static validation and a Rust patch/protocol contract. `failforge mutate` connects
+these components to the Python campaign controller, with explicit YAML or CLI
+configuration, fresh test copies and family-specific reports. See the
+[mutation CLI guide](docs/mutation-cli.md) for installation, commands and current
+standalone-package boundaries, and the [Dart adapter guide](docs/dart-adapter.md)
+for the protocol and operators.
 
 The backend supports Linux and macOS. Windows is intentionally unsupported.
 FailForge is **not a sandbox**: the child retains the filesystem, network, and

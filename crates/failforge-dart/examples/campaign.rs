@@ -143,7 +143,7 @@ struct SessionEvidence {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Failure> {
+pub async fn main() -> Result<(), Failure> {
     let configuration = Configuration::from_args(std::env::args_os().skip(1).collect())?;
     let mut stdout = io::stdout().lock();
     execute(configuration, &mut stdout).await

@@ -5,6 +5,7 @@ compile_error!("FailForge's first stage supports Linux and macOS only");
 mod args;
 mod diagnostics;
 mod display;
+mod mutate;
 
 use std::io::Write;
 use std::os::unix::process::ExitStatusExt;
@@ -43,7 +44,10 @@ fn main() -> ExitCode {
             return ExitCode::from(125);
         }
     };
-    let Commands::Run(arguments) = cli.command;
+    let arguments = match cli.command {
+        Commands::Run(arguments) => arguments,
+        Commands::Mutate(arguments) => return mutate::execute(*arguments, &invocation_cwd),
+    };
     let spec = match arguments.into_spec(&invocation_cwd) {
         Ok(spec) => spec,
         Err(error) => {

@@ -1,6 +1,7 @@
 /target/
 /.toolchain/
 /artifacts/
+.failforge/
 __pycache__/
 .dart_tool/
 build/

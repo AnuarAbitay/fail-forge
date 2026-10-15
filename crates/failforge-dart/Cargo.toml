@@ -18,3 +18,9 @@ name = "failforge-adapter-fixture"
 path = "tests/support/adapter_fixture.rs"
 test = false
 bench = false
+
+[[bin]]
+name = "failforge-adapter-campaign"
+path = "src/bin/campaign.rs"
+test = false
+bench = false

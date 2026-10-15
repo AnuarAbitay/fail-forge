@@ -2,7 +2,9 @@ use super::*;
 
 fn spec(values: &[&str]) -> Result<CommandSpec, clap::Error> {
     let cli = Cli::try_parse_from(values)?;
-    let Commands::Run(run) = cli.command;
+    let Commands::Run(run) = cli.command else {
+        panic!("expected run subcommand");
+    };
     run.into_spec(Path::new("/invocation"))
 }
 
@@ -307,7 +309,9 @@ fn native_arguments_paths_and_environment_are_preserved() {
         raw(b"arg-\xf9"),
     ];
     let cli = Cli::try_parse_from(values).unwrap();
-    let Commands::Run(run) = cli.command;
+    let Commands::Run(run) = cli.command else {
+        panic!("expected run subcommand");
+    };
     let command = run.into_spec(Path::new("/invocation")).unwrap();
     assert_eq!(command.program, raw(b"./tool-\xfa"));
     assert_eq!(command.args, [raw(b"arg-\xf9")]);
@@ -343,7 +347,9 @@ fn invalid_native_configuration_does_not_echo_raw_arguments() {
             OsString::from("tool"),
         ])
         .unwrap();
-        let Commands::Run(run) = cli.command;
+        let Commands::Run(run) = cli.command else {
+            panic!("expected run subcommand");
+        };
         let error = match run.into_spec(Path::new("/invocation")) {
             Err(error) => error,
             Ok(_) => panic!("invalid native environment accepted"),
@@ -355,17 +361,23 @@ fn invalid_native_configuration_does_not_echo_raw_arguments() {
 #[test]
 fn relative_invocation_directory_is_rejected() {
     let cli = Cli::try_parse_from(["failforge", "run", "--", "tool"]).unwrap();
-    let Commands::Run(run) = cli.command;
+    let Commands::Run(run) = cli.command else {
+        panic!("expected run subcommand");
+    };
     assert!(run.into_spec(Path::new("relative")).is_err());
 }
 
 #[test]
 fn empty_program_and_missing_program_are_rejected_during_conversion() {
     let cli = Cli::try_parse_from(["failforge", "run", "--", ""]).unwrap();
-    let Commands::Run(run) = cli.command;
+    let Commands::Run(run) = cli.command else {
+        panic!("expected run subcommand");
+    };
     assert!(run.into_spec(Path::new("/invocation")).is_err());
     let cli = Cli::try_parse_from(["failforge", "run", "--", "tool"]).unwrap();
-    let Commands::Run(mut run) = cli.command;
+    let Commands::Run(mut run) = cli.command else {
+        panic!("expected run subcommand");
+    };
     run.command.clear();
     assert!(run.into_spec(Path::new("/invocation")).is_err());
 }

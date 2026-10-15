@@ -1,0 +1,12 @@
+version: 1
+project: flutter_fixture
+family: failure_mode
+workers: 1
+timeouts:
+  test: 30s
+  command: 120s
+rules:
+  include: ['lib/**.dart']
+  methods: [enabled, asyncEnabled, readValue]
+limits:
+  max_mutants: 1000

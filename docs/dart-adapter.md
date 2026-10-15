@@ -293,9 +293,11 @@ small process-plus-test-evidence classification extension point. It reuses the
 same Runner; only optional caller-owned stdin and observable stream-loss counters
 were added to the Runner. It does not add another process supervisor.
 
-A production mutation engine, YAML/profiles, snapshot/workspace manager, mutation
-scheduler, complete machine-event ingestion and score/report orchestration are
-**not implemented**. `session` is a Rust example, not a new mutation CLI command.
+The [mutation CLI](mutation-cli.md) now provides explicit YAML and CLI settings,
+fresh snapshots, bounded parallel attempts, machine-event evidence and reports
+through the Python campaign package. It supports prepared standalone Dart and
+Flutter packages. Named profiles, persistent resume and Pub workspaces remain
+outside that implementation. `session` remains a low-level Rust example.
 `scripts/dart_adapter_e2e.py` is an executable fixture harness demonstrating
 snapshot/baseline/discover/validate/copy/patch/test/cleanup with explicit test files.
 Its Flutter-3.47.7 reporter extraction distinguishes assertion/test failures,
