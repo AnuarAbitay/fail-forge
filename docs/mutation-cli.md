@@ -139,6 +139,40 @@ project must be below `.failforge/`, which is excluded from copies and source
 bindings. Temporary copies are removed after each attempt. The CLI prints the
 report path. Captures retain the Runner's private file permissions.
 
+The CLI prints a final ASCII table to stdout, followed by the report path.
+Progress messages go to stderr. For example:
+
+```text
+FailForge mutation summary
+Family: classic
+Status: completed
+Mutants: 2/2
+
++--------------+-------+----------+
+| Outcome      | Count | In score |
++--------------+-------+----------+
+| KILLED       |     1 | yes      |
+| SURVIVED     |     1 | yes      |
+| INVALID      |     0 | no       |
+| TIMEOUT      |     0 | no       |
+| INFRA_ERROR  |     0 | no       |
+| UNCLASSIFIED |     0 | no       |
+| NO_TESTS     |     0 | no       |
+| CANCELLED    |     0 | no       |
++--------------+-------+----------+
+
+Mutation score: 50.00% (1/2)
+Wall time: 19.43s
+Report: /path/to/run/summary.json
+```
+
+`Mutants` shows processed/discovered counts; `?` means discovery did not establish
+the expected total. All eight outcomes appear, including zero counts. `In score`
+marks outcome eligibility. The score line is `Failure mode score` for that family.
+An incomplete campaign displays `N/A (campaign incomplete)`; a complete campaign
+with no killed or surviving mutants displays `N/A (no scored mutants)`. Wall time
+is elapsed campaign time. The final `Report:` line points to the JSON evidence.
+
 Only `KILLED` and `SURVIVED` enter the score denominator. `TIMEOUT`, `INVALID` and
 inconclusive results are excluded explicitly. Completed inner test timeouts retain
 `KILLED / test_timeout`; externally interrupted suites retain `TIMEOUT` even if
