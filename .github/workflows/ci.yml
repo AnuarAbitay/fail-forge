@@ -146,3 +146,12 @@ jobs:
           cargo test -p failforge-dart --all-targets --locked -- --test-threads=1
           python3 -m unittest discover -s scripts -p 'test_dart_adapter_e2e.py'
           python3 scripts/dart_adapter_e2e.py --flutter-sdk "$RUNNER_TEMP/flutter" --output "$RUNNER_TEMP/adapter-e2e" --p1
+      - name: Native Dart initialization and timeout regressions
+        shell: bash
+        run: |
+          mkdir -p .toolchain
+          ln -s "$RUNNER_TEMP/flutter" .toolchain/flutter
+          ln -s "$PUB_CACHE" .toolchain/pub-cache
+          python3 scripts/dart_initialization_e2e.py --output "$RUNNER_TEMP/initialization-e2e"
+          python3 scripts/dart_timeout_e2e.py --output "$RUNNER_TEMP/timeout-e2e"
+          python3 scripts/dart_timeout_campaign_e2e.py --output "$RUNNER_TEMP/timeout-campaign-e2e"

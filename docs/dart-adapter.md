@@ -303,6 +303,123 @@ compile failures, missing-input infrastructure failures, timeouts and no tests.
 Nonzero status alone does not establish KILLED. Production callers must supply
 validated `TestEvidence`; the Rust extension does not assign mutation scores.
 
+The prepared Dart campaign scripts use `dart_test_evidence.py` to validate the
+complete raw JSON reporter stream together with Runner completion, capture and
+cleanup evidence. A compiler diagnostic during suite loading is `INVALID`.
+Other failed synthetic loading tests produce neutral `LOAD_FAILURE` evidence,
+including the original error, stack trace and suite path. They do not count as
+author assertion failures or automatically establish infrastructure failure.
+
+`run_public_dart_campaign.py` and `run_isolated_dart_replay.py` can confirm a
+runtime exception during test initialization. Confirmation requires namespace
+isolation from the unchanged test framework (`run_isolated_dart_replay.py`), a
+bound passing baseline, the same selected suites, an explicit runtime diagnostic
+and a frame in the exact mutated library called from the failed author suite.
+An unisolated campaign leaves loading failures `UNCLASSIFIED`, since a subject
+may also be a dependency of the test framework. Following an isolated failed
+mutant run, the scripts run a fresh original, a fresh mutant replay, then another
+fresh original. Both
+original controls must pass the complete original author-test catalog; the
+replay must reproduce the same error and stack after replacing only its generated
+workspace path. Every command uses a separate copy and Runner-owned timeout.
+Source/test/configuration bytes, prepared dependency resources, framework files,
+SDK compilation/runtime files and invocation bindings are checked against a
+snapshot taken before the first run. The snapshot is shared within a campaign.
+
+Only this confirmed sequence produces `KILLED` with reason
+`mutation_caused_initialization_failure` and phase `suite_loading`. Its author
+test count may be zero: a group callback can throw before registering any tests.
+The partial catalog exception applies only to this verdict. Normal assertion
+kills and survivors still require the complete author-test catalog. Raw loader
+evidence and all three diagnostic controls are retained separately in the case
+directory. Unknown or unreproduced loading failures become `UNCLASSIFIED`;
+failed Runner capture/cleanup or changed inputs remain `INFRA_ERROR`. Both are
+excluded from the score. Historical reports are not relabelled automatically.
+
+Both `run_public_dart_campaign.py` and `run_isolated_dart_replay.py` expose two
+independent limits: `--test-timeout` (default `30s`) is passed explicitly to
+`dart test`, and `--timeout` (default `60s`) is the Runner budget for the entire
+process. Positive integer `ms`, `s`, and `m` durations are accepted; Runner must
+have at least `5s` more than the test timeout. Invalid policies fail before
+creating output directories or starting commands. Both normalized limits and
+their semantics appear in `timeoutPolicy` and the immutable execution binding,
+including initialization confirmation controls.
+Runner durations fit unsigned 64-bit milliseconds; the inner duration is bounded
+to `9007199254740ms` so package:test's floating-point parsing retains exact
+microseconds instead of silently rounding or saturating an oversized duration.
+
+The explicit Dart option overrides the project's default timeout. Per-test
+metadata, timeout factors, disabled timeouts and heartbeat resets can still
+change its effective duration. The process budget includes loading, all tests
+and teardown; it does not guarantee that several sequential test timeouts fit.
+The headroom check gives a single default test timeout room to report in an
+otherwise short run, rather than predicting compilation or whole-suite time.
+Before processing mutations, both entrypoints require two fresh passing
+original controls under the requested policy and the complete baseline catalog.
+If the originals time out, increase the budgets and rerun with a fresh output
+directory. For an intentionally short diagnostic run, pass both limits:
+`--test-timeout 1s --timeout 15s`.
+
+A normally completed, fully validated reporter session with an errored author
+test can produce `KILLED` with `reason: test_timeout`. This subtype requires the
+pinned package:test diagnostic message, stack shape, failure flag and elapsed
+duration, and the campaign still requires the complete author-test catalog.
+`timeoutDiagnostics.evidenceSource: package_test_json_diagnostic` describes
+observed text: the reporter cannot authenticate the exception's origin or prove
+which callback failed to complete.
+
+Runner timeouts retain outcome `TIMEOUT` and reason `runner_timeout`, even when
+the reporter emits assertion failures or `done` during shutdown. The `tests`
+counters describe observed events and carry `testsPartial: true`.
+`reporterComplete` records whether a valid `done` was observed; it does not turn
+an interrupted process into a completed test verdict. Counts include received
+shutdown events and cannot prove which events preceded the Runner deadline.
+
+`timeoutProgress` records accepted event count, pending author/loading tests,
+the last accepted reporter timestamp, unparsed byte count and a stop reason.
+Observation validates a bounded prefix of LF-framed JSON and stops at its first
+invalid event, oversized event, event-count limit or interrupted final fragment.
+Later events are never resumed after a rejected event. Plain shutdown messages
+are recorded as a parse stop, preserving the preceding verified progress. Only
+accepted events update counts; synthetic loaders remain separate from author
+tests. Failed cleanup, capture issues, raw byte-count mismatches and total
+capture-limit violations still produce `INFRA_ERROR`. Timeouts stay excluded
+from the mutation score regardless of their observed pass/failure counters.
+
+`timeoutDiagnostics` distinguishes `kind: test_timeout` from
+`kind: runner_timeout`. It includes accepted `observedInnerTimeouts` and
+`pendingAuthorTests`, each with a total, at most eight author identities and a
+truncation flag. Each name/path is limited to 512 characters. An external stop
+always has `cause: not_established`: a loop, disabled inner timeout, slow loading,
+teardown or several test timeouts cannot be distinguished from a capture alone.
+Shutdown events are observations and do not establish that an inner error
+preceded cancellation. New runs do not inherit historical investigation labels.
+The main `summary.json` adds `reasonCounts`, `outcomeReasonCounts` and
+`timeoutKindCounts`; per-case diagnostics stay in `records`. Outcome counts and
+the score formula retain their existing meaning. Historical files are unchanged.
+
+The native regression below uses the prepared adapter dependencies, the bundled
+SDK at `.toolchain/flutter`, and an already built `target/debug/failforge`. It
+checks registration failure, ordinary assertion failure, compilation failure,
+ambiguous resource failure and a survivor, executing nine sequential commands.
+
+The timeout regression executes four suites through the shared campaign path:
+one asynchronous wait, two sequential waits, a busy loop and an asynchronous
+wait with `Timeout.none`. Completed suites retain the complete catalog and inner
+timeout counts; interrupted suites retain prefix progress and an unknown cause.
+Both outer-timeout examples deliberately have different mechanisms. All cases
+check report reasons, capture evidence, source preservation and copy cleanup.
+The main-report regression discovers and statically validates one real boolean
+literal mutation through Rust, then runs both public and isolated entrypoints.
+Seven sequential test commands verify fresh original controls, the full author
+catalog, timeout reasons, score exclusions and both published summaries.
+
+```sh
+python3 scripts/dart_initialization_e2e.py --output /absolute/new-evidence-directory
+python3 scripts/dart_timeout_e2e.py --output /absolute/another-new-evidence-directory
+python3 scripts/dart_timeout_campaign_e2e.py --output /absolute/main-report-evidence
+```
+
 ```sh
 (cd adapters/dart && dart --suppress-analytics analyze && dart --suppress-analytics test)
 cargo test --workspace --all-targets --locked -- --test-threads=1
