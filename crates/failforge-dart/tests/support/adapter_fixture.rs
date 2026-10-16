@@ -6,6 +6,11 @@ use std::os::unix::net::UnixStream;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mode = std::env::args().nth(1).ok_or("fixture mode required")?;
+    if mode == "hang-ignore-term" {
+        // SAFETY: this dedicated fixture process changes only its own SIGTERM
+        // disposition before notifying the test that it is ready.
+        unsafe { libc::signal(libc::SIGTERM, libc::SIG_IGN) };
+    }
     let mut control = if let Some(path) = std::env::var_os("FAILFORGE_ADAPTER_CONTROL") {
         let mut stream = UnixStream::connect(path)?;
         // SAFETY: getpgrp reads this fixture's own process group without mutation.
@@ -46,9 +51,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             writeln!(control, "REQUEST {}", request.request_id)?;
         }
         sequence += 1;
-        if mode == "hang" {
+        if matches!(
+            mode.as_str(),
+            "hang" | "hang-until-signal" | "hang-ignore-term"
+        ) {
             let mut ignored = String::new();
             reader.read_line(&mut ignored)?;
+            if mode != "hang" {
+                // EOF alone is not completion in these cancellation fixtures.
+                // A finite fallback keeps a broken RED run self-terminating.
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            }
             return Ok(());
         }
         if mode == "eof" {

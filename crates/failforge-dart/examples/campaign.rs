@@ -3,22 +3,27 @@
 use std::error::Error;
 use std::ffi::OsString;
 use std::fs::File;
+use std::future::Future;
 use std::io::{self, Read, Write};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use failforge_dart::{
-    AdapterClient, ClientOptions, MAX_LINE_BYTES, Mutant, ValidationState, read_and_apply_mutant,
-    sha256_hex, validate_relative_target,
+    AdapterClient, ClientError, ClientOptions, MAX_LINE_BYTES, Mutant, ValidationState,
+    read_and_apply_mutant, sha256_hex, validate_relative_target,
 };
 use failforge_runner::{CommandSpec, EnvSpec, Runner, WORKSPACE_LEASE_ENV, WorkspaceLease};
 use serde::Serialize;
 use serde_json::{Value, json};
+use tokio::io::{Interest, unix::AsyncFd};
+use tokio::signal::unix::{Signal, SignalKind, signal};
 
 type Failure = Box<dyn Error>;
 const MAX_MUTANTS: u64 = 10_000;
 const MAX_SOURCE_BYTES: usize = 4 * 1024 * 1024;
+const CANCEL_ENV: &str = "FAILFORGE_ADAPTER_CANCEL_FD";
 
 struct Configuration {
     dart: OsString,
@@ -49,6 +54,7 @@ impl Configuration {
     fn spec(&self) -> CommandSpec {
         let mut environment = EnvSpec::default();
         environment.remove.insert(WORKSPACE_LEASE_ENV.into());
+        environment.remove.insert(CANCEL_ENV.into());
         CommandSpec {
             program: self.dart.clone(),
             args: vec![
@@ -142,6 +148,134 @@ struct Statistics {
 struct SessionEvidence {
     close_succeeded: bool,
     exit_code: Option<i32>,
+    cancellation: Option<&'static str>,
+    close_failure: Option<String>,
+    close_failure_details: Option<Value>,
+}
+
+/// A pipe buffers a controller request even before this process installs its
+/// signal handlers. The private capability is never inherited by the adapter.
+struct Cancellation {
+    interrupt: Signal,
+    terminate: Signal,
+    control: Option<AsyncFd<OwnedFd>>,
+}
+
+impl Cancellation {
+    fn new() -> io::Result<Self> {
+        // Subscribe before any managed child exists. External callers can
+        // signal this owner; Python uses the race-free buffered control pipe.
+        let interrupt = signal(SignalKind::interrupt())?;
+        let terminate = signal(SignalKind::terminate())?;
+        let control = std::env::var_os(CANCEL_ENV)
+            .as_deref()
+            .map(cancellation_descriptor)
+            .transpose()?;
+        Ok(Self {
+            interrupt,
+            terminate,
+            control,
+        })
+    }
+
+    async fn request(&mut self) -> io::Result<&'static str> {
+        tokio::select! {
+            event = self.interrupt.recv() => event.map(|()| "SIGINT")
+                .ok_or_else(|| io::Error::other("interrupt listener closed")),
+            event = self.terminate.recv() => event.map(|()| "SIGTERM")
+                .ok_or_else(|| io::Error::other("termination listener closed")),
+            result = control_request(&self.control) => result,
+        }
+    }
+}
+
+fn cancellation_descriptor(value: &std::ffi::OsStr) -> io::Result<AsyncFd<OwnedFd>> {
+    let invalid = || {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid campaign cancellation capability",
+        )
+    };
+    let value = value.to_str().ok_or_else(invalid)?;
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(invalid());
+    }
+    let source: RawFd = value.parse().map_err(|_| invalid())?;
+    if source < 3 {
+        return Err(invalid());
+    }
+    // SAFETY: fcntl borrows the source and returns a fresh CLOEXEC descriptor;
+    // no existing Rust-owned descriptor is consumed or closed.
+    let copied = unsafe { libc::fcntl(source, libc::F_DUPFD_CLOEXEC, 3) };
+    if copied < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: successful duplication created a uniquely owned live descriptor.
+    let descriptor = unsafe { OwnedFd::from_raw_fd(copied) };
+    let file = File::from(descriptor);
+    use std::os::unix::fs::FileTypeExt;
+    if !file.metadata()?.file_type().is_fifo() {
+        return Err(invalid());
+    }
+    // SAFETY: both source and duplicate remain live; these fcntl operations use
+    // only descriptor/integer arguments. Their open description is read-only.
+    let (status, flags) = unsafe {
+        (
+            libc::fcntl(copied, libc::F_GETFL),
+            libc::fcntl(source, libc::F_GETFD),
+        )
+    };
+    if status < 0 || flags < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if status & libc::O_ACCMODE != libc::O_RDONLY {
+        return Err(invalid());
+    }
+    // SAFETY: source is borrowed, while file owns copied. CLOEXEC keeps both
+    // capabilities out of exec; nonblocking is required by AsyncFd readiness.
+    if unsafe { libc::fcntl(source, libc::F_SETFD, flags | libc::FD_CLOEXEC) } < 0
+        || unsafe { libc::fcntl(copied, libc::F_SETFL, status | libc::O_NONBLOCK) } < 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    AsyncFd::with_interest(file.into(), Interest::READABLE)
+}
+
+async fn control_request(control: &Option<AsyncFd<OwnedFd>>) -> io::Result<&'static str> {
+    let Some(control) = control else {
+        return std::future::pending().await;
+    };
+    loop {
+        let mut byte = [0_u8];
+        let read = control
+            .async_io(Interest::READABLE, |descriptor| {
+                // SAFETY: AsyncFd owns a live readable pipe and byte is writable
+                // for one byte. read retains no pointer after returning.
+                let count =
+                    unsafe { libc::read(descriptor.as_raw_fd(), byte.as_mut_ptr().cast(), 1) };
+                if count < 0 {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(count)
+                }
+            })
+            .await;
+        match read {
+            Ok(0) => return Ok("controller_eof"),
+            Ok(_) => {
+                return match byte[0] {
+                    b'I' => Ok("SIGINT"),
+                    b'T' => Ok("SIGTERM"),
+                    _ => Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "invalid campaign cancellation request",
+                    )),
+                };
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 #[tokio::main]
@@ -155,6 +289,15 @@ pub async fn main() -> Result<(), Failure> {
 }
 
 async fn execute(configuration: Configuration, output: &mut dyn Write) -> Result<(), Failure> {
+    let mut cancellation = Cancellation::new()?;
+    execute_cancellable(configuration, output, cancellation.request()).await
+}
+
+async fn execute_cancellable(
+    configuration: Configuration,
+    output: &mut dyn Write,
+    cancellation: impl Future<Output = io::Result<&'static str>>,
+) -> Result<(), Failure> {
     let runner = Arc::new(Runner::new());
     let mut statistics = Statistics::default();
     let mut evidence = SessionEvidence::default();
@@ -164,6 +307,7 @@ async fn execute(configuration: Configuration, output: &mut dyn Write) -> Result
         output,
         &mut statistics,
         &mut evidence,
+        cancellation,
     )
     .await;
     // This executes on every session result, including transport, model,
@@ -176,10 +320,14 @@ async fn execute(configuration: Configuration, output: &mut dyn Write) -> Result
         &json!({
             "complete":shutdown.is_ok() && active_runs == 0,
             "adapterCloseSucceeded":evidence.close_succeeded,
+            "adapterCloseFailure":evidence.close_failure,
+            "adapterCloseFailureDetails":evidence.close_failure_details,
             "exitCode":evidence.exit_code,
             "runnerShutdown":shutdown.is_ok(),
             "activeRuns":active_runs,
             "campaignSucceeded":outcome.is_ok(),
+            "cancelled":evidence.cancellation.is_some(),
+            "cancellationReason":evidence.cancellation,
             "validatedCandidates":statistics.validated,
             "staticallyValidCandidates":statistics.valid,
             "writesPerformed":false,
@@ -196,23 +344,80 @@ async fn session(
     output: &mut dyn Write,
     statistics: &mut Statistics,
     evidence: &mut SessionEvidence,
+    cancellation: impl Future<Output = io::Result<&'static str>>,
 ) -> Result<(), Failure> {
     let mut client = AdapterClient::start(
-        runner,
+        runner.clone(),
         configuration.spec(),
         ClientOptions {
             request_timeout: Duration::from_secs(60),
             ..Default::default()
         },
     )?;
-    let outcome = steps(&mut client, configuration, output, statistics).await;
-    let closed = client.close().await;
+    tokio::pin!(cancellation);
+    let (outcome, request_received) = tokio::select! {
+        // An already available protocol/model error must never be relabelled
+        // as user cancellation merely because a stop request raced with it.
+        biased;
+        result = steps(&mut client, configuration, output, statistics) => (result, false),
+        request = &mut cancellation => (match request {
+            Ok(reason) => { evidence.cancellation = Some(reason); Err("adapter campaign cancelled".into()) },
+            Err(error) => Err(error.into()),
+        }, true),
+    };
+    let closed = client.close();
+    tokio::pin!(closed);
+    let closed = if request_received {
+        closed.await
+    } else {
+        tokio::select! {
+            biased;
+            result = &mut closed => result,
+            request = &mut cancellation => {
+                if outcome.is_ok() {
+                    evidence.cancellation = Some(request?);
+                }
+                // This Runner owns only the adapter. Keep polling close so
+                // its actual cleanup evidence survives cancellation during
+                // EOF/exit, rather than dropping the sole result consumer.
+                let (_, result) = tokio::join!(runner.shutdown(), &mut closed);
+                result
+            },
+        }
+    };
     if let Ok(result) = &closed {
         evidence.close_succeeded = result.cleanup.is_complete();
         evidence.exit_code = result.status.and_then(|status| status.code());
+    } else if let Err(error) = &closed {
+        if let ClientError::Execution(error) = error {
+            if let Some(result) = error.partial_result() {
+                evidence.close_failure_details = Some(json!({
+                    "cause":format!("{:?}",result.cause),
+                    "cleanupComplete":result.cleanup.is_complete(),
+                    "errors":result.cleanup.errors,
+                    "group":format!("{:?}",result.cleanup.group),
+                    "stdoutEof":result.stdout.eof,"stderrEof":result.stderr.eof,
+                    "stdoutIssue":format!("{:?}",result.stdout.issue),
+                    "stderrIssue":format!("{:?}",result.stderr.issue),
+                }));
+            }
+        }
+        // Only a fixed category and native I/O kind leave this boundary, never
+        // protocol bytes or arbitrary adapter diagnostics.
+        evidence.close_failure = Some(match error {
+            ClientError::Io(error) => format!("io_{:?}", error.kind()),
+            ClientError::Execution(_) => "runner_failure".into(),
+            ClientError::OutputLost => "output_lost".into(),
+            ClientError::UnsolicitedResponse => "unsolicited_output".into(),
+            ClientError::TimedOut => "timeout".into(),
+            _ => "transport".into(),
+        });
     }
     outcome?;
     let result = closed?;
+    if evidence.cancellation.is_some() {
+        return Err("adapter campaign cancelled".into());
+    }
     if !result.cleanup.is_complete() || !result.status.is_some_and(|status| status.success()) {
         return Err("adapter campaign did not finish successfully".into());
     }
@@ -318,8 +523,80 @@ mod tests {
         };
         let spec = configuration.spec();
         assert!(spec.env.remove.contains(OsStr::new(WORKSPACE_LEASE_ENV)));
+        assert!(spec.env.remove.contains(OsStr::new(CANCEL_ENV)));
         assert!(!spec.env.set.contains_key(OsStr::new(WORKSPACE_LEASE_ENV)));
         assert!(spec.validate().is_ok());
+    }
+
+    fn control_pipe() -> (OwnedFd, File) {
+        let mut descriptors = [-1; 2];
+        // SAFETY: descriptors is writable storage for the two returned fds.
+        assert_eq!(unsafe { libc::pipe(descriptors.as_mut_ptr()) }, 0);
+        // SAFETY: a successful pipe returned two fresh, uniquely owned fds.
+        unsafe {
+            (
+                OwnedFd::from_raw_fd(descriptors[0]),
+                File::from_raw_fd(descriptors[1]),
+            )
+        }
+    }
+
+    #[tokio::test]
+    async fn private_control_pipe_buffers_signals_and_controller_eof() {
+        for (byte, reason) in [(b'I', "SIGINT"), (b'T', "SIGTERM")] {
+            let (read, mut write) = control_pipe();
+            write.write_all(&[byte]).unwrap();
+            let control =
+                Some(cancellation_descriptor(OsStr::new(&read.as_raw_fd().to_string())).unwrap());
+            // SAFETY: source remains borrowed from the live read owner.
+            assert_ne!(
+                unsafe { libc::fcntl(read.as_raw_fd(), libc::F_GETFD) } & libc::FD_CLOEXEC,
+                0
+            );
+            let duplicate = control.as_ref().unwrap().get_ref().as_raw_fd();
+            // SAFETY: AsyncFd owns the live duplicate inspected by fcntl.
+            assert_ne!(
+                unsafe { libc::fcntl(duplicate, libc::F_GETFD) } & libc::FD_CLOEXEC,
+                0
+            );
+            assert_eq!(control_request(&control).await.unwrap(), reason);
+        }
+        let (read, write) = control_pipe();
+        let control =
+            Some(cancellation_descriptor(OsStr::new(&read.as_raw_fd().to_string())).unwrap());
+        drop(write);
+        assert_eq!(control_request(&control).await.unwrap(), "controller_eof");
+    }
+
+    #[tokio::test]
+    async fn private_control_rejects_invalid_capabilities_and_request_bytes() {
+        for text in [
+            "",
+            "0",
+            "1",
+            "2",
+            "-1",
+            "3.0",
+            "not-a-descriptor",
+            "999999999999999999999999",
+        ] {
+            assert!(cancellation_descriptor(OsStr::new(text)).is_err());
+        }
+        let fixture = Fixture::new("void main() {}\n");
+        for path in [fixture.0.clone(), fixture.0.join("lib/source.dart")] {
+            let file = File::open(path).unwrap();
+            assert!(cancellation_descriptor(OsStr::new(&file.as_raw_fd().to_string())).is_err());
+            assert!(file.metadata().is_ok()); // A rejected source was not closed.
+        }
+        let (read, mut write) = control_pipe();
+        assert!(cancellation_descriptor(OsStr::new(&write.as_raw_fd().to_string())).is_err());
+        let control =
+            Some(cancellation_descriptor(OsStr::new(&read.as_raw_fd().to_string())).unwrap());
+        write.write_all(b"X").unwrap();
+        assert_eq!(
+            control_request(&control).await.unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
     }
 
     #[test]
@@ -540,6 +817,7 @@ mod tests {
                 &mut DisconnectedConsumer,
                 &mut statistics,
                 &mut evidence,
+                std::future::pending(),
             ),
         )
         .await;

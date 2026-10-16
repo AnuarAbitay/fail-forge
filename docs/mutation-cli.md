@@ -1,7 +1,7 @@
 # Mutation campaigns
 
-`failforge mutate` runs one selected mutation family through the same campaign
-implementation, configured either by an explicit YAML file or by CLI arguments.
+`failforge mutate` runs explicitly selected mutations. A YAML profile can select
+multiple families; direct CLI arguments select one family.
 The Rust CLI replaces itself with the Python controller. Each native test command
 is owned by the existing Rust Runner; the controller does not implement another
 test timeout or kill that cleanup owner.
@@ -53,8 +53,8 @@ mutation requires a prepared Flutter project.
 
 `language_specific` selects the Dart semantic catalogue, with 19 operators in
 six categories. `--language dart` names the subtype explicitly. See the
-[Dart semantic mutation guide](dart-semantic-mutations.md) for operator IDs,
-category switches and YAML component selection. This family's report uses
+[Dart semantic mutation guide](dart-semantic-mutations.md) for operator IDs
+and YAML selection. This family's report uses
 `languageSpecificScore`, and the terminal summary includes `Language: dart`.
 
 Optional filters and execution settings:
@@ -80,40 +80,87 @@ available through explicit selection.
 failforge mutate --config failforge.yml
 ```
 
-Prepared examples are [failforge.classic.yml](../examples/failforge.classic.yml)
-and [failforge.failure-mode.yml](../examples/failforge.failure-mode.yml). Both
-target the repository's Flutter fixture; prepare that example's dependencies
-before using them.
+One file is one profile. The only supported YAML format uses explicit family
+and operator switches. There is no `version` or `project` field. The closest
+ancestor containing a readable regular `pubspec.yaml`, starting at the profile's
+directory, identifies the project. A missing pubspec is a configuration error;
+the invocation directory does not select a different project.
+
+Prepared profiles are inside the Flutter fixture:
+[classic](../examples/flutter_fixture/profiles/failforge.classic.yml),
+[failure mode](../examples/flutter_fixture/profiles/failforge.failure-mode.yml),
+[Dart semantic](../examples/flutter_fixture/profiles/failforge.dart-semantic.yml),
+and [one source file](../examples/flutter_fixture/profiles/subject.yml).
+Prepare the fixture's dependencies before using them.
+
+For example, place this file at `my_package/profiles/calculator.yml`:
 
 ```yaml
-version: 1
-project: ./my_package
-family: classic
-workers: 1
+workers: 2
 timeouts:
   test: 30s
   command: 120s
 rules:
-  include: ['lib/**.dart']
-  exclude: ['lib/generated/**']
-  operators: [BOOLEAN_LITERAL_FLIP, RELATIONAL_BOUNDARY]
+  include: ['lib/src/calculator.dart']
+  exclude: ['**/*.g.dart', '**/*.freezed.dart']
+mutations:
+  classic:
+    enabled: true
+    operators:
+      RELATIONAL_BOUNDARY: true
+      BOOLEAN_LITERAL_FLIP: false
+  failure_mode:
+    enabled: false
+    operators:
+      EXCEPTION_AT_ENTRY: true
+  language_specific:
+    enabled: true
+    language: dart
+    operators:
+      SWM-001: true
+      SWM-002: false
 limits:
   max_mutants: 1000
-output: ./reports/run-001
 ```
 
-YAML paths are relative to the file's directory; CLI paths are relative to the
-invocation directory. Omitting `project` in YAML selects the file's directory.
-YAML also accepts `dart_sdk`, `flutter_sdk`, `adapter_root`
-and `rules.classes`/`rules.methods`. `dart_sdk` and `flutter_sdk` are mutually
-exclusive input choices. Unknown keys, duplicate keys, YAML tags/anchors/aliases,
-multiple documents and files larger than 1 MiB are rejected. YAML settings cannot
-be mixed with semantic CLI settings, including `--output`; interpreter and
-installation options remain available in either mode.
+Run it from any directory with `failforge mutate --config /path/to/my_package/profiles/calculator.yml`.
+`rules.include`/`exclude` paths are relative to the project root. Other YAML paths
+(`dart_sdk`, `flutter_sdk`, `adapter_root`, `output`) are relative to the profile.
+CLI paths remain relative to the invocation directory. Only one of `dart_sdk`
+and `flutter_sdk` may be supplied. `rules.classes` and `rules.methods` filter
+mutations; they do not restrict the project's selected author tests.
+
+Selection rules:
+
+- Absent families, absent `enabled`, absent operators and explicit `false` are
+  off. Both a family's `enabled` and an operator must be `true` to run it.
+- `language_specific` requires explicit `language: dart` whenever that section
+  exists, even when disabled. No language is inferred for an absent section.
+- Unknown fields and operator IDs, wrong-family operators and non-boolean
+  switches are rejected even in disabled sections. Use unquoted lower-case
+  `true`/`false`; strings, numbers and YAML's `yes`/`on` spellings are rejected.
+- A profile without any active operators is a configuration error. An active
+  family with no enabled operators does not create a family campaign.
+- `rules.operators`, `rules.components`, old top-level `family`/`language`, and
+  old `mutations.dart_semantic` category settings are rejected. Select individual
+  operators under their family. Upgrades do not enable new operators silently.
+- A literal include naming a nonexistent file fails before output or workspace
+  creation. An existing file with no applicable mutations completes with
+  `no_mutants`, without running author tests or establishing a score.
+
+Duplicate keys, YAML tags/anchors/aliases, multiple documents and files larger
+than 1 MiB are rejected. YAML settings cannot be mixed with semantic CLI settings,
+including `--project` and `--output`; interpreter and installation options remain
+available in either mode. Old YAML formats are not supported.
 
 Defaults are one worker, `test: 30s`, `command: 120s` and 1,000 mutants. Workers
-range from 1 to 4; `max_mutants` ranges from 0 to 10,000. The adapter refuses a
-truncated discovery instead of publishing a score for a hidden partial set.
+range from 1 to 4; `max_mutants` ranges from 0 to 10,000. A profile discovers and
+statically validates every selected family before any author tests. The limit
+applies to their total candidate count, including statically invalid candidates.
+Exceeding it fails the profile before baselines or mutants run; no partial subset
+is silently selected. Each family also retains the adapter's 10,000-candidate
+hard ceiling. Families execute in order: `classic`, `failure_mode`, then
+`language_specific`; `workers` controls concurrent mutants within that family.
 Both durations use positive integer `ms`, `s` or `m` units. The command budget
 must exceed the test default by at least five seconds. It bounds the entire test
 process; metadata, multiple timeouts and teardown can still reach the outer limit.
@@ -201,6 +248,37 @@ baseline/              original test results and exact author-test catalogue
 original-after/        final original control
 mutants/<id>/          patch metadata, result and raw captures
 ```
+
+A multi-family profile has one common snapshot, input bindings, event journal
+and report directory. Family-tagged events share one ordered sequence. Its layout
+is:
+
+```text
+manifest.json          resolved project, explicit switches and enabled families
+input-bindings.json    common frozen execution inputs
+events.jsonl           shared stages and family-tagged progress
+summary.json           profile status, family summaries and outcome counts
+families/
+  classic/             discovery, baseline, mutants and original-after control
+  failure_mode/        independent family results
+  language_specific/   independent Dart results
+```
+
+Disabled families remain visible in the root summary. The profile has no combined
+score: each family retains its own denominator and score. A failed or cancelled
+profile clears final scores for all its families, including ones executed before
+the failure. Later families are marked `not_started`; no passing score is claimed
+for an incomplete profile. The terminal prints a family/status/mutants/score table
+and counts for all eight outcomes.
+
+The root and family `summary.json` paths are symbolic links through one private
+commit pointer. Final reports become visible together only after all of them
+have been written and synchronized. Preserve the hidden `.profile-reports/`
+directory and `.profile-reports-current` link when copying the report directory,
+or dereference the public `summary.json` paths when exporting individual files.
+An interrupted publication leaves the public reports incomplete and unscored.
+The journal's `campaign_finalizing` event records an intended status, not a
+committed result; use the root `summary.json` to determine completion.
 
 An explicit output directory must not already exist. Output inside the target
 project must be below `.failforge/`, which is excluded from copies and source

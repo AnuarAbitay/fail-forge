@@ -6,6 +6,7 @@ mod args;
 mod diagnostics;
 mod display;
 mod mutate;
+mod readiness;
 
 use std::io::Write;
 use std::os::unix::process::ExitStatusExt;
@@ -62,6 +63,16 @@ fn main() -> ExitCode {
             return ExitCode::from(125);
         }
     };
+    let readiness = match readiness::Readiness::from_env() {
+        Ok(readiness) => readiness,
+        Err(_) => {
+            let _ = writeln!(
+                std::io::stderr(),
+                "failforge: invalid native readiness capability"
+            );
+            return ExitCode::from(125);
+        }
+    };
     let mut spec = match arguments.into_spec(&invocation_cwd) {
         Ok(spec) => spec,
         Err(error) => {
@@ -71,6 +82,9 @@ fn main() -> ExitCode {
     };
     if let Some(lease) = &workspace_lease {
         lease.protect_child(&mut spec);
+    }
+    if let Some(readiness) = &readiness {
+        readiness.protect_child(&mut spec);
     }
     let diagnostics = match Diagnostics::new() {
         Ok(diagnostics) => diagnostics,
@@ -101,7 +115,7 @@ fn main() -> ExitCode {
             return ExitCode::from(125);
         }
     };
-    ExitCode::from(runtime.block_on(run(spec, &diagnostics)))
+    ExitCode::from(runtime.block_on(run(spec, &diagnostics, readiness)))
 }
 
 fn parse_error_diagnostic(error: &clap::Error) -> Option<String> {
@@ -124,7 +138,11 @@ fn parse_error_diagnostic(error: &clap::Error) -> Option<String> {
     ))
 }
 
-async fn run(spec: failforge_runner::CommandSpec, diagnostics: &Diagnostics) -> u8 {
+async fn run(
+    spec: failforge_runner::CommandSpec,
+    diagnostics: &Diagnostics,
+    readiness: Option<readiness::Readiness>,
+) -> u8 {
     // Install both listeners before spawning: no child is owned if installation
     // fails, and the first signal cannot arrive between spawn and subscription.
     let (mut interrupt, mut terminate) = match (
@@ -140,6 +158,13 @@ async fn run(spec: failforge_runner::CommandSpec, diagnostics: &Diagnostics) -> 
             return 125;
         }
     };
+    if readiness.is_some_and(|ready| ready.acknowledge().is_err()) {
+        diagnostics.report(
+            "failforge: cannot acknowledge native readiness\n",
+            DIAGNOSTIC_BUDGET,
+        );
+        return 125;
+    }
     let runner = Runner::new();
     let mut handle = match runner.start(spec) {
         Ok(handle) => handle,

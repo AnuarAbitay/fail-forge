@@ -174,43 +174,42 @@ failforge mutate --project /path/to/package --family language_specific --languag
 failforge mutate --project /path/to/package --family language_specific --language dart --operator NSM-001
 ```
 
-`dart` is the default subtype for this family. Other languages are rejected.
+In direct CLI mode, `dart` is the default subtype for this family. Other languages are rejected.
 The family must be selected explicitly; a classical campaign does not silently
 enable semantic mutations. Direct mode supports the existing file, class and
 method filters and worker/time limits.
 
 ```yaml
-version: 1
-family: language_specific
-language: dart
-project: ./package
 workers: 2
 mutations:
-  dart_semantic:
+  language_specific:
     enabled: true
-    null_safety: true
-    parameters: true
-    switch: true
-    patterns: true
-    collections: true
-    enums: true
-    exclude: ['**/*.g.dart', '**/*.freezed.dart']
+    language: dart
+    operators:
+      NSM-001: true
+      NSM-004: true
+      DPM-001: false
 rules:
-  include: ['lib/**.dart']
-  components:
-    - name: network
-      include: ['lib/network/**']
-      methods: [load]
-      operators: [NSM-001, NSM-004]
+  include: ['lib/network/**']
+  exclude: ['**/*.g.dart', '**/*.freezed.dart']
+  methods: [load]
 timeouts: {test: 30s, command: 120s}
 ```
 
-Categories default to enabled. An explicit `rules.operators` list intersects the
-enabled categories. `enabled: false`, disabled categories and explicit empty
-operator lists preserve empty selection. Component filters are bounded, named,
-strictly validated and forwarded to the adapter. Global operator restrictions
-also constrain components. Generated sources retain the adapter's normal
-exclusions. Unknown settings and unsupported operator IDs are rejected.
+The profile's nearest ancestor `pubspec.yaml` identifies the project. YAML has no
+`version` or `project` field. `language: dart` is mandatory inside a present
+`language_specific` section, including disabled sections. Only individually
+enabled operators run; omitted operators and families are off. The full
+[Dart profile](../examples/flutter_fixture/profiles/failforge.dart-semantic.yml)
+lists all 19 switches, grouped with comments. A profile can also select classical
+and failure-mode operators; their results stay separate. See the
+[profile rules](mutation-cli.md#explicit-yaml-configuration).
+
+Generated sources retain the adapter's normal exclusions. Unknown settings,
+unsupported or wrong-family IDs and non-boolean switches are rejected even when
+disabled. A profile with no active operators is an error. The adapter protocol's
+existing category/component rules remain internal; YAML profiles use explicit
+operator switches.
 
 ## Results, limits and performance
 

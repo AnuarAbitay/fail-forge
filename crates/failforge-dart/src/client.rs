@@ -239,8 +239,14 @@ impl AdapterClient {
     /// returned for the caller to classify; an adapter error cannot shut down
     /// unrelated commands using the shared Runner.
     pub async fn close(mut self) -> Result<Arc<CommandResult>, ClientError> {
-        if self.in_flight || self.poisoned {
+        if self.poisoned {
             self.handle.force_cancel(CancelReason::User);
+        } else if self.in_flight {
+            // A dropped caller future requests ordinary owned cancellation.
+            // Honor its configured grace period before escalating: an adapter
+            // already exiting after SIGTERM must not receive an unnecessary
+            // immediate SIGKILL. Transport/protocol poisoning remains forced.
+            self.handle.cancel(CancelReason::User);
         }
         let input_error = self.writer.shutdown().await.err();
         let mut unsolicited = false;

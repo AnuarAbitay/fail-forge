@@ -1,0 +1,24 @@
+# One source file, one profile, multiple selected mutation families.
+workers: 2
+timeouts:
+  test: 30s
+  command: 120s
+rules:
+  include: ['lib/subject.dart']
+mutations:
+  classic:
+    enabled: true
+    operators:
+      RELATIONAL_BOUNDARY: true
+      BOOLEAN_LITERAL_FLIP: false
+  failure_mode:
+    enabled: false
+    operators:
+      EXCEPTION_AT_ENTRY: true
+  language_specific:
+    enabled: true
+    language: dart
+    operators:
+      NSM-004: true
+limits:
+  max_mutants: 1000

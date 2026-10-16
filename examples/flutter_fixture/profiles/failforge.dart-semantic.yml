@@ -1,0 +1,39 @@
+workers: 1
+timeouts:
+  test: 30s
+  command: 120s
+rules:
+  include: ['lib/**.dart']
+  exclude: ['**/*.g.dart', '**/*.freezed.dart']
+mutations:
+  language_specific:
+    enabled: true
+    language: dart
+    operators:
+      # Null safety.
+      NSM-001: true
+      NSM-002: true
+      NSM-003: true
+      NSM-004: true
+      NSM-005: true
+      # Parameters.
+      DPM-001: true
+      DPM-002: true
+      DPM-003: true
+      # Switch.
+      SWM-001: true
+      SWM-002: true
+      SWM-003: true
+      # Patterns.
+      PMM-001: true
+      PMM-002: true
+      PMM-003: true
+      # Collections.
+      CLM-001: true
+      CLM-002: true
+      CLM-003: true
+      CLM-004: true
+      # Enums.
+      ENM-001: true
+limits:
+  max_mutants: 1000

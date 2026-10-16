@@ -1,0 +1,45 @@
+# The closest parent pubspec.yaml identifies the project.
+workers: 1
+timeouts:
+  test: 30s
+  command: 120s
+rules:
+  include: ['lib/**.dart']
+mutations:
+  classic:
+    enabled: true
+    operators:
+      RELATIONAL_BOUNDARY: true
+      COMPARISON_NEGATION: true
+      COMPARISON_OPERATOR_REPLACEMENT: true
+      LOGICAL_CONNECTOR_SWAP: true
+      LOGICAL_OPERAND_REMOVAL: true
+      ARITHMETIC_OPERATOR_REPLACEMENT: true
+      ARITHMETIC_OPERAND_REMOVAL: true
+      NUMERIC_NEGATION: true
+      INCREMENT_DECREMENT_REPLACEMENT: true
+      COMPOUND_ASSIGNMENT_REPLACEMENT: true
+      BOOLEAN_LITERAL_FLIP: true
+      BOOLEAN_NEGATION: true
+      CONDITIONAL_NEGATION: false # Optional legacy operator.
+      NUMERIC_LITERAL_REPLACEMENT: true
+      STRING_LITERAL_REPLACEMENT: true
+      RETURN_VALUE_REPLACEMENT: true
+      CONDITION_FORCING: true
+      BRANCH_BODY_REMOVAL: true
+      CONDITIONAL_EXPRESSION_MUTATION: true
+      STATEMENT_DELETION: true
+      BREAK_CONTINUE_MUTATION: true
+      SWITCH_CASE_MUTATION: true
+      FUNCTION_CALL_REMOVAL: true
+      ARGUMENT_REPLACEMENT: true
+      ARGUMENT_PERMUTATION: true
+      VARIABLE_REPLACEMENT: true
+      BITWISE_OPERATOR_REPLACEMENT: true
+      BITWISE_NEGATION: true
+      SHIFT_OPERATOR_REPLACEMENT: true
+      THROW_REMOVAL: true
+      EXCEPTION_REPLACEMENT: true
+      COLLECTION_LITERAL_MUTATION: true
+limits:
+  max_mutants: 1000

@@ -1,6 +1,7 @@
 use failforge_dart::{AdapterClient, AdapterCommand, ClientError, ClientOptions, ProtocolError};
-use failforge_runner::{CommandSpec, Runner};
+use failforge_runner::{CancelReason, CommandSpec, CompletionCause, Runner};
 use serde_json::json;
+use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -204,4 +205,73 @@ async fn request_deadline_stops_its_owned_process() {
     ));
     let _ = close_bounded(client).await;
     shutdown(&runner).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn interrupted_request_close_keeps_actual_cleanup_evidence() {
+    let runner = Arc::new(Runner::new());
+    let mut control = Control::new();
+    let mut waiting = spec("hang-until-signal");
+    waiting.env.set.insert(
+        "FAILFORGE_ADAPTER_CONTROL".into(),
+        control.path.clone().into_os_string(),
+    );
+    let mut client = AdapterClient::start(runner.clone(), waiting, options()).unwrap();
+    let mut pending = Box::pin(client.handshake());
+    tokio::select! {
+        result = &mut pending => panic!("quiet adapter unexpectedly responded: {result:?}"),
+        _ = control.request_observed() => {}
+    }
+    drop(pending);
+    let closed = close_bounded(client).await;
+    shutdown(&runner).await;
+    assert!(
+        closed.is_ok(),
+        "interrupted close lost cleanup evidence: {closed:?}"
+    );
+    let result = closed.unwrap();
+    assert!(result.cleanup.is_complete());
+    assert_eq!(result.cause, CompletionCause::Cancelled(CancelReason::User));
+    assert_eq!(result.status.unwrap().signal(), Some(libc::SIGTERM));
+    assert!(
+        result
+            .cleanup
+            .signals
+            .iter()
+            .all(|record| record.signal != libc::SIGKILL)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn interrupted_noncooperative_adapter_escalates_after_its_grace_period() {
+    let runner = Arc::new(Runner::new());
+    let mut control = Control::new();
+    let mut waiting = spec("hang-ignore-term");
+    waiting.timeout_policy.grace_period = Duration::from_millis(150);
+    waiting.env.set.insert(
+        "FAILFORGE_ADAPTER_CONTROL".into(),
+        control.path.clone().into_os_string(),
+    );
+    let mut client = AdapterClient::start(runner.clone(), waiting, options()).unwrap();
+    let mut pending = Box::pin(client.handshake());
+    tokio::select! {
+        result = &mut pending => panic!("noncooperative adapter responded: {result:?}"),
+        _ = control.request_observed() => {}
+    }
+    drop(pending);
+    let started = std::time::Instant::now();
+    let closed = close_bounded(client).await;
+    shutdown(&runner).await;
+    let result = closed.unwrap();
+    assert_eq!(result.cause, CompletionCause::Cancelled(CancelReason::User));
+    assert_eq!(result.status.unwrap().signal(), Some(libc::SIGKILL));
+    assert!(result.cleanup.is_complete());
+    let forced = result
+        .cleanup
+        .signals
+        .iter()
+        .find(|record| record.signal == libc::SIGKILL)
+        .unwrap();
+    assert!(forced.after_spawn >= Duration::from_millis(150));
+    assert!(started.elapsed() < Duration::from_secs(2));
 }

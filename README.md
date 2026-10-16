@@ -12,6 +12,10 @@ standalone-package boundaries, and the [Dart adapter guide](docs/dart-adapter.md
 for the protocol and operators.
 The [Dart semantic mutation guide](docs/dart-semantic-mutations.md) describes
 the 19 operators under `language_specific -> dart`, their limits and configuration.
+One YAML file selects a profile with explicit family/operator switches. Omitted
+operators are off; `language_specific` requires an explicit language. Profiles
+have no `version` or `project` keys: the nearest parent `pubspec.yaml` identifies
+the target package. See the [single-file profile](examples/flutter_fixture/profiles/subject.yml).
 
 The backend supports Linux and macOS. Windows is intentionally unsupported.
 FailForge is **not a sandbox**: the child retains the filesystem, network, and
