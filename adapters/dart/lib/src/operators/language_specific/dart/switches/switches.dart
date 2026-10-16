@@ -4,6 +4,7 @@ import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:analyzer/dart/element/element.dart';
 import 'package:analyzer/dart/element/type.dart';
 
+import '../../../classic/calls/call_semantics.dart' show literalIdentity;
 import '../common.dart';
 
 const switchOperators = <LanguageSpecificOperator>[
@@ -67,6 +68,15 @@ abstract class _ResultsCollector extends OperatorCollector {
       );
       return;
     }
+    // Donor portability depends on this switch owner, not the target arm.
+    // Keep both caches local: another switch or analyzer overlay has its own
+    // lexical bindings and must not inherit a previous donor's result.
+    final portable = <Expression, bool>{};
+    final textByExpression = <Expression, String>{};
+    String textOf(Expression expression) => textByExpression.putIfAbsent(
+      expression,
+      () => source.substring(expression.offset, expression.end),
+    );
     for (final target in results) {
       final targetType = target.staticType;
       if (!_usable(targetType)) continue;
@@ -81,9 +91,12 @@ abstract class _ResultsCollector extends OperatorCollector {
             )) {
           continue;
         }
-        final references = _PortableReferences(owner);
-        donor.accept(references);
-        if (!references.safe) {
+        final safe = portable.putIfAbsent(donor, () {
+          final references = _PortableReferences(owner);
+          donor.accept(references);
+          return references.safe;
+        });
+        if (!safe) {
           skip(
             donor,
             'branch_local_donor',
@@ -91,10 +104,8 @@ abstract class _ResultsCollector extends OperatorCollector {
           );
           continue;
         }
-        final text = source.substring(donor.offset, donor.end);
-        if (text == source.substring(target.offset, target.end) ||
-            !seen.add(text))
-          continue;
+        final text = textOf(donor);
+        if (text == textOf(target) || !seen.add(text)) continue;
         // Result precedence must not change when it moves into a different arm.
         replace(target, '($text)');
       }
@@ -111,7 +122,10 @@ bool _usable(DartType? type) =>
 
 bool _sameValue(Expression left, Expression right) {
   final a = left.unParenthesized, b = right.unParenthesized;
-  if (a is IntegerLiteral && b is IntegerLiteral) return a.value == b.value;
+  if (a is IntegerLiteral && b is IntegerLiteral) {
+    final value = literalIdentity(a);
+    return value != null && value == literalIdentity(b);
+  }
   if (a is DoubleLiteral && b is DoubleLiteral) return a.value == b.value;
   if (a is BooleanLiteral && b is BooleanLiteral) return a.value == b.value;
   if (a is SimpleStringLiteral && b is SimpleStringLiteral)

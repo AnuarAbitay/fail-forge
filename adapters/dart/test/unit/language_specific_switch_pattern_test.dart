@@ -127,6 +127,48 @@ void main() {
   });
 
   group('SWM-002', () {
+    test(
+      'keeps donor diagnostics ordered for every target and every switch',
+      () async {
+        const source =
+            'int f(Object x,int seed)=>switch(x){[int n]=>n,[int m,int k]=>m,_=>seed}; '
+            'int g(bool x,int n,int other)=>switch(x){true=>n,false=>other};';
+        final f = await fixture(source);
+        final scan = await f.scan(const SwitchExpressionReplacement(), source);
+        expect(scan.candidates.map((candidate) => candidate.replacement), [
+          '(seed)',
+          '(seed)',
+          '(other)',
+          '(n)',
+        ]);
+        expect(
+          scan.skips.map(
+            (skip) => source.substring(skip.anchor.offset, skip.anchor.end),
+          ),
+          ['m', 'n', 'n', 'm'],
+        );
+        expect(
+          scan.skips.every((skip) => skip.code == 'branch_local_donor'),
+          isTrue,
+        );
+        await valid(f, source, scan);
+      },
+    );
+
+    test('a later resolved overlay cannot reuse donor bindings from an earlier scan', () async {
+      const originalSource =
+          'int f(bool x,int n,int other)=>switch(x){true=>n,false=>other};';
+      const changedSource =
+          'int f(Object x,int other)=>switch(x){int n=>n,_=>other};';
+      final f = await fixture(originalSource);
+      const operator = SwitchExpressionReplacement();
+      expect((await f.scan(operator, originalSource)).candidates, hasLength(2));
+      final changed = await f.scan(operator, changedSource);
+      expect(changed.candidates.single.replacement, '(other)');
+      expect(changed.skips.single.code, 'branch_local_donor');
+      expect((await f.scan(operator, originalSource)).candidates, hasLength(2));
+    });
+
     test('replaces one expression result while preserving patterns and exhaustiveness', () async {
       const source = 'int f(bool x)=>switch(x){true=>1,false=>2};';
       final f = await fixture(source);

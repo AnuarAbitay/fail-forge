@@ -1,7 +1,72 @@
-/target/
-/.toolchain/
-/artifacts/
-.failforge/
-__pycache__/
-.dart_tool/
+# Build output, including nested Rust packages.
+target/
 build/
+
+# Dart / Flutter generated state. Keep pubspec.lock tracked.
+.dart_tool/
+.pub-cache/
+.pub/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec_overrides.yaml
+
+# Local toolchains, reports and mutation workspaces.
+/.toolchain/
+artifacts/
+/reports/
+.failforge/
+.failforge-namespace-*
+failforge-workspaces-*/
+/tmp/
+/temp/
+
+# Python environments, bytecode and tool caches.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage/
+
+# Local environment values. Only sanitized templates may be committed.
+.env
+.env.*
+!.env.example
+
+# Credential files and private keys.
+.netrc
+.pypirc
+.git-credentials
+.secrets/
+credentials.json
+service-account*.json
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Local logs, temporary files and operating-system metadata.
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+.DS_Store
+._*
+Thumbs.db

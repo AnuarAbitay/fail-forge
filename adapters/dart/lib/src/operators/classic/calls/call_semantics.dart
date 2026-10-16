@@ -84,21 +84,33 @@ Expression unparenthesized(Expression expression) {
   if (expression is SimpleStringLiteral) value = ('string', expression.value);
   if (expression is BooleanLiteral) value = ('bool', expression.value);
   if (expression is NullLiteral) value = ('null', null);
+  final isContextualDouble = isSdkInterface(expression.staticType, const {
+    'double',
+  });
   num? numeric;
-  if (expression is IntegerLiteral) numeric = expression.value;
+  if (expression is IntegerLiteral) {
+    numeric = isContextualDouble
+        ? expression.parseDoubleValue(negated: false)
+        : expression.parseIntValue(negated: false);
+  }
   if (expression is DoubleLiteral) numeric = expression.value;
   if (expression is PrefixExpression &&
       const {'-', '+'}.contains(expression.operator.lexeme)) {
     final operand = unparenthesized(expression.operand);
-    if (operand is IntegerLiteral) numeric = operand.value;
-    if (operand is DoubleLiteral) numeric = operand.value;
-    if (numeric != null && expression.operator.lexeme == '-')
-      numeric = -numeric;
+    final negated = expression.operator.lexeme == '-';
+    if (operand is IntegerLiteral) {
+      // The contextual type applies before negation. Parsing a signed int
+      // first would lose double negative zero and wrap large hexadecimals.
+      numeric = isContextualDouble
+          ? operand.parseDoubleValue(negated: negated)
+          : operand.parseIntValue(negated: negated);
+    }
+    if (operand is DoubleLiteral) {
+      numeric = negated ? -operand.value : operand.value;
+    }
   }
   if (numeric != null) {
-    final isDouble =
-        numeric is double ||
-        isSdkInterface(expression.staticType, const {'double'});
+    final isDouble = numeric is double || isContextualDouble;
     value = (
       isDouble ? 'double' : 'int',
       isDouble ? numeric.toDouble().toString() : numeric.toString(),
