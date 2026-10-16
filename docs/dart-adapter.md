@@ -222,6 +222,8 @@ even if their AST edit ranges differ. Merging precedes `maxMutants`, keeps a
 deterministic representative (original operator IDs have preference) and unions
 component names. `rawCandidates` and `deduplicatedCandidates` expose this step.
 No attempt is made to prove arbitrary semantic equivalence between programs.
+NSM-001 additionally has a [narrow boolean-comparison equivalence filter](dart-semantic-mutations.md#nsm-001-equivalent-comparison-filter);
+it does not infer equivalence from surviving tests.
 Deduplication preflights a 256 MiB aggregate hashing-work limit before hashing
 changed files. The handshake advertises `maxDedupWorkBytes`; discovery metrics
 include `dedupHashedBytes`. A larger request fails with
@@ -343,9 +345,13 @@ snapshot taken before the first run. The snapshot is shared within a campaign.
 Only this confirmed sequence produces `KILLED` with reason
 `mutation_caused_initialization_failure` and phase `suite_loading`. Its author
 test count may be zero: a group callback can throw before registering any tests.
-The partial catalog exception applies only to this verdict. Normal assertion
-kills and survivors still require the complete author-test catalog. Raw loader
-evidence and all three diagnostic controls are retained separately in the case
+The legacy script partial-catalog exception applies only to this verdict. The
+production `mutate` controller additionally supports an authenticated ordinary
+failure witness when a failed `setUpAll` suppresses other registrations, and a
+bounded author-null-check fallback to initiate causal initialization controls;
+see [campaign correctness](mutation-cli.md#results-and-correctness). Survivors
+still require the complete author-test catalog. Raw loader evidence and all
+three diagnostic controls are retained separately in the case
 directory. Unknown or unreproduced loading failures become `UNCLASSIFIED`;
 failed Runner capture/cleanup or changed inputs remain `INFRA_ERROR`. Both are
 excluded from the score. Historical reports are not relabelled automatically.

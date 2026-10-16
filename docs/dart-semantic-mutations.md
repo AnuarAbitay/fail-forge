@@ -148,6 +148,25 @@ logical-and and logical-or patterns. Guards can also affect type promotion and
 branch reachability. See [Dart pattern types](https://dart.dev/language/pattern-types)
 and [guard clauses](https://dart.dev/language/branches#guard-clause).
 
+### NSM-001 equivalent comparison filter
+
+NSM-001 omits a narrowly proven equivalent removal when the coalescing expression
+is the left operand of `==` or `!=`, its receiver has static type `dynamic` or
+SDK `bool?`, and the fallback and comparison value are opposite, pure boolean
+constants. Parentheses do not change this rule. For example,
+`(value ?? false) == true` and `value == true` have the same result: a null
+receiver compares false in both, while a non-null receiver keeps its evaluation
+and equality dispatch. The corresponding inequality and opposite boolean pair
+are also covered. Discovery records `equivalent_null_coalescing_comparison`.
+
+Recognized constants include boolean literals, resolved const aliases and static
+const fields with inert type or non-deferred import qualifiers. Calls, getters,
+non-const values and deferred accesses are excluded from this proof because
+evaluation can be observable. Reversed comparisons, equal fallback/comparison
+values, non-boolean comparisons, extension types, other static receiver types
+and type parameters are not filtered by this rule. This is not a general
+equivalence detector; an unfiltered survivor is not classified as equivalent.
+
 ## Configuration
 
 ```sh

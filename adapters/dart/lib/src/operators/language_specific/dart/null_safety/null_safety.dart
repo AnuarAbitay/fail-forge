@@ -83,6 +83,74 @@ class _Collector extends OperatorCollector {
         variable.computeConstantValue()?.isNull == true;
   }
 
+  // Only names of types and non-deferred import prefixes are inert qualifiers.
+  // A getter, instance receiver or deferred library access can have observable
+  // behavior even when the referenced declaration has a constant bool value.
+  bool _inertConstantQualifier(Expression expression) => switch (expression) {
+    SimpleIdentifier(:final element) =>
+      element is InterfaceElement ||
+          (element is PrefixElement &&
+              !element.fragments.any((fragment) => fragment.isDeferred)),
+    PrefixedIdentifier(:final prefix, :final element) =>
+      element is InterfaceElement && _inertConstantQualifier(prefix),
+    _ => false,
+  };
+
+  bool? _pureBoolConstant(Expression expression) {
+    final value = expression.unParenthesized;
+    if (value is BooleanLiteral) return value.value;
+    final Element? element;
+    switch (value) {
+      case SimpleIdentifier():
+        element = value.element;
+      case PrefixedIdentifier():
+        if (!_inertConstantQualifier(value.prefix)) return null;
+        element = value.element;
+      case PropertyAccess():
+        final target = value.target;
+        if (value.isCascaded ||
+            value.isNullAware ||
+            target == null ||
+            !_inertConstantQualifier(target)) {
+          return null;
+        }
+        element = value.propertyName.element;
+      default:
+        return null;
+    }
+    final variable = element is PropertyAccessorElement
+        ? element.variable
+        : element;
+    return variable is VariableElement && variable.isConst
+        ? variable.computeConstantValue()?.toBoolValue()
+        : null;
+  }
+
+  bool _equivalentBooleanComparison(BinaryExpression coalescing) {
+    final type = coalescing.leftOperand.staticType;
+    // Dynamic dispatch is unchanged for every non-null value, including a
+    // custom ==. SDK bool has the same property. Other static receiver types
+    // (notably extension types and type parameters) are deliberately unproven.
+    if (type is! DynamicType && type?.isDartCoreBool != true) return false;
+
+    Expression operand = coalescing;
+    while (operand.parent is ParenthesizedExpression) {
+      operand = operand.parent as ParenthesizedExpression;
+    }
+    final comparison = operand.parent;
+    if (comparison is! BinaryExpression ||
+        !identical(comparison.leftOperand, operand) ||
+        (comparison.operator.lexeme != '==' &&
+            comparison.operator.lexeme != '!=')) {
+      return false;
+    }
+    final fallback = _pureBoolConstant(coalescing.rightOperand);
+    final target = _pureBoolConstant(comparison.rightOperand);
+    // For null, both null == target and the opposite bool == target are false;
+    // != is their complement. For non-null, evaluation and dispatch coincide.
+    return fallback != null && target != null && fallback != target;
+  }
+
   @override
   void visitBinaryExpression(BinaryExpression node) {
     if (operator.id == 'NSM-001' && node.operator.lexeme == '??') {
@@ -92,7 +160,15 @@ class _Collector extends OperatorCollector {
           type is! InvalidType &&
           type is! VoidType &&
           unit.typeSystem.isPotentiallyNullable(type)) {
-        replace(node, '', offset: left.end, length: node.end - left.end);
+        if (_equivalentBooleanComparison(node)) {
+          skip(
+            node,
+            'equivalent_null_coalescing_comparison',
+            'Removing this pure bool fallback preserves the comparison result.',
+          );
+        } else {
+          replace(node, '', offset: left.end, length: node.end - left.end);
+        }
       } else {
         skip(
           node,

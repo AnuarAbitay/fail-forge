@@ -128,6 +128,67 @@ separate subject alias. Unsupported alias rewrites fail explicitly. Ordinary
 packages retain their self package imports. Originals, snapshots, dependencies,
 SDK and adapter inputs are checked for changes.
 
+A failing `setUpAll` can prevent some tests and child groups from starting, so
+their names never appear in the JSON reporter. When the baseline and observed
+group metadata explain this suppression, a separately observed ordinary test
+can still establish `KILLED`: its suite, name, group ancestry, source location and
+metadata must uniquely match a passing baseline test, with a verified author
+failure. The result retains the actual observed catalogue, missing-entry counts
+and `catalogueIdentityProven: false`. It never invents unstarted test results.
+Without that witness, the controller records `UNCLASSIFIED` with
+`author_test_catalogue_incomplete_after_setup_failure` and excludes it from the
+score. `SURVIVED` requires the complete expected catalogue. Unexplained selection
+changes and execution-input changes still fail the guard.
+
+An author null assertion during registration can be caused by a subject method
+that has already returned, so its frame need not appear in the exception stack.
+The production controller can use a narrowly checked author-runtime signature
+to initiate fresh original/mutant/original controls. The signature alone never
+establishes a kill. Both originals must pass the full expected catalogue; the
+mutant replay must reproduce the initial error and stack after replacing only
+the generated workspace path. Both raw streams, native cleanup, suite selection
+and source/dependency/SDK bindings remain mandatory.
+
+### Framework namespace isolation
+
+When the selected package is also a test-framework dependency, author tests use
+the subject alias while the framework keeps its unchanged library. This applies
+to every mutation family. The header rewriter recognizes URI token ranges with
+comments, metadata such as `@TestOn('vm')`, named or unnamed `library` directives,
+import prefixes (`as`), `deferred`, `show`/`hide`, conditional import/export URI
+branches and URI-bearing `part`/`part of` directives. It preserves those constructs
+and replaces only a canonical `package:<selected-package>/` prefix inside a
+supported URI literal. Comments and other header text are not reformatted.
+
+Headers alone need no analyzer subprocess. If author test code contains the
+identifier `resolvePackageUri` or `resolvePackageUriSync`, the controller obtains
+one read-only namespace plan for that frozen project through the Rust Runner.
+The Dart tool resolves SDK bindings without executing author code, running
+`pub get` or changing dependency metadata. It accepts a direct call to the actual `dart:isolate.Isolate`
+resolver whose argument is an actual `dart:core.Uri.parse` call with one canonical
+simple string literal. Only an owning-package prefix is changed; canonical URI
+literals for other packages are left alone. Prefixed SDK imports are supported,
+and a same-named custom class or method cannot authorize an edit.
+
+The internal plan binds the original package configuration, complete author-test
+file inventory and each file's SHA-256. Each attempt rechecks these bindings and
+the exact expected bytes before applying non-overlapping prefix edits to its
+copy. Reversing those precise edits must reproduce every original byte and hash;
+bytes outside the namespace ranges remain unchanged. Runtime URI edits are
+recorded separately from header edits, with the planner receipt and raw captures
+under `namespace-plan/`. The plan is produced internally, not accepted as a user
+configuration or persisted as a source-hash-only cache.
+
+SDK resolver tear-offs, indirect/computed/interpolated URI arguments, escaped or
+encoded URI spellings and unrecognized owning-package references are rejected
+explicitly. The implementation does not rewrite arbitrary assertion/body
+strings. Self-package URI references in the subject's `lib/` remain unsupported
+when framework isolation is required: rewriting that library would change the
+mutation's bound source and offsets. A namespace preparation failure stops the
+campaign before its test process launches; it is not a killed mutant or a successful
+baseline, and a failed campaign has no score. Packages without a framework-name
+collision do not require these alias rewrites.
+
 By default a run creates `.failforge/runs/<run-id>/` in the selected project:
 
 ```text
