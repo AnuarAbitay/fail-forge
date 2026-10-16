@@ -97,7 +97,7 @@ void main() {
   test('handshake exposes family/category/operator tree without changing mutant identity format', () async {
     final result = await AdapterEngine().handle('handshake', {});
     final tree = result['operatorTree'] as Map;
-    expect(tree.keys.toSet(), {'classic', 'failure_mode'});
+    expect(tree.keys.toSet(), {'classic', 'failure_mode', 'language_specific'});
     final categories = tree['classic'] as Map;
     expect(
       categories.keys.toSet(),
@@ -142,6 +142,7 @@ void main() {
       'CONDITIONAL_NEGATION',
       'EXCEPTION_AT_ENTRY',
       'METHOD_CHANNEL_ERROR',
+      ...languageSpecificOperators.map((operator) => operator.id),
     });
     final schema = jsonDecode(
       File('lib/src/protocol/schema.json').readAsStringSync(),

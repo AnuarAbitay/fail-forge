@@ -1,0 +1,101 @@
+{
+  "language": "dart",
+  "family": "language_specific",
+  "cases": [
+    {
+      "operatorId": "NSM-001",
+      "category": "null_safety",
+      "source": "// 😀 semantic fixture\nString? subject(String? v) => v ?? 'fallback';\nvoid main() {\n  try {\n    if (!(subject(null) == 'fallback' && subject('x') == 'x')) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "NSM-002",
+      "category": "null_safety",
+      "source": "// 😀 semantic fixture\ndynamic subject(dynamic v) => v?.length;\nvoid main() {\n  try {\n    if (!(subject(null) == null && subject([1, 2]) == 2)) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "NSM-003",
+      "category": "null_safety",
+      "source": "// 😀 semantic fixture\nString? subject() { String? value = 'hello'; return value; }\nvoid main() {\n  try {\n    if (!(subject() == 'hello')) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "NSM-004",
+      "category": "null_safety",
+      "source": "// 😀 semantic fixture\nint? subject(int? v) { v ??= 2; return v; }\nvoid main() {\n  try {\n    if (!(subject(1) == 1 && subject(null) == 2)) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "NSM-005",
+      "category": "null_safety",
+      "source": "// 😀 semantic fixture\nList<int> subject(List<int>? xs) => [1, ...?xs];\nvoid main() {\n  try {\n    if (!(subject([2]).length == 2 && subject(null).length == 1)) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "DPM-001",
+      "category": "parameters",
+      "source": "// 😀 semantic fixture\nint subject({int timeout = 30}) => timeout;\nvoid main() {\n  try {\n    if (!(subject() == 30)) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "DPM-002",
+      "category": "parameters",
+      "source": "// 😀 semantic fixture\nbool subject({bool enabled = true}) => enabled;\nvoid main() {\n  try {\n    if (!(subject() == true)) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "DPM-003",
+      "category": "parameters",
+      "source": "// 😀 semantic fixture\nString? subject({String? value = 'hello'}) => value;\nvoid main() {\n  try {\n    if (!(subject() == 'hello')) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "SWM-001",
+      "category": "switch",
+      "source": "// 😀 semantic fixture\nint subject(bool x) { switch(x) { case true: return 1; case false: return 2; } }\nvoid main() {\n  try {\n    if (!(subject(true) == 1 && subject(false) == 2)) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "SWM-002",
+      "category": "switch",
+      "source": "// 😀 semantic fixture\nint subject(bool x) => switch(x) { true => 1, false => 2 };\nvoid main() {\n  try {\n    if (!(subject(true) == 1 && subject(false) == 2)) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "SWM-003",
+      "category": "switch",
+      "source": "// 😀 semantic fixture\nint subject(Object x) => switch(x) { int n when n > 0 => 1, _ => 0 };\nvoid main() {\n  try {\n    if (!(subject(1) == 1 && subject(-1) == 0)) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "PMM-001",
+      "category": "patterns",
+      "source": "// 😀 semantic fixture\nbool subject(int x) => switch(x) { >0 => true, _ => false };\nvoid main() {\n  try {\n    if (!(subject(1) && !subject(0) && !subject(-1))) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "PMM-002",
+      "category": "patterns",
+      "source": "// 😀 semantic fixture\nbool subject(Object x) { if (x case int n when n > 0) return true; return false; }\nvoid main() {\n  try {\n    if (!(subject(1) && !subject(0) && !subject(-1))) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "PMM-003",
+      "category": "patterns",
+      "source": "// 😀 semantic fixture\nbool subject(List<int> x) { if (x case [>0, _] && [_, >0]) return true; return false; }\nvoid main() {\n  try {\n    if (!(!subject([1,-1]) && subject([1,1]))) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "CLM-001",
+      "category": "collections",
+      "source": "// 😀 semantic fixture\nList<int> subject(bool b) => [if (b) 1];\nvoid main() {\n  try {\n    if (!(subject(true).length == 1 && subject(false).isEmpty)) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "CLM-002",
+      "category": "collections",
+      "source": "// 😀 semantic fixture\nList<int> subject(List<int> xs) => [1, ...xs];\nvoid main() {\n  try {\n    if (!(subject([2]).length == 2)) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "CLM-003",
+      "category": "collections",
+      "source": "// 😀 semantic fixture\nList<int> subject(bool b) => [if (b) 1];\nvoid main() {\n  try {\n    if (!(subject(true).length == 1 && subject(false).isEmpty)) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "CLM-004",
+      "category": "collections",
+      "source": "// 😀 semantic fixture\nList<int> subject() => [for (var i=0; i<2; i++) i];\nvoid main() {\n  try {\n    if (!(subject().length == 2)) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    },
+    {
+      "operatorId": "ENM-001",
+      "category": "enums",
+      "source": "// 😀 semantic fixture\nenum State { ready, failed } State subject() => State.ready;\nvoid main() {\n  try {\n    if (!(subject() == State.ready)) throw StateError('MUTATION_OBSERVED');\n  } catch (_) {\n    throw StateError('MUTATION_OBSERVED');\n  }\n}\n"
+    }
+  ]
+}

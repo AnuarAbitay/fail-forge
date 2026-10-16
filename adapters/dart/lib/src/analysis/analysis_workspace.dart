@@ -12,6 +12,7 @@ import '../patches/patch.dart';
 import '../project/safe_project.dart';
 import '../project/source_file.dart';
 import '../protocol/adapter_error.dart';
+import '../model/mutation_family.dart';
 
 /// A request owns its analysis contexts. No hash-only semantic cache survives a
 /// request; SDK, dependency and options changes are observed by the next one.
@@ -116,7 +117,11 @@ class AnalysisWorkspace {
       context.changeFile(source.absolutePath);
       await context.applyPendingFileChanges();
       final changed = await library(source);
-      final valid = !hasErrors(changed);
+      final changedDiagnostics = diagnostics(changed);
+      final unreachable =
+          mutant.family == MutationFamily.languageSpecific &&
+          _addsUnreachableDiagnostic(baselineDiagnostics, changedDiagnostics);
+      final valid = !hasErrors(changed) && !unreachable;
       final parses = syntaxValid(changed);
       return {
         'mutantId': mutant.id,
@@ -127,7 +132,8 @@ class AnalysisWorkspace {
         'semanticValid': valid,
         'compileChecked': false,
         'baselineDiagnostics': baselineDiagnostics,
-        'diagnostics': diagnostics(changed),
+        'diagnostics': changedDiagnostics,
+        if (unreachable) 'reason': 'new_unreachable_branch',
         'durationMicros': timer.elapsedMicroseconds,
       };
     } finally {
@@ -144,4 +150,37 @@ class AnalysisWorkspace {
   }
 
   Future<void> dispose() => collection.dispose();
+}
+
+/// Existing warnings are permitted; a semantic mutation must not add an
+/// unreachable branch. Offsets are excluded because an edit can shift them.
+bool _addsUnreachableDiagnostic(
+  List<Map<String, Object?>> before,
+  List<Map<String, Object?>> after,
+) {
+  const codes = {
+    'dead_code',
+    'unreachable_switch_case',
+    'unreachable_switch_default',
+  };
+  final available = <String, int>{};
+  String? signature(Map<String, Object?> diagnostic) {
+    final code = (diagnostic['code'] as String).split('.').last;
+    return codes.contains(code)
+        ? jsonEncode([diagnostic['file'], code, diagnostic['message']])
+        : null;
+  }
+
+  for (final diagnostic in before) {
+    final key = signature(diagnostic);
+    if (key != null) available[key] = (available[key] ?? 0) + 1;
+  }
+  for (final diagnostic in after) {
+    final key = signature(diagnostic);
+    if (key == null) continue;
+    final remaining = available[key] ?? 0;
+    if (remaining == 0) return true;
+    available[key] = remaining - 1;
+  }
+  return false;
 }

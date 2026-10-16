@@ -41,6 +41,7 @@ same binary directory. A standalone copied `failforge` binary is insufficient.
 ```sh
 failforge mutate --project ./my_package --family classic
 failforge mutate --project ./my_package --family failure_mode
+failforge mutate --project ./my_package --family language_specific --language dart
 ```
 
 `--project` defaults to the invocation directory. `--family` is required without
@@ -49,6 +50,12 @@ failforge mutate --project ./my_package --family failure_mode
 enables `EXCEPTION_AT_ENTRY` for Dart, plus `METHOD_CHANNEL_ERROR` for Flutter.
 An explicitly selected operator must belong to the chosen family. Method-channel
 mutation requires a prepared Flutter project.
+
+`language_specific` selects the Dart semantic catalogue, with 19 operators in
+six categories. `--language dart` names the subtype explicitly. See the
+[Dart semantic mutation guide](dart-semantic-mutations.md) for operator IDs,
+category switches and YAML component selection. This family's report uses
+`languageSpecificScore`, and the terminal summary includes `Language: dart`.
 
 Optional filters and execution settings:
 

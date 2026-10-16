@@ -151,7 +151,7 @@ source/dependency graphs.
 
 ## Operators and patch contract
 
-The hierarchy is **family → category → operator → concrete mutant**:
+The hierarchy is **family → optional language → category → operator → concrete mutant**:
 
 ```text
 Mutation Operators
@@ -168,11 +168,19 @@ Mutation Operators
 │   ├── Bitwise
 │   ├── Exceptions
 │   └── Collections
-└── FailureMode (wire family: failure_mode)
-    ├── EXCEPTION_AT_ENTRY
-    └── METHOD_CHANNEL_ERROR
-        ├── PlatformException candidate
-        └── MissingPluginException candidate
+├── FailureMode (wire family: failure_mode)
+│   ├── EXCEPTION_AT_ENTRY
+│   └── METHOD_CHANNEL_ERROR
+│       ├── PlatformException candidate
+│       └── MissingPluginException candidate
+└── LanguageSpecific (wire family: language_specific)
+    └── dart
+        ├── null_safety (NSM-001…005)
+        ├── parameters (DPM-001…003)
+        ├── switch (SWM-001…003)
+        ├── patterns (PMM-001…003)
+        ├── collections (CLM-001…004)
+        └── enums (ENM-001)
 ```
 
 The 31 default classical operators implement the supplied practical catalogue.
@@ -203,6 +211,10 @@ The handshake retains its flat `operators` list, adds category/legacy metadata,
 and exposes `operatorTree`. Categories are derived from the operator catalogue,
 not trusted as extra mutant fields. Existing mutant JSON and canonical ID format
 remain unchanged; protocol version is still 1. Rule selection uses operator IDs.
+The [Dart semantic catalogue](dart-semantic-mutations.md) describes the 19
+`language_specific/dart` operators, applicability limits, prepublication semantic
+checks and CLI/YAML configuration. These operators require explicit selection;
+the default classical selection remains unchanged.
 
 Each variant produces a separate candidate. Discovery excludes unchanged variants
 and merges candidates producing identical final bytes within the same family,

@@ -13,6 +13,7 @@ void main() {
     expect(MutationFamily.values.map((family) => family.wireName), [
       'classic',
       'failure_mode',
+      'language_specific',
     ]);
     expect(MutationFamily.failureMode.name, 'failureMode');
     for (final family in MutationFamily.values) {
@@ -46,7 +47,7 @@ void main() {
     }
   });
 
-  test('catalog groups every unique operator under exactly two families', () {
+  test('catalog groups every unique operator under exactly three families', () {
     expect(operatorsByFamily.keys.toSet(), MutationFamily.values.toSet());
     expect(operatorsByFamily[MutationFamily.classic]!, hasLength(32));
     expect(defaultClassicOperators, hasLength(31));
@@ -71,7 +72,8 @@ void main() {
         );
       }
     }
-    expect(ids, hasLength(34));
+    expect(ids, hasLength(53));
+    expect(operatorsByFamily[MutationFamily.languageSpecific]!, hasLength(19));
     expect(
       () => operatorsByFamily[MutationFamily.classic]!.clear(),
       throwsUnsupportedError,
@@ -160,13 +162,17 @@ void main() {
       'validation rejects relabelled ${originalFamily.wireName} operator even with a recomputed ID',
       () async {
         final fixture = ProjectFixture.create({
-          'lib/main.dart': 'bool flag() => true;\n',
+          'lib/main.dart': originalFamily == MutationFamily.languageSpecific
+              ? 'String? flag(String? value) => value ?? "fallback";\n'
+              : 'bool flag() => true;\n',
         });
         try {
           final engine = AdapterEngine();
-          final operatorId = originalFamily == MutationFamily.classic
-              ? 'BOOLEAN_LITERAL_FLIP'
-              : 'EXCEPTION_AT_ENTRY';
+          final operatorId = switch (originalFamily) {
+            MutationFamily.classic => 'BOOLEAN_LITERAL_FLIP',
+            MutationFamily.failureMode => 'EXCEPTION_AT_ENTRY',
+            MutationFamily.languageSpecific => 'NSM-001',
+          };
           final payload = {
             ...fixture.payload,
             'rules': {

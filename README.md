@@ -10,6 +10,8 @@ configuration, fresh test copies and family-specific reports. See the
 [mutation CLI guide](docs/mutation-cli.md) for installation, commands and current
 standalone-package boundaries, and the [Dart adapter guide](docs/dart-adapter.md)
 for the protocol and operators.
+The [Dart semantic mutation guide](docs/dart-semantic-mutations.md) describes
+the 19 operators under `language_specific -> dart`, their limits and configuration.
 
 The backend supports Linux and macOS. Windows is intentionally unsupported.
 FailForge is **not a sandbox**: the child retains the filesystem, network, and

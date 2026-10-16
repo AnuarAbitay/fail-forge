@@ -4,7 +4,8 @@ import '../protocol/adapter_error.dart';
 /// participate in canonical mutant IDs independently of Dart enum names.
 enum MutationFamily {
   classic('classic'),
-  failureMode('failure_mode');
+  failureMode('failure_mode'),
+  languageSpecific('language_specific');
 
   const MutationFamily(this.wireName);
 
@@ -13,9 +14,10 @@ enum MutationFamily {
   static MutationFamily fromWire(Object? value) => switch (value) {
     'classic' => classic,
     'failure_mode' => failureMode,
+    'language_specific' => languageSpecific,
     _ => throw AdapterException(
       'invalid_family',
-      'family must be classic or failure_mode.',
+      'family must be classic, failure_mode or language_specific.',
     ),
   };
 }

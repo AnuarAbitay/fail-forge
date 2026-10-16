@@ -6,10 +6,12 @@ import 'package:analyzer/dart/element/type.dart';
 
 import '../model/mutation_family.dart';
 import '../model/classical_category.dart';
+import '../model/mutation_category.dart';
 import '../protocol/adapter_error.dart';
 
 export '../model/mutation_family.dart';
 export '../model/classical_category.dart';
+export '../model/mutation_category.dart';
 
 /// Operators produce UTF-16 AST ranges. The adapter's source/patch layer owns
 /// conversion to UTF-8 byte ranges, hashes, scope filtering and stable IDs.
@@ -19,7 +21,8 @@ abstract class MutationOperator {
   String get id;
   int get version => 1;
   MutationFamily get family;
-  ClassicalCategory? get category => null;
+  MutationCategory? get category => null;
+  String? get language => null;
   bool get isLegacy => false;
 
   /// [source] must use the resolved analyzer's coordinate space, normally

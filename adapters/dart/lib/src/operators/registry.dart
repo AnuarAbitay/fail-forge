@@ -1,4 +1,13 @@
 import 'common.dart';
+import 'language_specific/dart/common.dart' show LanguageSpecificOperator;
+import 'language_specific/dart/null_safety/null_safety.dart';
+import 'language_specific/dart/null_safety/null_aware_spread_removal.dart';
+import 'language_specific/dart/parameters/parameters.dart';
+import 'language_specific/dart/switches/switches.dart';
+import 'language_specific/dart/patterns/patterns.dart';
+import 'language_specific/dart/collections/collections.dart';
+import 'language_specific/dart/enums/enums.dart';
+
 import 'classic/relational/relational_boundary.dart';
 import 'classic/relational/comparison_negation.dart';
 import 'classic/relational/comparison_operator_replacement.dart';
@@ -33,6 +42,9 @@ import 'classic/exceptions/exception_replacement.dart';
 import 'classic/collections/collection_literal_mutation.dart';
 import 'failure_modes/exception_at_entry.dart';
 import 'failure_modes/method_channel_error.dart';
+
+export 'language_specific/dart/common.dart'
+    show LanguageSpecificCategory, LanguageSpecificOperator;
 
 /// The user-facing hierarchy within the classic family.
 const Map<ClassicalCategory, List<ClassicOperator>>
@@ -99,8 +111,19 @@ const List<MutationOperator> failureModeOperators = [
   MethodChannelError(),
 ];
 
+const List<LanguageSpecificOperator> languageSpecificOperators = [
+  ...nullSafetyOperators,
+  ...nullAwareSpreadOperators,
+  ...parameterOperators,
+  ...switchOperators,
+  ...patternOperators,
+  ...collectionOperators,
+  ...enumOperators,
+];
+
 final Map<MutationFamily, List<MutationOperator>> operatorsByFamily =
     Map.unmodifiable({
       MutationFamily.classic: classicOperators,
       MutationFamily.failureMode: failureModeOperators,
+      MutationFamily.languageSpecific: languageSpecificOperators,
     });

@@ -1,0 +1,22 @@
+version: 1
+project: flutter_fixture
+family: language_specific
+language: dart
+workers: 1
+timeouts:
+  test: 30s
+  command: 120s
+mutations:
+  dart_semantic:
+    enabled: true
+    null_safety: true
+    parameters: true
+    switch: true
+    patterns: true
+    collections: true
+    enums: true
+    exclude: ['**/*.g.dart', '**/*.freezed.dart']
+rules:
+  include: ['lib/**.dart']
+limits:
+  max_mutants: 1000

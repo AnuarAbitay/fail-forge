@@ -14,6 +14,7 @@ import '../scope/scope_rules.dart' hide classicOperators;
 import 'analysis_workspace.dart';
 
 const _maxDedupWorkBytes = 256 * 1024 * 1024;
+const _maxSemanticValidations = 10000;
 
 /// Sequential development-tool requests. Test execution belongs to Rust Core.
 class AdapterEngine {
@@ -42,6 +43,7 @@ class AdapterEngine {
                   if (operator.category != null)
                     'category': operator.category!.wireName,
                   if (operator.isLegacy) 'legacy': true,
+                  if (operator.language != null) 'language': operator.language,
                 },
           ],
           'operatorTree': {
@@ -55,11 +57,21 @@ class AdapterEngine {
             'failure_mode': [
               for (final operator in failureModeOperators) operator.id,
             ],
+            'language_specific': {
+              'dart': {
+                for (final category in LanguageSpecificCategory.values)
+                  category.wireName: [
+                    for (final operator in languageSpecificOperators)
+                      if (operator.category == category) operator.id,
+                  ],
+              },
+            },
           },
           'limits': {
             'maxLineBytes': 8 * 1024 * 1024,
             'maxMutants': 10000,
             'maxDedupWorkBytes': _maxDedupWorkBytes,
+            'maxSemanticValidations': _maxSemanticValidations,
           },
           'validation': 'whole_library_static_analysis',
           'testExecution': false,
@@ -343,20 +355,60 @@ class AdapterEngine {
           );
         }
       }
-      final result = unique.values.toList()..sort(compareMutants);
+      final deduplicated = unique.values.toList()..sort(compareMutants);
+      final result = <Mutant>[];
+      var semanticChecks = 0;
+      var semanticFiltered = 0;
+      for (final mutant in deduplicated) {
+        if (mutant.family == MutationFamily.languageSpecific) {
+          if (++semanticChecks > _maxSemanticValidations) {
+            throw AdapterException(
+              'candidate_validation_limit_exceeded',
+              'Narrow semantic files or operators to stay within the validation budget.',
+            );
+          }
+          final validation = await workspace.validate(
+            sourceByPath[mutant.file]!,
+            mutant,
+          );
+          if (validation['valid'] != true) {
+            semanticFiltered++;
+            if (diagnostics.length >= 10000) {
+              throw AdapterException(
+                'diagnostic_limit_exceeded',
+                'Discovery exceeds its diagnostic budget.',
+              );
+            }
+            diagnostics.add({
+              'file': mutant.file,
+              'operatorId': mutant.operatorId,
+              'code': 'semantic_candidate_rejected',
+              'severity': 'info',
+              'reason': validation['reason'] ?? 'static_analysis',
+              'message': 'The candidate would break Dart typing, syntax or branch reachability.',
+            });
+            continue;
+          }
+        }
+        result.add(mutant);
+      }
       return {
         'mutants': result.take(max).map((mutant) => mutant.toJson()).toList(),
         'diagnostics': diagnostics,
         'truncated': result.length > max,
         'totalCandidates': result.length,
         'rawCandidates': mutants.length,
-        'deduplicatedCandidates': mutants.length - result.length,
+        'deduplicatedCandidates': mutants.length - deduplicated.length,
         'returnedCandidates': result.length < max ? result.length : max,
         'maxMutants': max,
         'metrics': {
           'discoveryMicros': timer.elapsedMicroseconds,
           'files': sources.length,
           'dedupHashedBytes': dedupWorkBytes,
+          if (semanticChecks > 0)
+            'semanticValidationCandidates': semanticChecks,
+          if (semanticChecks > 0)
+            'semanticFilteredCandidates': semanticFiltered,
         },
       };
     } finally {

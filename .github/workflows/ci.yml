@@ -161,6 +161,10 @@ jobs:
           python3 scripts/dart_initialization_e2e.py --output "$RUNNER_TEMP/initialization-e2e"
           python3 scripts/dart_timeout_e2e.py --output "$RUNNER_TEMP/timeout-e2e"
           python3 scripts/dart_timeout_campaign_e2e.py --output "$RUNNER_TEMP/timeout-campaign-e2e"
+      - name: All 19 Dart semantic operators through Rust and the Dart VM
+        shell: bash
+        run: |
+          python3 scripts/dart_semantic_e2e.py --output "$RUNNER_TEMP/dart-semantic-e2e"
       - name: Real mutation CLI, YAML parity, cancellation and Flutter failures
         shell: bash
         run: |

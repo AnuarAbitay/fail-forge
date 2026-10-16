@@ -35,6 +35,7 @@ fn family_wire_names_are_exact_and_match_canonical_id_strings() {
     for (family, wire) in [
         (MutationFamily::Classic, "classic"),
         (MutationFamily::FailureMode, "failure_mode"),
+        (MutationFamily::LanguageSpecific, "language_specific"),
     ] {
         assert_eq!(family.as_str(), wire);
         assert_eq!(serde_json::to_value(family).unwrap(), json!(wire));
@@ -118,7 +119,11 @@ fn family_changes_require_a_new_id_without_changing_the_byte_patch() {
 #[test]
 fn component_symbol_and_validation_metadata_never_reclassify_the_family() {
     for fixture in fixtures() {
-        for family in [MutationFamily::Classic, MutationFamily::FailureMode] {
+        for family in [
+            MutationFamily::Classic,
+            MutationFamily::FailureMode,
+            MutationFamily::LanguageSpecific,
+        ] {
             let mut mutant = fixture.mutant.clone();
             mutant.family = family;
             mutant.id = mutant.stable_id();
@@ -158,7 +163,11 @@ fn test_outcome_evidence_cannot_supply_or_replace_a_mutation_family() {
     };
     let encoded = serde_json::to_value(evidence).unwrap();
     assert!(encoded.get("family").is_none());
-    for family in [MutationFamily::Classic, MutationFamily::FailureMode] {
+    for family in [
+        MutationFamily::Classic,
+        MutationFamily::FailureMode,
+        MutationFamily::LanguageSpecific,
+    ] {
         let mut mixed = encoded.clone();
         mixed["family"] = json!(family.as_str());
         assert!(serde_json::from_value::<TestEvidence>(mixed).is_err());

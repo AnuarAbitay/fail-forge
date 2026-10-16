@@ -53,7 +53,7 @@ void main() {
 
   test('handshake declares catalogue, compatibility operator and opt-in failure modes', () async {
     final result = await engine.handle('handshake', {});
-    expect(result['operators'], hasLength(34));
+    expect(result['operators'], hasLength(53));
     expect(
       (result['operators'] as List).where(
         (value) => (value as Map)['family'] == 'classic',

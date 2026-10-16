@@ -1,8 +1,9 @@
 import '../protocol/adapter_error.dart';
+import 'mutation_category.dart';
 
 /// Categories describe operators within the classic family. They are catalogue
 /// metadata; a mutant's canonical identity continues to use its operator ID.
-enum ClassicalCategory {
+enum ClassicalCategory implements MutationCategory {
   relational('relational', 'Relational'),
   logical('logical', 'Logical'),
   arithmetic('arithmetic', 'Arithmetic'),

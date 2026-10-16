@@ -143,6 +143,7 @@ fn validate_header(version: u32, request_id: &str) -> Result<(), ProtocolError> 
 pub enum MutationFamily {
     Classic,
     FailureMode,
+    LanguageSpecific,
 }
 
 impl MutationFamily {
@@ -150,6 +151,7 @@ impl MutationFamily {
         match self {
             Self::Classic => "classic",
             Self::FailureMode => "failure_mode",
+            Self::LanguageSpecific => "language_specific",
         }
     }
 }

@@ -30,6 +30,8 @@ pub(crate) enum MutationFamily {
     Classic,
     #[value(name = "failure_mode")]
     FailureMode,
+    #[value(name = "language_specific")]
+    LanguageSpecific,
 }
 
 impl MutationFamily {
@@ -37,6 +39,7 @@ impl MutationFamily {
         match self {
             Self::Classic => "classic",
             Self::FailureMode => "failure_mode",
+            Self::LanguageSpecific => "language_specific",
         }
     }
 }
@@ -44,7 +47,7 @@ impl MutationFamily {
 #[derive(Args)]
 pub(crate) struct MutateArgs {
     /// Campaign configuration file; cannot be mixed with campaign flags.
-    #[arg(long, value_name = "FILE", conflicts_with_all = ["project", "family", "workers", "test_timeout", "command_timeout", "output", "dart_sdk", "flutter_sdk", "operator", "include", "exclude", "method", "class", "max_mutants", "adapter_root"])]
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["project", "family", "language", "workers", "test_timeout", "command_timeout", "output", "dart_sdk", "flutter_sdk", "operator", "include", "exclude", "method", "class", "max_mutants", "adapter_root"])]
     config: Option<PathBuf>,
     /// Root of the project to mutate; defaults to the invocation directory.
     #[arg(long, value_name = "PATH", requires = "family")]
@@ -52,6 +55,9 @@ pub(crate) struct MutateArgs {
     /// Mutation family; failure_mode uses the existing adapter operator family.
     #[arg(long, value_enum, required_unless_present = "config")]
     family: Option<MutationFamily>,
+    /// Language-specific subtype; Dart is the currently supported language.
+    #[arg(long, value_parser = ["dart"])]
+    language: Option<String>,
     /// Maximum simultaneously executing mutants.
     #[arg(long, value_parser = clap::value_parser!(u8).range(1..=4))]
     workers: Option<u8>,
@@ -114,6 +120,9 @@ impl MutateArgs {
         }
         if let Some(family) = self.family {
             pair("--family", family.as_str().into());
+        }
+        if let Some(language) = &self.language {
+            pair("--language", language.into());
         }
         if let Some(value) = self.workers {
             pair("--workers", value.to_string().into());

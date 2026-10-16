@@ -45,6 +45,7 @@ fn config_conflicts_with_every_campaign_option() {
     for (name, value) in [
         ("--project", "project"),
         ("--family", "classic"),
+        ("--language", "dart"),
         ("--workers", "1"),
         ("--test-timeout", "1s"),
         ("--command-timeout", "10s"),
@@ -93,6 +94,43 @@ fn explicit_mode_requires_a_known_family() {
         "failure_mode",
     ]);
     assert_eq!(arguments.family, Some(MutationFamily::FailureMode));
+}
+
+#[test]
+fn language_specific_dart_and_semantic_id_are_forwarded_literally() {
+    let arguments = mutate(&[
+        "failforge",
+        "mutate",
+        "--family",
+        "language_specific",
+        "--language",
+        "dart",
+        "--operator",
+        "NSM-001",
+    ]);
+    assert_eq!(arguments.family, Some(MutationFamily::LanguageSpecific));
+    assert_eq!(
+        arguments.engine_arguments(),
+        [
+            "--family",
+            "language_specific",
+            "--language",
+            "dart",
+            "--operator",
+            "NSM-001"
+        ]
+    );
+    assert!(
+        Cli::try_parse_from([
+            "failforge",
+            "mutate",
+            "--family",
+            "language_specific",
+            "--language",
+            "other"
+        ])
+        .is_err()
+    );
 }
 
 #[test]
