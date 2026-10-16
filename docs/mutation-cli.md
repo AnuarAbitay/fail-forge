@@ -36,6 +36,142 @@ are recorded in the manifest.
 a virtual environment. `failforge` and `failforge-adapter-campaign` must be in the
 same binary directory. A standalone copied `failforge` binary is insufficient.
 
+## Generate a profile
+
+`failforge profile generate` creates an explicit YAML profile for one existing
+Dart source file under `lib/`. By default it discovers mutations with the
+existing Dart adapter and statically validates them. An operator is written as
+`true` only when at least one candidate in that file is statically valid. An
+operator with no candidates, or only statically invalid candidates, is `false`.
+Generation does not execute author tests or run a mutation campaign.
+Run this example from a prepared target package:
+
+```sh
+failforge profile generate --file lib/src/calculator.dart --family classic \
+  --output profiles/calculator.yml
+```
+
+Default analysis requires the prepared package metadata, dependencies, SDK and
+adapter described above. `--dart-sdk PATH` or `--flutter-sdk PATH` selects an SDK;
+they are mutually exclusive. `--adapter-root PATH` selects a prepared adapter.
+Explicit SDK and adapter overrides are resolved from the invocation directory
+and saved as absolute YAML paths, so the suggested `mutate --config` command uses
+the same selections. Generation never installs dependencies or runs `pub get`.
+
+Use `--template` to write the catalogue defaults without source analysis or
+prepared dependencies:
+
+```sh
+failforge profile generate --template --file lib/src/calculator.dart \
+  --family classic --output profiles/calculator.yml
+```
+
+Template mode still checks the source/profile paths and writes explicit switches,
+but it does not determine which operators apply to the file. It needs Python
+and PyYAML, with no SDK. `--template` cannot be combined with SDK or adapter
+overrides.
+
+`--file`, at least one `--family`, and `--output` are required. Relative CLI paths
+are resolved from the invocation directory. The source must be a regular
+`.dart` file under that package's `lib/`; its nearest parent `pubspec.yaml`
+identifies the package. Files outside `lib/` are rejected before writing a
+profile because the mutation engine discovers library sources. Existing
+generated-file exclusions apply during analysis and the campaign. The
+generated YAML contains a literal, project-relative `rules.include` for that
+file, with no `version` or `project` field. Source paths containing glob syntax
+(`*`, `?`, `[`, `]`, `{`, `}`) or backslashes are rejected so the include cannot
+expand to other files. Spaces, Unicode and quotes are supported.
+Components inside the package use their actual filesystem names, including when macOS
+accepts a differently cased or Unicode-normalized spelling. This keeps the
+generated include consistent with the adapter's case-sensitive file matching.
+Ancestors above the package need only search permission; generation does not
+enumerate their contents.
+The output must be a `.yml` or `.yaml` file inside that same package, so
+the nearest parent `pubspec.yaml` also identifies the same project when the
+profile is used later. Here `--output` names the YAML file; it does not set the
+campaign's report directory or add a YAML `output` setting.
+
+Repeat `--family` to select multiple families. `--language dart` is required
+when `language_specific` is selected and is rejected otherwise:
+
+```sh
+failforge profile generate --file lib/src/calculator.dart \
+  --family classic --family language_specific --language dart \
+  --output profiles/calculator.yml --dry-run
+```
+
+Each selected family gets `enabled: true` and its complete known operator
+catalogue as explicit lower-case boolean switches. Omitted families are off.
+Without `--operator`, analysis considers the 31 default classical operators and
+all 19 Dart semantic operators in the selected families. The legacy
+`CONDITIONAL_NEGATION` stays off unless explicitly selected. For `failure_mode`,
+it considers `EXCEPTION_AT_ENTRY` and additionally `METHOD_CHANNEL_ERROR` when
+the prepared test framework is Flutter, identified by `flutter_test` in
+`.dart_tool/package_config.json`. A dependency on `flutter` alone does not
+establish that test framework. Only operators with a statically valid candidate
+are enabled in the resulting profile.
+
+Repeat `--operator` to restrict analysis to those IDs across the selected
+families. This whitelist does not force an inapplicable operator on. All other
+operators in their catalogues are written as `false`. Unknown IDs and IDs
+outside the selected families are rejected:
+
+```sh
+failforge profile generate --file lib/src/calculator.dart \
+  --family classic --family language_specific --language dart \
+  --operator RELATIONAL_BOUNDARY --operator SWM-001 \
+  --output profiles/calculator.yml
+```
+
+An explicitly selected family whose operators are all `false` remains visible
+in the YAML but creates no campaign, matching the normal profile rules.
+An explicit `METHOD_CHANNEL_ERROR` requires a Flutter package.
+If analysis finds no applicable operator in any selected family, generation
+reports that no profile was written and creates neither YAML nor output
+directories.
+
+Template mode writes the same complete catalogues but uses the catalogue
+defaults or explicit operator whitelist directly, without static validation.
+When prepared package metadata is absent, an explicit
+`flutter_test: {sdk: flutter}` dependency in either `dependencies` or
+`dev_dependencies` identifies the Flutter test framework for the template.
+Empty or null dependency sections are accepted.
+
+Analysis uses the existing family discovery limit of 10,000 candidates per
+family. Adapter failures, incomplete or truncated discovery, failed validation,
+changed inputs and incomplete cleanup stop generation without publishing YAML.
+Statically invalid candidates are ordinary analysis results; they cannot enable
+an operator without a separate valid candidate.
+
+Generated settings use one worker, `test: 30s`, `command: 120s`, and
+`max_mutants: 1000`. They remain editable before running the campaign.
+`--dry-run` performs the selected analysis and prints the YAML without publishing
+a profile or creating its output directories. Temporary analysis workspaces are
+cleaned afterward. Existing destinations are
+protected by default. `--force` permits replacing an existing regular `.yml` or
+`.yaml` file. Reserved package configuration names (`pubspec.yaml`,
+`pubspec_overrides.yaml`, `analysis_options.yaml`, `build.yaml`, `dart_test.yaml`,
+`l10n.yaml`) cannot be used as destinations, including case variants. Both source and output paths must
+stay outside `.git/`, `.dart_tool/`, `.failforge/`, `build/`, `target/` and
+`__pycache__/` directories, also ignoring case. Symlinks anywhere in the
+source or output path within the package, directories and special files are
+rejected. Publication binds the selected package and destination directory
+identities during preparation and checks them again around the atomic write.
+Observed directory moves, replacements and changes of the nearest package
+are errors. A failed write restores the previous profile and cleans its own
+unpublished temporary files. If the filesystem also refuses restoration, the
+recoverable `.failforge-profile-backup-*.tmp` copy is retained for recovery.
+
+Generation uses the existing installation layout and requires Python 3.9+ and
+PyYAML. Use `--python PROGRAM` or `--installation PATH` to select them as for
+`mutate`. Analysis preserves the source, package metadata, dependencies, SDK and
+adapter inputs and cleans its temporary workspaces. It does not execute author
+tests; template mode also skips discovery and static validation.
+After writing the file, the command prints its path and a suggested
+`failforge mutate --config ...` command including the selected Python
+interpreter and installation. Run that command separately after
+preparing the target and adapter as described above.
+
 ## Explicit CLI configuration
 
 ```sh

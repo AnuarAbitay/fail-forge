@@ -17,6 +17,24 @@ operators are off; `language_specific` requires an explicit language. Profiles
 have no `version` or `project` keys: the nearest parent `pubspec.yaml` identifies
 the target package. See the [single-file profile](examples/flutter_fixture/profiles/subject.yml).
 
+Generate a profile for one existing Dart file under its package's `lib/`:
+
+```sh
+failforge profile generate --file lib/src/calculator.dart --family classic \
+  --output profiles/calculator.yml
+failforge mutate --config profiles/calculator.yml
+```
+
+Generation uses the prepared project's SDK and Dart adapter to enable only
+operators with a statically valid mutation in the selected file. It needs Python,
+PyYAML and prepared dependencies; author tests are never run. Use `--template`
+for a catalogue template without an SDK, dependencies or source analysis.
+Repeat `--family` to combine families, add `--language dart` when selecting
+`language_specific`, and use `--dry-run` to preview the YAML. The
+required `--output` names a YAML file inside the same package; existing files
+require `--force`. See [profile generation](docs/mutation-cli.md#generate-a-profile)
+for selection and overwrite rules.
+
 The backend supports Linux and macOS. Windows is intentionally unsupported.
 FailForge is **not a sandbox**: the child retains the filesystem, network, and
 other access granted by its operating-system credentials. Stdin defaults to `null`. Library callers can transfer an input descriptor with

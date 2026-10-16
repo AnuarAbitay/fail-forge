@@ -6,6 +6,7 @@ mod args;
 mod diagnostics;
 mod display;
 mod mutate;
+mod profile;
 mod readiness;
 
 use std::io::Write;
@@ -19,7 +20,7 @@ use failforge_runner::{
 };
 use tokio::signal::unix::{SignalKind, signal};
 
-use args::{Cli, Commands};
+use args::{Cli, Commands, ProfileCommands};
 use diagnostics::Diagnostics;
 
 const DIAGNOSTIC_BUDGET: Duration = Duration::from_millis(100);
@@ -50,6 +51,11 @@ fn main() -> ExitCode {
     let arguments = match cli.command {
         Commands::Run(arguments) => arguments,
         Commands::Mutate(arguments) => return mutate::execute(*arguments, &invocation_cwd),
+        Commands::Profile(arguments) => match arguments.command {
+            ProfileCommands::Generate(arguments) => {
+                return profile::execute(*arguments, &invocation_cwd);
+            }
+        },
     };
     // Retain the optional inherited capability until the runtime and Runner
     // have finished cleanup. Child exec must not inherit either descriptor.

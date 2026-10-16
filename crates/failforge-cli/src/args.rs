@@ -23,6 +23,8 @@ pub(crate) enum Commands {
     Run(RunArgs),
     /// Run a mutation campaign from a config file or explicit project options.
     Mutate(Box<MutateArgs>),
+    /// Generate mutation profiles using static analysis or a catalogue template.
+    Profile(ProfileArgs),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -41,6 +43,114 @@ impl MutationFamily {
             Self::FailureMode => "failure_mode",
             Self::LanguageSpecific => "language_specific",
         }
+    }
+}
+
+#[derive(Args)]
+pub(crate) struct ProfileArgs {
+    #[command(subcommand)]
+    pub(crate) command: ProfileCommands,
+}
+
+#[derive(Subcommand)]
+pub(crate) enum ProfileCommands {
+    /// Generate a YAML mutation profile for one Dart source file.
+    Generate(Box<ProfileGenerateArgs>),
+}
+
+#[derive(Args)]
+pub(crate) struct ProfileGenerateArgs {
+    /// Dart source file, relative to the invocation directory.
+    #[arg(long, value_name = "PATH")]
+    file: PathBuf,
+    /// Enable a mutation family; repeat to include several.
+    #[arg(long, value_enum, required = true, action = clap::ArgAction::Append, requires_if("language_specific", "language"))]
+    family: Vec<MutationFamily>,
+    /// Required for language_specific; currently only Dart is supported.
+    #[arg(long, value_parser = ["dart"])]
+    language: Option<String>,
+    /// Restrict analysis or template selection to one operator ID; repeat as needed.
+    #[arg(long, value_name = "ID", action = clap::ArgAction::Append)]
+    operator: Vec<String>,
+    /// Destination YAML file within the source file's Dart package.
+    #[arg(long, value_name = "PATH")]
+    output: PathBuf,
+    /// Replace an existing profile file.
+    #[arg(long)]
+    force: bool,
+    /// Print the generated YAML without publishing a profile file.
+    #[arg(long)]
+    dry_run: bool,
+    /// Generate a catalogue template without analysis, an SDK or dependencies.
+    #[arg(long, conflicts_with_all = ["dart_sdk", "flutter_sdk", "adapter_root"])]
+    pub(crate) template: bool,
+    /// Dart SDK root for applicability analysis; conflicts with --flutter-sdk.
+    #[arg(long, value_name = "PATH", conflicts_with = "flutter_sdk")]
+    dart_sdk: Option<PathBuf>,
+    /// Flutter SDK root for applicability analysis using its bundled Dart SDK.
+    #[arg(long, value_name = "PATH")]
+    flutter_sdk: Option<PathBuf>,
+    /// Prepared Dart adapter directory for applicability analysis.
+    #[arg(long, value_name = "PATH")]
+    adapter_root: Option<PathBuf>,
+    /// Python interpreter program or path for the profile generator.
+    #[arg(long, value_name = "PROGRAM", default_value = "python3")]
+    pub(crate) python: OsString,
+    /// Installation root containing python/failforge_campaign/profile_generate.py.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) installation: Option<PathBuf>,
+}
+
+impl ProfileGenerateArgs {
+    pub(crate) fn has_valid_language_selection(&self) -> bool {
+        self.family.contains(&MutationFamily::LanguageSpecific) == self.language.is_some()
+    }
+
+    pub(crate) fn engine_arguments(&self) -> Vec<OsString> {
+        let mut arguments = Vec::new();
+        let mut pair = |name: &str, value: OsString| {
+            // Python's argparse otherwise treats a leading '-' as a new option.
+            // OsString joining preserves native path bytes without Unicode loss.
+            if value.as_os_str().as_bytes().starts_with(b"-") {
+                let mut joined = OsString::from(name);
+                joined.push("=");
+                joined.push(value);
+                arguments.push(joined);
+            } else {
+                arguments.push(name.into());
+                arguments.push(value);
+            }
+        };
+        pair("--file", self.file.as_os_str().to_owned());
+        for family in &self.family {
+            pair("--family", family.as_str().into());
+        }
+        if let Some(language) = &self.language {
+            pair("--language", language.into());
+        }
+        for operator in &self.operator {
+            pair("--operator", operator.into());
+        }
+        pair("--output", self.output.as_os_str().to_owned());
+        for (name, path) in [
+            ("--dart-sdk", self.dart_sdk.as_ref()),
+            ("--flutter-sdk", self.flutter_sdk.as_ref()),
+            ("--adapter-root", self.adapter_root.as_ref()),
+        ] {
+            if let Some(path) = path {
+                pair(name, path.as_os_str().to_owned());
+            }
+        }
+        if self.force {
+            arguments.push("--force".into());
+        }
+        if self.dry_run {
+            arguments.push("--dry-run".into());
+        }
+        if self.template {
+            arguments.push("--template".into());
+        }
+        arguments
     }
 }
 
@@ -306,3 +416,7 @@ mod tests;
 #[cfg(test)]
 #[path = "mutate_args_tests.rs"]
 mod mutate_tests;
+
+#[cfg(test)]
+#[path = "profile_args_tests.rs"]
+mod profile_tests;

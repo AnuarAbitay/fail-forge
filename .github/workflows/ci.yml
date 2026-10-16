@@ -56,6 +56,7 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/campaign-python"
           "$RUNNER_TEMP/campaign-python/bin/python" -m pip install -r python/requirements.txt
           PYTHONPATH=python:scripts "$RUNNER_TEMP/campaign-python/bin/python" -B -m unittest discover -s python/tests -v
+          PATH="$RUNNER_TEMP/campaign-python/bin:$PATH" cargo test -p failforge-cli --test profile_generate --locked -- --test-threads=1
 
   msrv:
     name: Rust 1.85.1 / ${{ matrix.os }}
@@ -172,4 +173,5 @@ jobs:
           "$RUNNER_TEMP/mutate-python/bin/python" -m pip install -r python/requirements.txt
           "$RUNNER_TEMP/mutate-python/bin/python" scripts/mutate_cli_e2e.py --output "$RUNNER_TEMP/mutate-cli-e2e" --flutter-sdk "$RUNNER_TEMP/flutter"
           "$RUNNER_TEMP/mutate-python/bin/python" -B scripts/mutation_profile_e2e.py --output "$RUNNER_TEMP/mutation-profile-e2e" --flutter-sdk "$RUNNER_TEMP/flutter"
+          "$RUNNER_TEMP/mutate-python/bin/python" -B scripts/profile_applicability_e2e.py --output "$RUNNER_TEMP/profile-applicability-e2e" --dart-sdk "$RUNNER_TEMP/flutter/bin/cache/dart-sdk"
           "$RUNNER_TEMP/mutate-python/bin/python" scripts/workspace_recovery_e2e.py --output "$RUNNER_TEMP/workspace-recovery-e2e"
