@@ -207,14 +207,29 @@ struct PreambleEdit {
     replacement: String,
 }
 
-fn prepare_preamble(text: &str) -> Result<Cow<'_, str>, ConfigError> {
-    prepare_preamble_with(text, |input| {
+/// Normalize a YAML 1.x preamble for the shared event parser.
+///
+/// This preserves the existing loader's handling of unknown directives and
+/// minor versions. Callers must still parse and validate the document body.
+pub fn prepare_preamble(text: &str) -> Result<Cow<'_, str>, ConfigError> {
+    prepare_preamble_with(text, false, |input| {
+        BufReader::with_capacity(PREAMBLE_BUFFER_BYTES, input)
+    })
+}
+
+/// Prepare an author-owned YAML preamble, retaining tag-handle directives.
+///
+/// The caller must validate resolved tags and document values. Mutation-profile
+/// parsing deliberately uses [`prepare_preamble`] and keeps its stricter policy.
+pub fn prepare_author_preamble(text: &str) -> Result<Cow<'_, str>, ConfigError> {
+    prepare_preamble_with(text, true, |input| {
         BufReader::with_capacity(PREAMBLE_BUFFER_BYTES, input)
     })
 }
 
 fn prepare_preamble_with<'a, R: BufRead>(
     text: &'a str,
+    allow_tag_directives: bool,
     mut reader: impl FnMut(&'a [u8]) -> R,
 ) -> Result<Cow<'a, str>, ConfigError> {
     // libyaml rejects unknown directives and versions other than 1.1/1.2;
@@ -255,6 +270,7 @@ fn prepare_preamble_with<'a, R: BufRead>(
                         });
                     }
                 }
+                TokenData::TagDirective { .. } if allow_tag_directives => directives = true,
                 TokenData::TagDirective { .. } => return Err(ConfigError::new(TAG_ERROR)),
                 TokenData::DocumentStart => break,
                 _ if directives => return Err(invalid_yaml()),
@@ -449,6 +465,30 @@ mod tests {
                 "output": "literal %TAG text\n"
             })
         );
+    }
+
+    #[test]
+    fn author_preamble_retains_tag_handles_without_weakening_profile_policy() {
+        let input = "%TAG ! tag:yaml.org,2002:\n---\nvalue: !str true\n";
+        assert_eq!(prepare_author_preamble(input).unwrap(), input);
+        assert!(
+            prepare_preamble(input)
+                .unwrap_err()
+                .to_string()
+                .contains(TAG_ERROR)
+        );
+        assert!(
+            parse_yaml(input)
+                .unwrap_err()
+                .to_string()
+                .contains(TAG_ERROR)
+        );
+        let input =
+            "%unknown ignored\n%TAG ! tag:yaml.org,2002:\n%YAML 1.3\n---\nvalue: !str true\n";
+        let prepared = prepare_author_preamble(input).unwrap();
+        assert!(prepared.contains("%TAG ! tag:yaml.org,2002:"));
+        assert!(prepared.contains("%YAML 1.1"));
+        assert!(prepared.starts_with("#unknown ignored"));
     }
 
     #[test]
@@ -718,7 +758,7 @@ mod tests {
         let source = format!("{}---\na: true\n", "%UNKNOWN ignored\n".repeat(count));
         let bytes = Rc::new(Cell::new(0));
         let mut suffix_lengths = Vec::new();
-        let prepared = prepare_preamble_with(&source, |input| {
+        let prepared = prepare_preamble_with(&source, false, |input| {
             suffix_lengths.push(input.len());
             BufReader::with_capacity(
                 PREAMBLE_BUFFER_BYTES,

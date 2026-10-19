@@ -34,6 +34,11 @@ pub enum CaptureIssue {
 #[derive(Debug, Clone, Default)]
 pub struct CaptureSummary {
     pub bytes_read: u64,
+    /// SHA-256 of bytes observed directly from the child's pipe, including any
+    /// prefix retained after a capture failure. This is independent of the file
+    /// and bounded tail. `None` means no native capture snapshot is available;
+    /// completeness still requires checking cleanup, EOF and capture issues.
+    pub sha256: Option<[u8; 32]>,
     pub tail: Vec<u8>,
     pub tail_truncated: bool,
     pub file_path: Option<PathBuf>,

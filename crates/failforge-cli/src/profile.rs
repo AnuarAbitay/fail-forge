@@ -1,123 +1,152 @@
-//! Replace the CLI with the profile generator without starting execution owners.
+//! Native profile generation; this CLI owns cancellation until cleanup finishes.
 use std::io::Write;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
+
+use failforge_config::Context;
+use failforge_profile::ProfileError;
+use failforge_profile::analysis::{Cancellation, analyze_profile};
+use failforge_profile::output::write_profile;
+use failforge_profile::preparation::{apply_applicability, prepare_profile};
+use tokio::signal::unix::{SignalKind, signal};
 
 use crate::args::ProfileGenerateArgs;
 
-#[derive(Debug, PartialEq, Eq)]
-enum LaunchError {
-    LanguageSelection,
-    InvocationDirectory,
-    Installation,
-    Generator,
-    Runner,
-}
-
-impl LaunchError {
-    fn diagnostic(&self) -> &'static str {
-        match self {
-            Self::LanguageSelection => {
-                "failforge: --language dart is required exactly when --family language_specific is selected"
-            }
-            Self::InvocationDirectory => "failforge: invocation directory must be absolute",
-            Self::Installation => {
-                "failforge: profile installation is unavailable; use --installation PATH"
-            }
-            Self::Generator => "failforge: profile generator is missing from the installation",
-            Self::Runner => {
-                "failforge: cannot locate the native Runner executable for profile analysis"
-            }
-        }
-    }
-}
-
-fn prepare(
+fn context(
     arguments: &ProfileGenerateArgs,
     invocation_cwd: &Path,
-    default_installation: &Path,
-    runner: Option<&Path>,
-) -> Result<Command, LaunchError> {
+) -> Result<Context, ProfileError> {
     if !arguments.has_valid_language_selection() {
-        return Err(LaunchError::LanguageSelection);
+        return Err(ProfileError::Config(
+            "--language dart is required exactly when --family language_specific is selected"
+                .into(),
+        ));
     }
     if !invocation_cwd.is_absolute() {
-        return Err(LaunchError::InvocationDirectory);
+        return Err(ProfileError::Analysis(
+            "invocation directory must be absolute".into(),
+        ));
     }
-    let requested = arguments
-        .installation
-        .as_deref()
-        .unwrap_or(default_installation);
-    let installation = invocation_cwd
-        .join(requested)
-        .canonicalize()
-        .map_err(|_| LaunchError::Installation)?;
-    if !installation.is_dir() {
-        return Err(LaunchError::Installation);
+    let default = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let requested = arguments.installation.as_deref().unwrap_or(&default);
+    let context = Context::new(invocation_cwd, requested)?;
+    if !context.installation.is_dir() {
+        return Err(ProfileError::Analysis(
+            "profile installation is unavailable; use --installation PATH".into(),
+        ));
     }
-    let entry = installation.join("python/failforge_campaign/profile_generate.py");
-    if !entry.is_file() {
-        return Err(LaunchError::Generator);
+    Ok(context)
+}
+
+fn shell_quote(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"_@%+=:,./-".contains(&byte))
+    {
+        value.to_owned()
+    } else {
+        format!("'{}'", value.replace('\'', "'\"'\"'"))
     }
-    let mut command = Command::new(&arguments.python);
-    command
-        .arg("-E")
-        .arg(entry)
-        .args(arguments.engine_arguments())
-        .arg("--installation")
-        .arg(installation)
-        .current_dir(invocation_cwd);
-    if !arguments.template {
-        let runner = runner
-            .filter(|path| path.is_absolute())
-            .ok_or(LaunchError::Runner)?;
-        let runner = runner.canonicalize().map_err(|_| LaunchError::Runner)?;
-        if !runner.is_file() {
-            return Err(LaunchError::Runner);
+}
+
+async fn generate(arguments: &ProfileGenerateArgs, context: &Context) -> Result<(), ProfileError> {
+    let mut interrupt = signal(SignalKind::interrupt())?;
+    let mut terminate = signal(SignalKind::terminate())?;
+    let cancellation = Cancellation::default();
+    let signal_cancellation = cancellation.clone();
+    let listener = tokio::spawn(async move {
+        let signum = tokio::select! {
+            _ = interrupt.recv() => libc::SIGINT,
+            _ = terminate.recv() => libc::SIGTERM,
+        };
+        signal_cancellation.request(signum);
+    });
+    let result = async {
+        let options = arguments.generate_options();
+        let mut draft = prepare_profile(&options, context)?;
+        cancellation.check()?;
+        let evidence = if arguments.template {
+            None
+        } else {
+            writeln!(
+                std::io::stderr(),
+                "failforge: analysing applicable mutation operators"
+            )?;
+            let executable = std::env::current_exe()?;
+            let helper = executable
+                .parent()
+                .ok_or_else(|| {
+                    ProfileError::Analysis("cannot locate the native analysis helper".into())
+                })?
+                .join("failforge-adapter-campaign");
+            let result = analyze_profile(&draft, context, &helper, &cancellation).await?;
+            apply_applicability(&mut draft, &result, context)?;
+            for row in &result.families {
+                writeln!(
+                    std::io::stderr(),
+                    "failforge: {}: {} applicable operators ({} statically valid mutants)",
+                    row.family,
+                    row.active_operators.len(),
+                    row.statically_valid_candidates
+                )?;
+            }
+            Some(result)
+        };
+        if let Some(evidence) = &evidence {
+            evidence.verify_unchanged_with_cancellation(&cancellation)?;
         }
-        command.arg("--runner").arg(runner);
+        cancellation.check()?;
+        if arguments.dry_run {
+            std::io::stdout().write_all(draft.text.as_bytes())?;
+        } else {
+            write_profile(
+                &draft.project,
+                &draft.output,
+                &draft.text,
+                options.force,
+                Some(&draft.binding),
+            )?;
+            let output = draft
+                .output
+                .to_str()
+                .ok_or_else(|| ProfileError::Config("profile output must be Unicode".into()))?;
+            let installation = context
+                .installation
+                .to_str()
+                .ok_or_else(|| ProfileError::Config("installation must be Unicode".into()))?;
+            writeln!(std::io::stdout(), "Profile: {output}")?;
+            writeln!(
+                std::io::stdout(),
+                "Run: failforge mutate --config {} --installation {}",
+                shell_quote(output),
+                shell_quote(installation)
+            )?;
+        }
+        Ok(())
     }
-    Ok(command)
+    .await;
+    listener.abort();
+    let _ = listener.await;
+    result
 }
 
 pub(crate) fn execute(arguments: ProfileGenerateArgs, invocation_cwd: &Path) -> ExitCode {
-    let default_installation = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let runner = if arguments.template {
-        None
-    } else {
-        match std::env::current_exe() {
-            Ok(path) => Some(path),
-            Err(_) => {
-                let _ = writeln!(std::io::stderr(), "{}", LaunchError::Runner.diagnostic());
-                return ExitCode::from(125);
-            }
-        }
-    };
-    let mut command = match prepare(
-        &arguments,
-        invocation_cwd,
-        &default_installation,
-        runner.as_deref(),
-    ) {
-        Ok(command) => command,
+    let result = (|| {
+        let context = context(&arguments, invocation_cwd)?;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()?;
+        runtime.block_on(generate(&arguments, &context))
+    })();
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            let _ = writeln!(std::io::stderr(), "{}", error.diagnostic());
-            return ExitCode::from(if error == LaunchError::LanguageSelection {
-                2
-            } else {
-                125
-            });
+            let _ = writeln!(std::io::stderr(), "failforge: {error}");
+            ExitCode::from(error.exit_code())
         }
-    };
-    // Native dispatch starts neither a Runner nor a Tokio runtime. Python owns
-    // analysis execution; exec preserves its status and signal ownership.
-    let _error = command.exec();
-    let _ = writeln!(
-        std::io::stderr(),
-        "failforge: cannot execute the Python profile generator; check --python PROGRAM"
-    );
-    ExitCode::from(125)
+    }
 }
 
 #[cfg(test)]

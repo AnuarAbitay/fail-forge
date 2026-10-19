@@ -4,6 +4,7 @@ members = [
     "crates/failforge-runner",
     "crates/failforge-dart",
     "crates/failforge-config",
+    "crates/failforge-profile",
 ]
 resolver = "3"
 

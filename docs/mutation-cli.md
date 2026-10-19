@@ -10,9 +10,18 @@ its Python configuration defaults on this path. Each native test command
 is owned by the existing Rust Runner; the controller does not implement another
 test timeout or kill that cleanup owner.
 
+Primary Dart/Flutter reporter parsing, author-test catalogue comparison and
+outcome classification run in Rust. This includes conservative setup-suppression
+analysis and independent ordinary-failure witnesses.
+The campaign accepts the native verdict only after verifying its private handoff
+against both raw captures. A private input descriptor transfers the opaque
+baseline catalogue and expected test selection to each native owner before it
+starts the test process. Baseline/control sequencing, source-integrity checks and
+initialization confirmation remain part of the campaign controller.
+
 Configuration loading itself needs neither Python nor an SDK and never starts
-author tests. Python is still required for campaign execution, and profile
-generation still uses its existing Python implementation and PyYAML. The native
+author tests. Python is still required for campaign execution. Profile generation
+runs through the native `failforge-profile` crate without Python or PyYAML. The native
 configuration library also exposes the direct settings and profile APIs for
 later migration stages; this step does not migrate the execution engine.
 
@@ -77,8 +86,8 @@ failforge profile generate --template --file lib/src/calculator.dart \
 ```
 
 Template mode still checks the source/profile paths and writes explicit switches,
-but it does not determine which operators apply to the file. It needs Python
-and PyYAML, with no SDK. `--template` cannot be combined with SDK or adapter
+but it does not determine which operators apply to the file. It needs neither
+Python nor an SDK. `--template` cannot be combined with SDK or adapter
 overrides.
 
 `--file`, at least one `--family`, and `--output` are required. Relative CLI paths
@@ -172,14 +181,14 @@ are errors. A failed write restores the previous profile and cleans its own
 unpublished temporary files. If the filesystem also refuses restoration, the
 recoverable `.failforge-profile-backup-*.tmp` copy is retained for recovery.
 
-Generation uses the existing installation layout and requires Python 3.9+ and
-PyYAML. Use `--python PROGRAM` or `--installation PATH` to select them as for
-`mutate`. Analysis preserves the source, package metadata, dependencies, SDK and
+Generation uses the existing installation layout selected by `--installation PATH`.
+The legacy `--python PROGRAM` option is accepted for compatibility and has no
+effect on generation. Analysis preserves the source, package metadata, dependencies, SDK and
 adapter inputs and cleans its temporary workspaces. It does not execute author
 tests; template mode also skips discovery and static validation.
 After writing the file, the command prints its path and a suggested
-`failforge mutate --config ...` command including the selected Python
-interpreter and installation. Run that command separately after
+`failforge mutate --config ...` command including the selected installation.
+The campaign still requires its Python controller. Run that command separately after
 preparing the target and adapter as described above.
 
 ## Explicit CLI configuration

@@ -340,3 +340,56 @@ metadata intact, then uses a bounded empty-directory protocol so interrupted
 recovery itself can be retried. Named profiles, persistent resume and Pub
 workspace support remain outside this implementation. See the
 [mutation CLI](mutation-cli.md).
+
+`failforge-profile` handles file-scoped profile generation in Rust. It uses the
+same native configuration rules and calls the Dart adapter through the separate
+Rust discovery owner. A cancellation or controller crash closes the private
+control channel so that owner drains its adapter before releasing the workspace
+lease. Generation verifies complete static evidence and unchanged inputs before
+publishing through directory-bound atomic filesystem operations. The campaign
+execution controller remains in Python during the incremental migration.
+
+Primary Dart/Flutter test classification lives in `failforge-dart`. The native
+test owner parses the complete JSON reporter stream after Runner shutdown and
+uses its typed process result, so diagnostics printed by a child cannot supply
+cleanup or termination evidence. The remaining Python campaign controller passes
+a private anonymous regular-file descriptor to that owner. Both descriptor copies
+close on child exec, and the private environment variable is removed from the
+test command. The committed envelope binds the reporter mode, actual owner exit,
+and byte lengths and SHA-256 hashes of both raw captures. Missing, uncommitted or
+inconsistent evidence fails closed before author-failure attribution.
+Runner computes each digest from bytes read from the child's pipe, before disk
+writing. Native classification and publication compare the stored capture to
+that digest, so a same-length file replacement cannot manufacture a verdict.
+
+Author-test identities and catalogue comparison also live in `failforge-dart`.
+The native owner emits a bounded catalogue snapshot with normalized paths,
+group ancestry, source locations, multiplicities and diagnostics. The controller
+retains the passing baseline snapshot as opaque data. On subsequent attempts it
+passes that snapshot and the expected selection through a separate private,
+anonymous context descriptor, read before child startup and closed on child exec.
+The context is limited to 64 MiB and rejects malformed or duplicate JSON fields.
+Baseline comparison therefore does not depend on reopening an already cleaned
+baseline working copy. Retained reporter data, observed identities and the
+structural catalogue view each have a separate 32 MiB accounting budget.
+These bounds cover estimated owned data, not total process RSS. Reporter and
+identity limits prevent `KILLED`/`SURVIVED` attribution; exhausting only the
+structural-view budget disables setup-suppression explanations while preserving
+exact-selection checks.
+
+Native setup-suppression analysis explains missing tests without claiming their
+identities were observed. An incomplete catalogue remains unclassified unless a
+separate, unique ordinary test passed in the baseline and now has a source-bound
+failure outside the suppressed group. Changed source inputs still override any
+native classification with an infrastructure error in the controller.
+
+The controller still owns baseline/control sequencing, initialization replays,
+working copies, scheduling and final reports. Legacy diagnostic scripts retain
+their Python reporter implementation during migration; product test attempts do
+not fall back to it. Native parsing rejects duplicate keys, non-finite numbers,
+invalid Unicode and excessive nesting. Integer tokens must fit signed or
+unsigned 64-bit storage; larger integers are rejected before they can be rounded
+into indistinguishable floating-point metadata. Captures are limited to 256 MiB,
+events to 8 MiB and 100,000 framed lines, and the private evidence envelope to
+64 MiB. Exceeding these parsing or transport limits prevents `KILLED`/`SURVIVED`
+attribution.

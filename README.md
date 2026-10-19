@@ -26,8 +26,8 @@ failforge mutate --config profiles/calculator.yml
 ```
 
 Generation uses the prepared project's SDK and Dart adapter to enable only
-operators with a statically valid mutation in the selected file. It needs Python,
-PyYAML and prepared dependencies; author tests are never run. Use `--template`
+operators with a statically valid mutation in the selected file. Generation runs
+in Rust and needs prepared dependencies; author tests are never run. Use `--template`
 for a catalogue template without an SDK, dependencies or source analysis.
 Repeat `--family` to combine families, add `--language dart` when selecting
 `language_specific`, and use `--dry-run` to preview the YAML. The

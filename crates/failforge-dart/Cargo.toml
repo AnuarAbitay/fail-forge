@@ -8,10 +8,12 @@ rust-version.workspace = true
 failforge-runner = { path = "../failforge-runner" }
 tokio.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+# Catalogue identity must preserve distinct finite float metadata values.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 sha2.workspace = true
 thiserror.workspace = true
 libc.workspace = true
+regex = { version = "=1.13.1", default-features = false, features = ["std", "perf", "unicode"] }
 
 [[bin]]
 name = "failforge-adapter-fixture"

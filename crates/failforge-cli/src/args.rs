@@ -80,7 +80,7 @@ pub(crate) struct ProfileGenerateArgs {
     force: bool,
     /// Print the generated YAML without publishing a profile file.
     #[arg(long)]
-    dry_run: bool,
+    pub(crate) dry_run: bool,
     /// Generate a catalogue template without analysis, an SDK or dependencies.
     #[arg(long, conflicts_with_all = ["dart_sdk", "flutter_sdk", "adapter_root"])]
     pub(crate) template: bool,
@@ -93,10 +93,10 @@ pub(crate) struct ProfileGenerateArgs {
     /// Prepared Dart adapter directory for applicability analysis.
     #[arg(long, value_name = "PATH")]
     adapter_root: Option<PathBuf>,
-    /// Python interpreter program or path for the profile generator.
-    #[arg(long, value_name = "PROGRAM", default_value = "python3")]
-    pub(crate) python: OsString,
-    /// Installation root containing python/failforge_campaign/profile_generate.py.
+    // Accepted for compatibility with existing launch scripts. Generation is native.
+    #[arg(long = "python", value_name = "PROGRAM", hide = true)]
+    _python: Option<OsString>,
+    /// Installation root containing the prepared Dart adapter and toolchain.
     #[arg(long, value_name = "PATH")]
     pub(crate) installation: Option<PathBuf>,
 }
@@ -106,51 +106,22 @@ impl ProfileGenerateArgs {
         self.family.contains(&MutationFamily::LanguageSpecific) == self.language.is_some()
     }
 
-    pub(crate) fn engine_arguments(&self) -> Vec<OsString> {
-        let mut arguments = Vec::new();
-        let mut pair = |name: &str, value: OsString| {
-            // Python's argparse otherwise treats a leading '-' as a new option.
-            // OsString joining preserves native path bytes without Unicode loss.
-            if value.as_os_str().as_bytes().starts_with(b"-") {
-                let mut joined = OsString::from(name);
-                joined.push("=");
-                joined.push(value);
-                arguments.push(joined);
-            } else {
-                arguments.push(name.into());
-                arguments.push(value);
-            }
-        };
-        pair("--file", self.file.as_os_str().to_owned());
-        for family in &self.family {
-            pair("--family", family.as_str().into());
+    pub(crate) fn generate_options(&self) -> failforge_profile::GenerateOptions {
+        failforge_profile::GenerateOptions {
+            source: self.file.clone(),
+            output: self.output.clone(),
+            families: self
+                .family
+                .iter()
+                .map(|family| family.as_str().to_owned())
+                .collect(),
+            language: self.language.clone(),
+            operators: self.operator.clone(),
+            force: self.force,
+            dart_sdk: self.dart_sdk.clone(),
+            flutter_sdk: self.flutter_sdk.clone(),
+            adapter_root: self.adapter_root.clone(),
         }
-        if let Some(language) = &self.language {
-            pair("--language", language.into());
-        }
-        for operator in &self.operator {
-            pair("--operator", operator.into());
-        }
-        pair("--output", self.output.as_os_str().to_owned());
-        for (name, path) in [
-            ("--dart-sdk", self.dart_sdk.as_ref()),
-            ("--flutter-sdk", self.flutter_sdk.as_ref()),
-            ("--adapter-root", self.adapter_root.as_ref()),
-        ] {
-            if let Some(path) = path {
-                pair(name, path.as_os_str().to_owned());
-            }
-        }
-        if self.force {
-            arguments.push("--force".into());
-        }
-        if self.dry_run {
-            arguments.push("--dry-run".into());
-        }
-        if self.template {
-            arguments.push("--template".into());
-        }
-        arguments
     }
 }
 
@@ -344,6 +315,9 @@ pub(crate) struct RunArgs {
     /// Save raw output in a directory relative to this invocation.
     #[arg(long, value_name = "PATH")]
     capture_dir: Option<PathBuf>,
+    /// Internal reporter selection; requires a private native evidence channel.
+    #[arg(long, value_enum, hide = true, requires = "capture_dir")]
+    pub(crate) test_reporter: Option<TestReporter>,
     /// Override a child environment variable; the last assignment wins.
     #[arg(long, value_name = "KEY=VALUE")]
     env: Vec<OsString>,
@@ -358,6 +332,28 @@ pub(crate) struct RunArgs {
     grace_period: Duration,
     #[arg(last = true, required = true, num_args = 1.., value_name = "PROGRAM [ARGS...]")]
     command: Vec<OsString>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub(crate) enum TestReporter {
+    Dart,
+    Flutter,
+}
+
+impl TestReporter {
+    pub(crate) fn mode(self) -> failforge_dart::ReporterMode {
+        match self {
+            Self::Dart => failforge_dart::ReporterMode::Dart,
+            Self::Flutter => failforge_dart::ReporterMode::Flutter,
+        }
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Dart => "dart",
+            Self::Flutter => "flutter",
+        }
+    }
 }
 
 impl RunArgs {

@@ -56,7 +56,6 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/campaign-python"
           "$RUNNER_TEMP/campaign-python/bin/python" -m pip install -r python/requirements.txt
           PYTHONPATH=python:scripts "$RUNNER_TEMP/campaign-python/bin/python" -B -m unittest discover -s python/tests -v
-          PATH="$RUNNER_TEMP/campaign-python/bin:$PATH" cargo test -p failforge-cli --test profile_generate --locked -- --test-threads=1
 
   msrv:
     name: Rust 1.85.1 / ${{ matrix.os }}

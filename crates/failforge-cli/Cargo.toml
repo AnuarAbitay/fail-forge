@@ -7,6 +7,9 @@ rust-version.workspace = true
 [dependencies]
 failforge-runner = { path = "../failforge-runner" }
 failforge-config = { path = "../failforge-config" }
+failforge-profile = { path = "../failforge-profile" }
+failforge-dart = { path = "../failforge-dart" }
+sha2.workspace = true
 serde_json.workspace = true
 clap.workspace = true
 tokio.workspace = true

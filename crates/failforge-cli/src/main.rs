@@ -8,6 +8,8 @@ mod display;
 mod mutate;
 mod profile;
 mod readiness;
+mod test_context;
+mod test_evidence;
 
 use std::io::Write;
 use std::os::unix::process::ExitStatusExt;
@@ -79,6 +81,16 @@ fn main() -> ExitCode {
             return ExitCode::from(125);
         }
     };
+    let evidence = match test_evidence::EvidenceHandoff::from_env(arguments.test_reporter) {
+        Ok(evidence) => evidence,
+        Err(_) => {
+            let _ = writeln!(
+                std::io::stderr(),
+                "failforge: invalid native evidence capability"
+            );
+            return ExitCode::from(125);
+        }
+    };
     let mut spec = match arguments.into_spec(&invocation_cwd) {
         Ok(spec) => spec,
         Err(error) => {
@@ -91,6 +103,9 @@ fn main() -> ExitCode {
     }
     if let Some(readiness) = &readiness {
         readiness.protect_child(&mut spec);
+    }
+    if let Some(evidence) = &evidence {
+        evidence.protect_child(&mut spec);
     }
     let diagnostics = match Diagnostics::new() {
         Ok(diagnostics) => diagnostics,
@@ -121,7 +136,7 @@ fn main() -> ExitCode {
             return ExitCode::from(125);
         }
     };
-    ExitCode::from(runtime.block_on(run(spec, &diagnostics, readiness)))
+    ExitCode::from(runtime.block_on(run(spec, &diagnostics, readiness, evidence)))
 }
 
 fn parse_error_diagnostic(error: &clap::Error) -> Option<String> {
@@ -148,7 +163,9 @@ async fn run(
     spec: failforge_runner::CommandSpec,
     diagnostics: &Diagnostics,
     readiness: Option<readiness::Readiness>,
+    evidence: Option<test_evidence::EvidenceHandoff>,
 ) -> u8 {
+    let cwd = spec.cwd.clone();
     // Install both listeners before spawning: no child is owned if installation
     // fails, and the first signal cannot arrive between spawn and subscription.
     let (mut interrupt, mut terminate) = match (
@@ -223,10 +240,11 @@ async fn run(
     };
     // Never terminate the runtime while the runner still owns cleanup work.
     let shutdown = runner.shutdown().await;
-    let mut code = match outcome {
+    let native_ok = outcome.is_ok() && shutdown.is_ok() && !display_failed;
+    let mut code = match &outcome {
         Ok(result) => {
-            diagnostics.report(&summary(&result), DIAGNOSTIC_BUDGET);
-            result_exit_code(&result)
+            diagnostics.report(&summary(result), DIAGNOSTIC_BUDGET);
+            result_exit_code(result)
         }
         Err(error) => {
             diagnostics.report(&format!("failforge: {error}\n"), DIAGNOSTIC_BUDGET);
@@ -242,6 +260,19 @@ async fn run(
     }
     if display_failed {
         code = 125;
+    }
+    if let Some(evidence) = evidence {
+        let result = match &outcome {
+            Ok(result) => Some(result.as_ref()),
+            Err(error) => error.partial_result(),
+        };
+        if result.is_none_or(|result| evidence.publish(result, code, native_ok, &cwd).is_err()) {
+            diagnostics.report(
+                "failforge: cannot publish native test evidence\n",
+                DIAGNOSTIC_BUDGET,
+            );
+            code = 125;
+        }
     }
     code
 }

@@ -11,6 +11,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
+use sha2::{Digest, Sha256};
 use tokio::io::Interest;
 use tokio::io::unix::AsyncFd;
 use tokio::sync::Notify;
@@ -278,10 +279,14 @@ impl StreamQueue {
 struct CaptureState {
     summary: CaptureSummary,
     tail: TailBuffer,
+    sha256: Sha256,
 }
 
 impl CaptureState {
     fn record(&mut self, bytes: &[u8]) {
+        // Hash the bytes read from the pipe before any file queue or display
+        // sink can drop, truncate, or replace them.
+        self.sha256.update(bytes);
         match self.summary.bytes_read.checked_add(bytes.len() as u64) {
             Some(total) => self.summary.bytes_read = total,
             None => {
@@ -302,6 +307,7 @@ impl CaptureState {
         let mut summary = self.summary.clone();
         summary.tail = self.tail.snapshot();
         summary.tail_truncated = self.tail.truncated;
+        summary.sha256 = Some(self.sha256.clone().finalize().into());
         summary
     }
 }
@@ -544,6 +550,7 @@ impl OutputSession {
                     ..CaptureSummary::default()
                 },
                 tail: TailBuffer::new(policy.tail_bytes_per_stream),
+                sha256: Sha256::new(),
             }))
         });
         let mut prepared = [None, None];
@@ -983,6 +990,7 @@ mod tests {
         Arc::new(Mutex::new(CaptureState {
             summary: CaptureSummary::default(),
             tail: TailBuffer::new(limit),
+            sha256: Sha256::new(),
         }))
     }
 
@@ -1059,6 +1067,7 @@ mod tests {
         let mut state = CaptureState {
             summary: CaptureSummary::default(),
             tail: TailBuffer::new(3),
+            sha256: Sha256::new(),
         };
         state.record(&[0, 255, 128]);
         state.record(b"xy");
@@ -1069,6 +1078,71 @@ mod tests {
         assert_eq!(summary.tail, [128, b'x', b'y']);
         assert!(summary.tail_truncated);
         assert_eq!(summary.issue, Some(CaptureIssue::FileQuotaExceeded));
+        assert_eq!(
+            summary.sha256,
+            Some(Sha256::digest([0, 255, 128, b'x', b'y']).into())
+        );
+    }
+
+    #[test]
+    fn pipe_digest_matches_known_vectors_independent_of_read_partition_and_tail() {
+        let binary: Vec<u8> = (0..=255).collect();
+        for (bytes, expected) in [
+            (
+                b"".as_slice(),
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            ),
+            (
+                b"abc",
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            ),
+            (
+                b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+                "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
+            ),
+            (
+                binary.as_slice(),
+                "40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880",
+            ),
+        ] {
+            for read_size in [1, 3, 64, 1024] {
+                let capture = state(0);
+                let mut capture = lock(&capture);
+                for chunk in bytes.chunks(read_size) {
+                    capture.record(chunk);
+                }
+                let snapshot = capture.snapshot();
+                let hex: String = snapshot
+                    .sha256
+                    .unwrap()
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect();
+                assert_eq!(hex, expected, "read partition {read_size}");
+                assert_eq!(snapshot.bytes_read, bytes.len() as u64);
+                assert!(snapshot.tail.is_empty());
+            }
+        }
+        // Default caller-provided metadata is distinguishable from an actual
+        // native snapshot of an empty pipe.
+        assert_eq!(CaptureSummary::default().sha256, None);
+    }
+
+    #[test]
+    fn pipe_digest_snapshot_is_immutable_and_records_failed_capture_prefixes() {
+        let capture = state(1);
+        let mut capture = lock(&capture);
+        capture.record(b"abc");
+        let first = capture.snapshot();
+        capture.record(b"def");
+        capture.issue(CaptureIssue::DrainExpired);
+        let partial = capture.snapshot();
+        assert_eq!(first.sha256, Some(Sha256::digest(b"abc").into()));
+        assert_eq!(first.bytes_read, 3);
+        assert_eq!(partial.sha256, Some(Sha256::digest(b"abcdef").into()));
+        assert_eq!(partial.bytes_read, 6);
+        assert!(!partial.eof);
+        assert_eq!(partial.issue, Some(CaptureIssue::DrainExpired));
     }
 
     #[test]
@@ -1711,8 +1785,13 @@ mod tests {
         );
         let (stdout, stderr) = session.finish(Duration::from_secs(1)).await;
         assert_eq!(stdout.bytes_read, 5);
+        assert_eq!(
+            stdout.sha256,
+            Some(Sha256::digest([0, 255, 128, 13, 10]).into())
+        );
         assert_eq!(stdout.tail, [128, 13, 10]);
         assert_eq!(stderr.bytes_read, 6);
+        assert_eq!(stderr.sha256, Some(Sha256::digest(b"abcdef").into()));
         assert_eq!(stderr.tail, b"def");
         for summary in [&stdout, &stderr] {
             assert!(summary.eof);
@@ -1723,6 +1802,7 @@ mod tests {
         assert!(session.failure().is_none());
         let (again, _) = session.finish(Duration::ZERO).await;
         assert_eq!(again.tail, stdout.tail);
+        assert_eq!(again.sha256, stdout.sha256);
         assert_eq!(
             session
                 .begin(ended_pipe(b""), ended_pipe(b""))
@@ -1752,6 +1832,13 @@ mod tests {
             let (stdout, stderr) = session.finish(Duration::from_secs(1)).await;
             assert_eq!(stdout.bytes_read, 4);
             assert_eq!(stderr.bytes_read, 3);
+            // The stream digest includes bytes omitted from a quota-limited
+            // file, so truncated or replaced storage cannot authenticate them.
+            assert_eq!(
+                stdout.sha256,
+                Some(Sha256::digest([0, 255, 128, 10]).into())
+            );
+            assert_eq!(stderr.sha256, Some(Sha256::digest(b"abc").into()));
             assert_eq!(stdout.tail, [0, 255, 128, 10]);
             assert_eq!(stdout.file_bytes_written, quota.min(4));
             assert_eq!(stderr.file_bytes_written, quota.min(3));
@@ -1789,8 +1876,10 @@ mod tests {
         .await
         .unwrap();
         assert!(!stdout.eof);
+        assert_eq!(stdout.sha256, Some(Sha256::digest(b"").into()));
         assert_eq!(stdout.issue, Some(CaptureIssue::DrainExpired));
         assert_eq!(stderr.tail, b"stderr bytes");
+        assert_eq!(stderr.sha256, Some(Sha256::digest(b"stderr bytes").into()));
         assert!(stderr.eof);
         assert_eq!(session.failure(), Some(CaptureIssue::DrainExpired));
     }
@@ -2264,6 +2353,8 @@ mod tests {
             };
             assert_eq!(std::fs::read(dir.0.join("stdout.bin")).unwrap(), expected);
             assert_eq!(stdout.file_bytes_written, expected.len() as u64);
+            assert_eq!(stdout.sha256, Some(Sha256::digest(expected).into()));
+            assert_eq!(stderr.sha256, Some(Sha256::digest(b"").into()));
             assert!(std::fs::read(dir.0.join("stderr.bin")).unwrap().is_empty());
         }
     }
@@ -2547,6 +2638,7 @@ mod tests {
                 assert!(summary.issue.is_none());
                 assert!(summary.tail.is_empty() && summary.tail_truncated);
                 assert_eq!(summary.bytes_read, expected.len() as u64);
+                assert_eq!(summary.sha256, Some(Sha256::digest(expected).into()));
                 assert_eq!(summary.file_bytes_written, expected.len() as u64);
                 assert_eq!(
                     summary.stream_dropped_bytes + summary.stream_unconfirmed_bytes,
@@ -2561,6 +2653,7 @@ mod tests {
             let (frozen, _) = session.finish(Duration::ZERO).await;
             assert!(frozen.eof && frozen.writer_finished && frozen.issue.is_none());
             assert_eq!(frozen.bytes_read, stdout.bytes_read);
+            assert_eq!(frozen.sha256, stdout.sha256);
             assert_eq!(frozen.file_bytes_written, stdout.file_bytes_written);
             drop(session);
             assert_eq!(FILE_WORKERS.load(Ordering::Acquire), baseline);
@@ -2579,6 +2672,8 @@ mod tests {
         let mut session = OutputSession::prepare(&policy, Path::new("/")).unwrap();
         let (stdout, stderr) = session.finish(Duration::ZERO).await;
         assert!(stdout.writer_finished && stderr.writer_finished);
+        assert_eq!(stdout.sha256, Some(Sha256::digest(b"").into()));
+        assert_eq!(stderr.sha256, Some(Sha256::digest(b"").into()));
         assert_eq!(FILE_WORKERS.load(Ordering::Acquire), baseline);
     }
 }
