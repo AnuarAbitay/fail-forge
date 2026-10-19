@@ -31,6 +31,9 @@ pub(crate) enum Commands {
     /// Internal leased workspace lifecycle for the campaign controller.
     #[command(hide = true)]
     WorkspaceLifecycle,
+    /// Internal Dart namespace planning and isolated byte rewriting.
+    #[command(hide = true)]
+    DartNamespace,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

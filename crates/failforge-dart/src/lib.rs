@@ -21,6 +21,7 @@
 mod client;
 mod evidence;
 mod initialization;
+pub mod namespace;
 mod patch;
 mod protocol;
 mod test_catalog;

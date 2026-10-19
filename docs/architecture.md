@@ -350,10 +350,21 @@ binding request hashes all dependencies, SDK inputs, tools and controller files.
 The bridge validates a bounded versioned JSON response and never falls back to
 Python after an error. Copy owners inherit the current campaign lease. Read-only
 source verification uses an independent cancellation token so a cancelled test
-cannot hide input drift. Namespace isolation, campaign scheduling and report
-assembly remain in Python in this migration stage. Direct research helpers
+cannot hide input drift. Campaign scheduling, per-project namespace-plan caching
+and report assembly remain in Python in this migration stage. Direct research helpers
 without a production client retain their legacy
 Python implementations for diagnostics and differential tests.
+
+Dart namespace isolation lives in `failforge-dart`: lexical scanning, source and
+plan bindings, prefix edits, inverse proofs, preflight validation and rollback
+of copy writes run natively. The private namespace owner shares the bounded
+request protocol and inherits the campaign lease. When resolved SDK calls need
+an analyzer plan, that owner starts the existing Dart planner directly through
+the Rust Runner. It verifies source integrity even after cancellation, validates
+captured bytes against the typed Runner result and publishes a private receipt.
+The receipt's command is the actual Dart child command. Python retains the plan
+cache and dispatches fresh attempts; active production requests cannot fall back
+to the diagnostic Python scanner or planner after a native failure.
 
 The lifecycle bridge obtains already opened registry, campaign, work and lease
 descriptors through a private Unix socket's `SCM_RIGHTS` handoff. The queued

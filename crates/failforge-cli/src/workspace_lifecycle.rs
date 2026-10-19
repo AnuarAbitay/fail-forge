@@ -222,7 +222,10 @@ mod tests {
 
     #[test]
     fn lifecycle_and_runner_use_the_same_inherited_lease_protocol() {
-        assert_eq!(lifecycle::LEASE_MAGIC, failforge_runner::WORKSPACE_LEASE_MAGIC);
+        assert_eq!(
+            lifecycle::LEASE_MAGIC,
+            failforge_runner::WORKSPACE_LEASE_MAGIC
+        );
     }
 
     #[test]

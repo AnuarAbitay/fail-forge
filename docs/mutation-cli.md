@@ -28,9 +28,10 @@ its parallel workers; native errors fail the operation without a Python fallback
 Copy requests retain the campaign workspace lease. Read-only source checks still
 execute after cancellation and report changed inputs as infrastructure failure.
 Registry allocation, leases, recovery and removal of owned copies also execute
-in Rust. The controller retains inherited descriptor capabilities and temporary
-context lifetimes; namespace isolation, overall scheduling and report assembly
-remain in Python.
+in Rust. Dart namespace scanning, copy rewrites, inverse proofs and read-only
+analyzer planning also execute in Rust through `failforge-dart` and the existing
+Runner. The controller retains inherited descriptor capabilities, temporary
+context lifetimes, per-project plan caching, overall scheduling and report assembly.
 
 Configuration loading itself needs neither Python nor an SDK and never starts
 author tests. Python is still required for campaign execution. Profile generation
@@ -383,9 +384,11 @@ branches and URI-bearing `part`/`part of` directives. It preserves those constru
 and replaces only a canonical `package:<selected-package>/` prefix inside a
 supported URI literal. Comments and other header text are not reformatted.
 
-Headers alone need no analyzer subprocess. If author test code contains the
-identifier `resolvePackageUri` or `resolvePackageUriSync`, the controller obtains
-one read-only namespace plan for that frozen project through the Rust Runner.
+Headers alone need no analyzer subprocess. Rust scans and validates all source
+files before applying byte edits to the disposable copy. If author test code
+contains the identifier `resolvePackageUri` or `resolvePackageUriSync`, the
+controller requests one read-only namespace plan for that frozen project from
+the native owner. The owner starts the Dart tool directly through the Rust Runner.
 The Dart tool resolves SDK bindings without executing author code, running
 `pub get` or changing dependency metadata. It accepts a direct call to the actual `dart:isolate.Isolate`
 resolver whose argument is an actual `dart:core.Uri.parse` call with one canonical
@@ -402,12 +405,23 @@ recorded separately from header edits, with the planner receipt and raw captures
 under `namespace-plan/`. The plan is produced internally, not accepted as a user
 configuration or persisted as a source-hash-only cache.
 
+The native owner verifies unchanged source inputs after the planner exits,
+including on cancellation, and checks capture hashes against the Runner result.
+Integrity failures take precedence over cancellation. `result.json` records the
+actual Dart child command, the Runner summary and the bound plan hash;
+`capture/stdout.bin` contains the tool's response. The private protocol uses the
+campaign's workspace lease, so the copy remains protected until its native owner
+finishes. A native namespace error never falls back to the Python implementation.
+
 SDK resolver tear-offs, indirect/computed/interpolated URI arguments, escaped or
 encoded URI spellings and unrecognized owning-package references are rejected
 explicitly. The implementation does not rewrite arbitrary assertion/body
 strings. Self-package URI references in the subject's `lib/` remain unsupported
 when framework isolation is required: rewriting that library would change the
-mutation's bound source and offsets. A namespace preparation failure stops the
+mutation's bound source and offsets. The selected package's `packageUri` must
+resolve to the verified `lib/` tree. An entry pointing to another library tree is
+rejected because that tree is not covered by the isolation proof.
+A namespace preparation failure stops the
 campaign before its test process launches; it is not a killed mutant or a successful
 baseline, and a failed campaign has no score. Packages without a framework-name
 collision do not require these alias rewrites.

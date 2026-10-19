@@ -285,7 +285,7 @@ pub fn dependency_roots(config: &Path) -> Result<BTreeMap<String, PathBuf>, Inpu
 
 /// Resolve the already captured package bytes against their original location.
 /// Snapshot rebasing must not re-read a mutable source configuration here.
-pub(crate) fn dependency_roots_from_value(
+pub fn dependency_roots_from_value(
     config: &Path,
     value: &Value,
 ) -> Result<BTreeMap<String, PathBuf>, InputError> {

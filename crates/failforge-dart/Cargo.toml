@@ -6,6 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 failforge-runner = { path = "../failforge-runner" }
+failforge-workspace = { path = "../failforge-workspace" }
 tokio.workspace = true
 serde.workspace = true
 # Catalogue identity must preserve distinct finite float metadata values.

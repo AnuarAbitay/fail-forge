@@ -221,6 +221,7 @@ name = "failforge-dart"
 version = "0.1.0"
 dependencies = [
  "failforge-runner",
+ "failforge-workspace",
  "libc",
  "regex",
  "serde",

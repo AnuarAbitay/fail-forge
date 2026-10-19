@@ -9,8 +9,8 @@ pub use cancellation::Cancellation;
 pub use copy::{copy_campaign_snapshot, copy_project};
 pub use inputs::{
     BoundAlias, BoundTree, Hashes, PreparedProject, bound_tree, copy_snapshot, dependency_roots,
-    hash_file, inspect_project, metadata_json, parse_json, read_regular, read_regular_prefix,
-    source_hashes, verify_source,
+    dependency_roots_from_value, hash_file, inspect_project, metadata_json, parse_json,
+    read_regular, read_regular_prefix, source_hashes, verify_source,
 };
 
 #[derive(Debug, thiserror::Error)]

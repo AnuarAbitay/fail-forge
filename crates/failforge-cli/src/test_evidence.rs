@@ -162,10 +162,10 @@ fn validate_handoff(file: &mut File) -> io::Result<()> {
     Ok(())
 }
 
-struct Capture {
-    bytes: Vec<u8>,
-    length: u64,
-    hash: String,
+pub(crate) struct Capture {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) length: u64,
+    pub(crate) hash: String,
 }
 
 fn same_file(a: &Metadata, b: &Metadata) -> bool {
@@ -181,6 +181,14 @@ fn same_file(a: &Metadata, b: &Metadata) -> bool {
 }
 
 fn read_capture(summary: &CaptureSummary, retain: bool) -> io::Result<Capture> {
+    read_capture_limited(summary, retain, MAX_CAPTURE)
+}
+
+pub(crate) fn read_capture_limited(
+    summary: &CaptureSummary,
+    retain: bool,
+    limit: u64,
+) -> io::Result<Capture> {
     let path = summary.file_path.as_deref().ok_or_else(invalid)?;
     let mut file = OpenOptions::new()
         .read(true)
@@ -188,7 +196,7 @@ fn read_capture(summary: &CaptureSummary, retain: bool) -> io::Result<Capture> {
         .open(path)?;
     let before = file.metadata()?;
     if !before.is_file()
-        || before.len() > MAX_CAPTURE
+        || before.len() > limit
         || before.len() != summary.bytes_read
         || before.len() != summary.file_bytes_written
     {
