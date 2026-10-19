@@ -96,13 +96,13 @@ impl EvidenceHandoff {
             classification["reason"] = "native_owner_failed".into();
         }
         let mut catalogue = None;
+        let context = self.context.unwrap_or_default();
         if matches!(
             classification["outcome"].as_str(),
             Some("KILLED" | "SURVIVED" | "LOAD_FAILURE")
         ) {
             match failforge_dart::analyze_catalogue(&stdout.bytes, cwd, self.mode.mode()) {
                 Ok(snapshot) => {
-                    let context = self.context.unwrap_or_default();
                     failforge_dart::apply_selection(&mut classification, &snapshot, &context)
                         .map_err(|_| invalid())?;
                     catalogue = Some(snapshot);
@@ -113,12 +113,21 @@ impl EvidenceHandoff {
                 }
             }
         }
+        let initialization = failforge_dart::initialization_handoff(
+            &stdout.bytes,
+            cwd,
+            self.mode.mode(),
+            &mut classification,
+            &context,
+        )
+        .map_err(|_| invalid())?;
         let value = json!({
-            "version":2,"reporterMode":self.mode.as_str(),"ownerExitCode":exit_code,
+            "version":3,"reporterMode":self.mode.as_str(),"ownerExitCode":exit_code,
             "stdoutBytes":stdout.length,"stderrBytes":stderr.length,
             "stdoutSha256":stdout.hash,"stderrSha256":stderr.hash,
             "classification":classification,
             "catalogue":catalogue,
+            "initialization":initialization,
         });
         let mut encoded = BoundedReport(Vec::new());
         serde_json::to_writer(&mut encoded, &value)?;

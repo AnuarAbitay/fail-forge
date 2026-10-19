@@ -528,7 +528,7 @@ fn absolute(path: &Path) -> Result<PathBuf, CatalogError> {
 
 /// Resolve every existing prefix while preserving missing components. This
 /// mirrors Path.resolve(strict=False) and remains usable after baseline cleanup.
-fn resolve_existing(path: &Path) -> Result<PathBuf, CatalogError> {
+pub(crate) fn resolve_existing(path: &Path) -> Result<PathBuf, CatalogError> {
     let mut pending: VecDeque<_> = absolute(path)?
         .components()
         .map(|component| component.as_os_str().to_owned())

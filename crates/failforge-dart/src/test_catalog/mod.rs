@@ -3,6 +3,9 @@
 mod comparison;
 mod view;
 
+pub(crate) use comparison::python_string as python_json_string;
+pub(crate) use view::{path_uri, resolve_existing};
+
 pub use view::{CatalogSnapshot, analyze_catalogue};
 
 use serde::{Deserialize, Serialize};
@@ -26,6 +29,8 @@ pub struct SelectionContext {
     #[serde(default)]
     pub mutant: Option<Value>,
     pub alias: String,
+    #[serde(default)]
+    pub initialization: Option<crate::InitializationRequest>,
 }
 
 /// Decode a bounded private context without accepting duplicate JSON keys,
@@ -38,6 +43,8 @@ pub fn parse_selection_context(bytes: &[u8]) -> Result<SelectionContext, Catalog
     if let Some(baseline) = &context.baseline {
         comparison::validate_snapshot(baseline)?;
     }
+    crate::initialization::validate_request(&context)
+        .map_err(|_| CatalogError("invalid initialization context"))?;
     Ok(context)
 }
 

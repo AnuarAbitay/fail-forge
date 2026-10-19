@@ -510,6 +510,7 @@ fn ordinary_failure_witness_accepts_frames_using_logical_symlink_cwd() {
         baseline: Some(baseline),
         mutant: Some(json!({"file":"lib/a.dart"})),
         alias: "subject".into(),
+        initialization: None,
     };
     let mut result = json!({"outcome":"KILLED","reason":"user_test_failure"});
     apply_selection(&mut result, &current, &context).unwrap();

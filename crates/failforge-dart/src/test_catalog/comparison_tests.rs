@@ -162,6 +162,7 @@ fn fixture(ordinary: bool) -> (CatalogSnapshot, SelectionContext) {
         baseline: Some(baseline),
         mutant: Some(json!({"file":"lib/event.dart"})),
         alias: "subject".into(),
+        initialization: None,
     };
     (current, context)
 }
@@ -292,6 +293,7 @@ fn duplicate_full_keys_are_ambiguous_but_same_name_different_locations_are_not()
             baseline: Some(before),
             mutant: Some(json!({"file":"lib/event.dart"})),
             alias: "subject".into(),
+            initialization: None,
         };
         assert_eq!(
             ordinary_failure_witness(&after, &context).is_some(),
@@ -440,6 +442,7 @@ fn integer_metadata_never_rounds_distinct_author_keys_into_a_failure_witness() {
         baseline: Some(baseline),
         mutant: Some(json!({"file":"lib/event.dart"})),
         alias: "subject".into(),
+        initialization: None,
     };
     let unchanged = read(true, "18446744073709551614").unwrap();
     assert!(ordinary_failure_witness(&unchanged, &context).is_some());
@@ -487,6 +490,7 @@ fn numeric_metadata_preserves_float_precision_type_and_signed_zero_identity() {
             baseline: Some(baseline),
             mutant: Some(json!({"file":"lib/event.dart"})),
             alias: "subject".into(),
+            initialization: None,
         };
         // The opaque baseline is transported through JSON before reuse.
         let context = parse_selection_context(&serde_json::to_vec(&context).unwrap()).unwrap();
@@ -664,6 +668,7 @@ fn frozen_python_catalogue_corpus() {
                     baseline: Some(baseline),
                     mutant: Some(row["mutant"].clone()),
                     alias: row["alias"].as_str().unwrap().into(),
+                    initialization: None,
                 };
                 match row["kind"].as_str().unwrap() {
                     "explain_setup_suppression" => explain_setup_suppression(&current, &context),

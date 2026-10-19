@@ -383,8 +383,28 @@ separate, unique ordinary test passed in the baseline and now has a source-bound
 failure outside the suppressed group. Changed source inputs still override any
 native classification with an infrastructure error in the controller.
 
-The controller still owns baseline/control sequencing, initialization replays,
-working copies, scheduling and final reports. Legacy diagnostic scripts retain
+Loader observations, suite selection and causal initialization decisions also
+live in `failforge-dart`. The owner reports the next required control and an
+opaque continuation bound to the candidate, expected selection and package
+alias. Each subsequent owner validates that continuation and role before test
+startup. The ordered original/mutant/original experiment only confirms a kill
+after both originals pass and the mutant reproduces the eligible diagnostic.
+The private envelope carries both the current attempt and the causal decision;
+reports retain the original observation and all executed controls, without
+publishing reusable continuation state. The controller still checks capture
+identity, source integrity, cancellation and execution bindings before accepting
+the native confirmation.
+
+Initialization observations require a complete valid reporter stream. A control
+timeout with an incomplete stream keeps its primary `TIMEOUT` evidence, but
+cannot prove unchanged suite selection or confirm a kill. Signature and suite
+normalization have a 32 MiB data budget; the complete private handoff and input
+context remain capped at 64 MiB each. These are data limits, not process RSS
+limits. Temporary workspace paths are normalized while diagnostic text, stack
+coordinates and test identity multiplicities remain part of the comparison.
+
+The controller still owns baseline/control execution, working copies, scheduling
+and final reports. Legacy diagnostic scripts retain
 their Python reporter implementation during migration; product test attempts do
 not fall back to it. Native parsing rejects duplicate keys, non-finite numbers,
 invalid Unicode and excessive nesting. Integer tokens must fit signed or

@@ -350,7 +350,11 @@ production `mutate` controller additionally supports an authenticated ordinary
 failure witness when a failed `setUpAll` suppresses other registrations, and a
 bounded author-null-check fallback to initiate causal initialization controls;
 see [campaign correctness](mutation-cli.md#results-and-correctness). Survivors
-still require the complete author-test catalog. Raw loader evidence and all
+still require the complete author-test catalog. In production, signature
+extraction and the ordered confirmation policy run in `failforge-dart`; the
+Python controller schedules native-requested controls and checks source integrity
+and cancellation before accepting their results. Legacy diagnostic scripts retain
+their separate Python implementation during migration. Raw loader evidence and all
 three diagnostic controls are retained separately in the case
 directory. Unknown or unreproduced loading failures become `UNCLASSIFIED`;
 failed Runner capture/cleanup or changed inputs remain `INFRA_ERROR`. Both are

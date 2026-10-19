@@ -587,7 +587,7 @@ pub(super) fn selection_evidence(
     Some((proof.report, ordinary))
 }
 
-fn python_string(text: &str, output: &mut String) {
+pub(crate) fn python_string(text: &str, output: &mut String) {
     output.push('"');
     for character in text.chars() {
         match character {

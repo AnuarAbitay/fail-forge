@@ -225,7 +225,7 @@ fn publication_binds_both_streams_and_fails_closed_on_native_owner_failure() {
         file.read_to_end(&mut bytes).unwrap();
         assert_eq!(bytes.last(), Some(&b'\n'));
         let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(value["version"], 2);
+        assert_eq!(value["version"], 3);
         assert!(value["catalogue"].is_null());
         assert_eq!(value["stdoutSha256"], failforge_dart::sha256_hex(b""));
         assert_eq!(

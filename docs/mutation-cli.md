@@ -12,12 +12,14 @@ test timeout or kill that cleanup owner.
 
 Primary Dart/Flutter reporter parsing, author-test catalogue comparison and
 outcome classification run in Rust. This includes conservative setup-suppression
-analysis and independent ordinary-failure witnesses.
+analysis, independent ordinary-failure witnesses and initialization confirmation.
 The campaign accepts the native verdict only after verifying its private handoff
 against both raw captures. A private input descriptor transfers the opaque
 baseline catalogue and expected test selection to each native owner before it
-starts the test process. Baseline/control sequencing, source-integrity checks and
-initialization confirmation remain part of the campaign controller.
+starts the test process. For an eligible loading failure, Rust requests the next
+original/mutant/original control through opaque state and validates its order and
+candidate binding. The campaign controller executes those requests and retains
+source-integrity checks, cancellation and report assembly.
 
 Configuration loading itself needs neither Python nor an SDK and never starts
 author tests. Python is still required for campaign execution. Profile generation
@@ -344,8 +346,8 @@ changes and execution-input changes still fail the guard.
 
 An author null assertion during registration can be caused by a subject method
 that has already returned, so its frame need not appear in the exception stack.
-The production controller can use a narrowly checked author-runtime signature
-to initiate fresh original/mutant/original controls. The signature alone never
+The native policy can use a narrowly checked author-runtime signature to request
+fresh original/mutant/original controls. The signature alone never
 establishes a kill. Both originals must pass the full expected catalogue; the
 mutant replay must reproduce the initial error and stack after replacing only
 the generated workspace path. Both raw streams, native cleanup, suite selection

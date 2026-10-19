@@ -211,7 +211,7 @@ fn real_native_runs_publish_bound_dart_and_flutter_outcomes_without_changing_exi
             failforge_dart::sha256_hex(b"diagnostic")
         );
         assert_eq!(evidence["ownerExitCode"], if failed { 1 } else { 0 });
-        assert_eq!(evidence["version"], 2);
+        assert_eq!(evidence["version"], 3);
         assert_eq!(
             evidence["classification"]["testIdentities"],
             json!([["test/value_test.dart", "author"]])
@@ -500,4 +500,128 @@ fn native_catalogue_comparison_survives_baseline_cleanup_and_rejects_changed_sel
             }
         );
     }
+}
+
+fn initialization_run(bytes: &[u8], context: Option<&Value>, failed: bool) -> Value {
+    let mut fixture = Fixture::new();
+    fs::write(fixture.0.join("events"), bytes).unwrap();
+    let mut command = fixture.command();
+    command.args([
+        "run",
+        "--capture-dir",
+        "capture",
+        "--test-reporter",
+        "dart",
+        "--",
+        "/bin/sh",
+        "-c",
+        "cat events; exit \"$1\"",
+        "sh",
+        if failed { "1" } else { "0" },
+    ]);
+    let mut handoff = fixture.evidence(&mut command);
+    let _context = context.map(|context| {
+        let mut bytes = serde_json::to_vec(context).unwrap();
+        bytes.push(b'\n');
+        fixture.context(&mut command, &bytes)
+    });
+    let output = fixture.execute(&mut command);
+    assert_eq!(
+        output.status.code(),
+        Some(i32::from(failed)),
+        "{:?}",
+        output.stderr
+    );
+    report(&mut handoff)
+}
+
+fn loader_failure() -> Vec<u8> {
+    [
+        json!({"type":"start","time":0,"protocolVersion":"0.1.1","runnerVersion":"1.33.0","pid":100}),
+        json!({"type":"suite","time":1,"suite":{"id":0,"platform":"vm","path":"test/value_test.dart"}}),
+        json!({"type":"testStart","time":2,"test":{"id":1,"suiteID":0,"groupIDs":[],"name":"loading test/value_test.dart","metadata":{"skip":false}}}),
+        json!({"type":"error","time":3,"testID":1,"error":"Failed to load \"test/value_test.dart\": Bad state: initialization failed","stackTrace":"package:subject/value.dart 1:1 initialize\ntest/value_test.dart 3:1 main\n","isFailure":false}),
+        json!({"type":"testDone","time":4,"testID":1,"result":"error","hidden":false,"skipped":false}),
+        json!({"type":"allSuites","time":5,"count":1}),
+        json!({"type":"done","time":6,"success":false}),
+    ].into_iter().flat_map(|event| format!("{event}\n").into_bytes()).collect()
+}
+
+#[test]
+fn native_initialization_requires_ordered_controls_and_rejects_rebound_state_before_spawn() {
+    let baseline = initialization_run(&raw(false, false), None, false);
+    let mut context = json!({
+        "alias":"subject", "expected": [["test/value_test.dart", "author"]],
+        "baseline": baseline["catalogue"], "mutant":{"id":"candidate", "file":"lib/value.dart"},
+        "initialization":{"role":"initial", "candidateValid":true,
+            "baseline":baseline["initialization"]["observation"]},
+    });
+    let initial = initialization_run(&loader_failure(), Some(&context), true);
+    assert_eq!(initial["classification"]["outcome"], "LOAD_FAILURE");
+    assert_eq!(
+        initial["initialization"]["decision"]["nextRole"],
+        "original-before"
+    );
+    assert_eq!(initial["initialization"]["decision"]["confirmed"], false);
+    let mut state = initial["initialization"]["state"].clone();
+
+    for change in ["role", "candidate", "alias", "expected"] {
+        let mut invalid = context.clone();
+        invalid["initialization"] = json!({"role":"original-before", "state":state});
+        match change {
+            "role" => invalid["initialization"]["role"] = "original-after".into(),
+            "candidate" => invalid["mutant"]["id"] = "different".into(),
+            "alias" => invalid["alias"] = "different".into(),
+            _ => invalid["expected"][0][1] = "different".into(),
+        }
+        let mut fixture = Fixture::new();
+        let mut command = fixture.command();
+        command.args([
+            "run",
+            "--capture-dir",
+            "capture",
+            "--test-reporter",
+            "dart",
+            "--",
+            "/bin/sh",
+            "-c",
+            "touch child-started",
+        ]);
+        let handoff = fixture.evidence(&mut command);
+        let bytes = format!("{invalid}\n");
+        let _context = fixture.context(&mut command, bytes.as_bytes());
+        let output = fixture.execute(&mut command);
+        assert_eq!(output.status.code(), Some(125), "{change}");
+        assert!(!fixture.0.join("child-started").exists(), "{change}");
+        assert_eq!(handoff.metadata().unwrap().len(), 0, "{change}");
+    }
+    for (role, next, failed) in [
+        ("original-before", Some("mutant-replay"), false),
+        ("mutant-replay", Some("original-after"), true),
+        ("original-after", None, false),
+    ] {
+        context["initialization"] = json!({"role":role, "state":state});
+        let bytes = if failed {
+            loader_failure()
+        } else {
+            raw(false, false)
+        };
+        let result = initialization_run(&bytes, Some(&context), failed);
+        let decision = &result["initialization"]["decision"];
+        assert_eq!(decision["nextRole"], json!(next));
+        assert_eq!(decision["confirmed"], next.is_none());
+        assert_eq!(
+            decision["outcome"],
+            if next.is_none() {
+                "KILLED"
+            } else {
+                "UNCLASSIFIED"
+            }
+        );
+        if next.is_none() {
+            assert_eq!(decision["reason"], "mutation_caused_initialization_failure");
+        }
+        state = result["initialization"]["state"].clone();
+    }
+    assert!(state.is_null());
 }

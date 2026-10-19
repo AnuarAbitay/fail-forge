@@ -13,9 +13,14 @@
 //! the working copy exists. [`apply_selection`] compares this snapshot against
 //! the baseline, preserving an incomplete catalogue unless an independent
 //! ordinary failure supplies a source-bound witness.
+//! [`initialization_handoff`] derives eligible loader signatures and enforces
+//! ordered original/mutant/original controls through a private continuation.
+//! Its confirmation remains subject to the controller's source-integrity and
+//! cancellation checks before publication.
 
 mod client;
 mod evidence;
+mod initialization;
 mod patch;
 mod protocol;
 mod test_catalog;
@@ -24,6 +29,13 @@ mod test_reporter;
 
 pub use client::{AdapterClient, ClientError, ClientOptions};
 pub use evidence::{TestEvidence, TestRunClassification, classify_test_run};
+pub use initialization::{
+    ConfirmationSignature, InitializationAttempt, InitializationContext, InitializationDecision,
+    InitializationError, InitializationEvidence, InitializationHandoff, InitializationObservation,
+    InitializationRequest, InitializationRole, InitializationState, NormalizedDiagnostic,
+    NormalizedLoadFailure, SignatureKind, analyze_initialization_evidence, evaluate_initialization,
+    initialization_handoff,
+};
 pub use patch::{PatchError, apply_mutant, read_and_apply_mutant, validate_relative_target};
 pub use protocol::{
     AdapterCommand, AdapterFailure, ByteEdit, MAX_LINE_BYTES, Mutant, MutationFamily,
