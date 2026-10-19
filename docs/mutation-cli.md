@@ -378,7 +378,8 @@ By default a run creates `.failforge/runs/<run-id>/` in the selected project:
 manifest.json          effective configuration and original input hashes
 input-bindings.json    dependency, adapter, SDK and executable bindings
 events.jsonl           ordered stage/progress events and process intervals
-summary.json           status, outcomes, stage timings and family-specific score
+progress.json          compact live status and processed/discovered counts
+summary.json           initial empty report, then authoritative terminal report
 discovery/             fresh adapter transcript and static-validation evidence
 baseline/              original test results and exact author-test catalogue
 original-after/        final original control
@@ -393,7 +394,8 @@ is:
 manifest.json          resolved project, explicit switches and enabled families
 input-bindings.json    common frozen execution inputs
 events.jsonl           shared stages and family-tagged progress
-summary.json           profile status, family summaries and outcome counts
+progress.json          compact live profile/family status and counts
+summary.json           initial empty report, then terminal family summaries
 families/
   classic/             discovery, baseline, mutants and original-after control
   failure_mode/        independent family results
@@ -415,6 +417,43 @@ or dereference the public `summary.json` paths when exporting individual files.
 An interrupted publication leaves the public reports incomplete and unscored.
 The journal's `campaign_finalizing` event records an intended status, not a
 committed result; use the root `summary.json` to determine completion.
+
+### Live progress and terminal reports
+
+Both direct CLI campaigns and YAML profiles update `progress.json` as results
+arrive or status changes. This compact file contains counts and status, without
+the accumulated test catalogues, mutation records or scores. Counters include
+only processed results; a discovered total can remain unknown until discovery
+finishes. A profile also shows each selected family's progress. Read this file
+for live monitoring, and use `events.jsonl` for the ordered event history.
+
+`progress.json` always has `complete: false`. Its status is `running` or
+`finalizing`; an `intendedStatus` during finalization describes the controller's
+intention and does not prove that the final report was published. This remains
+true even when every discovered mutant has a processed result. Input checks,
+original controls, workspace cleanup or report publication can still fail.
+
+A normal run writes the full `summary.json` once as an empty, incomplete initial
+report, then once at terminal publication. A failure during discovery or baseline
+setup can produce only an incomplete terminal summary. The full report is not a
+live counter or a growing checkpoint. Each mutant's `mutants/<id>/result.json`
+is retained independently when that result is produced, including its evidence
+and actual test catalogue;
+profile results use `families/<family>/mutants/<id>/result.json`. Live progress
+does not replace those files or the journal. Avoid repeatedly loading the full
+summary to monitor a large campaign.
+
+A terminal report for a failed or gracefully cancelled campaign contains the
+available partial results and remains incomplete and unscored. A profile clears
+the scores of every selected family, including families that finished earlier.
+The existing atomic profile publication rule still applies: root and family
+reports must agree before a final successful profile is visible.
+
+SIGKILL or a host crash can prevent terminal publication. In that case the
+initial summary can remain visible while `progress.json`, per-mutant results
+and the journal retain the last successfully written evidence. None of those
+files alone establishes a completed campaign or a final mutation score. This
+does not add automatic continuation of an interrupted campaign.
 
 An explicit output directory must not already exist. Output inside the target
 project must be below `.failforge/`, which is excluded from copies and source
