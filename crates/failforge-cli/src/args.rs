@@ -216,6 +216,58 @@ pub(crate) struct MutateArgs {
 }
 
 impl MutateArgs {
+    /// Semantic input for the native normalizer, preserving omitted options.
+    pub(crate) fn configuration_values(&self) -> Result<serde_json::Value, &'static str> {
+        let mut values = serde_json::Map::new();
+        for (name, path) in [
+            ("config", self.config.as_ref()),
+            ("project", self.project.as_ref()),
+            ("output", self.output.as_ref()),
+            ("dart_sdk", self.dart_sdk.as_ref()),
+            ("flutter_sdk", self.flutter_sdk.as_ref()),
+            ("adapter_root", self.adapter_root.as_ref()),
+        ] {
+            if let Some(path) = path {
+                let text = path
+                    .to_str()
+                    .ok_or("configuration paths must contain valid Unicode")?;
+                values.insert(name.into(), text.into());
+            }
+        }
+        if let Some(family) = self.family {
+            values.insert("family".into(), family.as_str().into());
+        }
+        if let Some(language) = &self.language {
+            values.insert("language".into(), language.clone().into());
+        }
+        if let Some(workers) = self.workers {
+            values.insert("workers".into(), workers.into());
+        }
+        if let Some(maximum) = self.max_mutants {
+            values.insert("max_mutants".into(), maximum.into());
+        }
+        for (name, value) in [
+            ("test_timeout", self.test_timeout.as_ref()),
+            ("command_timeout", self.command_timeout.as_ref()),
+        ] {
+            if let Some(value) = value {
+                values.insert(name.into(), value.clone().into());
+            }
+        }
+        for (name, items) in [
+            ("operators", &self.operator),
+            ("include", &self.include),
+            ("exclude", &self.exclude),
+            ("methods", &self.method),
+            ("classes", &self.class),
+        ] {
+            if !items.is_empty() {
+                values.insert(name.into(), serde_json::json!(items));
+            }
+        }
+        Ok(serde_json::Value::Object(values))
+    }
+
     pub(crate) fn engine_arguments(&self) -> Vec<OsString> {
         let mut arguments = Vec::new();
         let mut pair = |name: &str, value: OsString| {

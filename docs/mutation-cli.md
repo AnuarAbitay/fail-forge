@@ -2,9 +2,19 @@
 
 `failforge mutate` runs explicitly selected mutations. A YAML profile can select
 multiple families; direct CLI arguments select one family.
-The Rust CLI replaces itself with the Python controller. Each native test command
+The Rust CLI reads, validates and normalizes both launch modes through
+`failforge-config`, then replaces itself with the Python execution controller.
+The effective configuration is transferred through an unlinked regular-file
+descriptor and consumed once; the controller does not re-read the YAML or apply
+its Python configuration defaults on this path. Each native test command
 is owned by the existing Rust Runner; the controller does not implement another
 test timeout or kill that cleanup owner.
+
+Configuration loading itself needs neither Python nor an SDK and never starts
+author tests. Python is still required for campaign execution, and profile
+generation still uses its existing Python implementation and PyYAML. The native
+configuration library also exposes the direct settings and profile APIs for
+later migration stages; this step does not migrate the execution engine.
 
 ## Prepare the installation and target
 

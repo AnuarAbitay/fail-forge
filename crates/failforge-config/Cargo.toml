@@ -1,0 +1,12 @@
+[package]
+name = "failforge-config"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+libc.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+libyaml-safer = "=0.3.0"
+regex = { version = "=1.13.1", default-features = false, features = ["std", "perf", "unicode"] }

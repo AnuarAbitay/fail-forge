@@ -180,3 +180,81 @@ fn relative_invocation_directory_is_rejected() {
         LaunchError::InvocationDirectory
     );
 }
+
+#[test]
+fn native_settings_preserve_omission_limits_repeated_filters_and_literal_paths() {
+    let minimum = arguments(&["failforge", "mutate", "--family", "classic"]);
+    assert_eq!(
+        minimum.configuration_values().unwrap(),
+        serde_json::json!({"family":"classic"})
+    );
+    let selected = arguments(&[
+        "failforge",
+        "mutate",
+        "--family",
+        "language_specific",
+        "--language",
+        "dart",
+        "--project",
+        "project with spaces",
+        "--workers",
+        "4",
+        "--test-timeout",
+        "2s",
+        "--command-timeout",
+        "9s",
+        "--max-mutants",
+        "0",
+        "--operator",
+        "NSM-001",
+        "--operator",
+        "ENM-001",
+        "--include",
+        "lib/a.dart",
+        "--include",
+        "lib/b.dart",
+        "--exclude",
+        "lib/generated/**",
+        "--class",
+        "Gateway",
+        "--method",
+        "read",
+        "--output",
+        "reports",
+        "--dart-sdk",
+        "sdk",
+        "--adapter-root",
+        "adapter",
+    ]);
+    assert_eq!(
+        selected.configuration_values().unwrap(),
+        serde_json::json!({
+        "family":"language_specific", "language":"dart", "project":"project with spaces",
+        "workers":4, "test_timeout":"2s", "command_timeout":"9s", "max_mutants":0,
+        "operators":["NSM-001","ENM-001"], "include":["lib/a.dart","lib/b.dart"],
+        "exclude":["lib/generated/**"], "classes":["Gateway"], "methods":["read"],
+        "output":"reports", "dart_sdk":"sdk", "adapter_root":"adapter"})
+    );
+}
+
+#[test]
+fn native_configuration_rejects_non_unicode_paths_without_lossy_conversion() {
+    use std::os::unix::ffi::OsStringExt;
+    let Commands::Mutate(arguments) = Cli::try_parse_from([
+        std::ffi::OsString::from("failforge"),
+        "mutate".into(),
+        "--family".into(),
+        "classic".into(),
+        "--project".into(),
+        std::ffi::OsString::from_vec(vec![b'p', 0xff]),
+    ])
+    .unwrap()
+    .command
+    else {
+        panic!("expected mutate");
+    };
+    assert_eq!(
+        arguments.configuration_values().unwrap_err(),
+        "configuration paths must contain valid Unicode"
+    );
+}
