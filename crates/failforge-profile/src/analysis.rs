@@ -78,7 +78,13 @@ struct Runtime {
 
 impl Runtime {
     fn environment(&self) -> BTreeMap<OsString, OsString> {
-        let mut environment: BTreeMap<_, _> = std::env::vars_os().collect();
+        self.environment_from(std::env::vars_os().collect())
+    }
+
+    fn environment_from(
+        &self,
+        mut environment: BTreeMap<OsString, OsString>,
+    ) -> BTreeMap<OsString, OsString> {
         for key in [
             "FAILFORGE_WORKSPACE_LEASE_FD",
             "FAILFORGE_ADAPTER_CANCEL_FD",
@@ -86,6 +92,8 @@ impl Runtime {
             "FAILFORGE_TEST_EVIDENCE_FD",
             "FAILFORGE_TEST_CONTEXT_FD",
             "FAILFORGE_WORKSPACE_REQUEST_FD",
+            "FAILFORGE_WORKSPACE_HANDOFF_FD",
+            "FAILFORGE_WORKSPACE_CAPS_FDS",
         ] {
             environment.remove(std::ffi::OsStr::new(key));
         }
@@ -425,6 +433,39 @@ pub async fn analyze_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn analysis_environment_drops_private_workspace_transports() {
+        let runtime = Runtime {
+            helper: "/unused/helper".into(),
+            dart_sdk: "/unused/dart".into(),
+            flutter_sdk: None,
+            adapter: "/unused/adapter".into(),
+            installation: "/unused/installation".into(),
+        };
+        let private = [
+            "FAILFORGE_WORKSPACE_LEASE_FD",
+            "FAILFORGE_WORKSPACE_REQUEST_FD",
+            "FAILFORGE_WORKSPACE_HANDOFF_FD",
+            "FAILFORGE_WORKSPACE_CAPS_FDS",
+        ];
+        let mut input = BTreeMap::from([("PATH".into(), "/tools/bin".into())]);
+        for key in private {
+            input.insert(key.into(), "7".into());
+        }
+        let environment = runtime.environment_from(input);
+        for key in private {
+            assert!(!environment.contains_key(std::ffi::OsStr::new(key)));
+        }
+        assert_eq!(
+            environment.get(std::ffi::OsStr::new("PATH")),
+            Some(&OsString::from("/tools/bin"))
+        );
+        assert_eq!(
+            environment.get(std::ffi::OsStr::new("CI")),
+            Some(&OsString::from("true"))
+        );
+    }
 
     #[tokio::test]
     async fn cancellation_latches_before_and_after_subscription() {

@@ -1,6 +1,6 @@
 //! Private filesystem operations; the campaign retains scheduling and leases.
 use std::collections::BTreeMap;
-use std::io::{self, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -12,7 +12,6 @@ use sha2::{Digest, Sha256};
 use tokio::signal::unix::{SignalKind, signal};
 
 const REQUEST_ENV: &str = "FAILFORGE_WORKSPACE_REQUEST_FD";
-const MAX_RESPONSE: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
@@ -292,23 +291,6 @@ fn environment_hash(environment: &BTreeMap<String, String>) -> String {
     )
 }
 
-struct Response(Vec<u8>);
-impl Write for Response {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if bytes.len() > MAX_RESPONSE - self.0.len() - 1 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "workspace response limit exceeded",
-            ));
-        }
-        self.0.extend_from_slice(bytes);
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
 async fn process(
     request: Request,
     readiness: Option<crate::readiness::Readiness>,
@@ -328,16 +310,8 @@ async fn process(
     let result = tokio::task::spawn_blocking(move || {
         let result = dispatch(request, &working)?;
         working.check()?;
-        let mut response = Response(Vec::new());
-        serde_json::to_writer(&mut response, &json!({"version":1,"result":result}))
-            .map_err(|_| invalid("native workspace response exceeds limits"))?;
-        working.check()?;
-        response.0.push(b'\n');
-        for chunk in response.0.chunks(64 * 1024) {
-            working.check()?;
-            std::io::stdout().lock().write_all(chunk)?;
-        }
-        working.check()
+        let response = crate::private_response::encode(result)?;
+        crate::private_response::publish(&response, &working)
     })
     .await
     .map_err(|_| invalid("native workspace operation failed"))?;

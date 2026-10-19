@@ -3,6 +3,7 @@
 mod cancellation;
 mod copy;
 mod inputs;
+pub mod lifecycle;
 
 pub use cancellation::Cancellation;
 pub use copy::{copy_campaign_snapshot, copy_project};

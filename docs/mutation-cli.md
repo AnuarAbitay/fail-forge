@@ -27,8 +27,10 @@ snapshot copying and fresh attempt copying execute in Rust through
 its parallel workers; native errors fail the operation without a Python fallback.
 Copy requests retain the campaign workspace lease. Read-only source checks still
 execute after cancellation and report changed inputs as infrastructure failure.
-Workspace registry allocation, leases, crash recovery, namespace isolation and
-overall scheduling remain in the Python controller.
+Registry allocation, leases, recovery and removal of owned copies also execute
+in Rust. The controller retains inherited descriptor capabilities and temporary
+context lifetimes; namespace isolation, overall scheduling and report assembly
+remain in Python.
 
 Configuration loading itself needs neither Python nor an SDK and never starts
 author tests. Python is still required for campaign execution. Profile generation
@@ -549,7 +551,7 @@ report is marked incomplete, with no final score.
 
 ## Recovery of abandoned working copies
 
-Before allocating working copies, each valid `mutate` campaign scans FailForge's
+Before allocating working copies, each valid `mutate` campaign asks Rust to scan FailForge's
 private per-user registry, `<system-temporary-directory>/failforge-workspaces-<uid>`.
 Snapshots and attempts are created inside a registered campaign directory. The
 registry must be outside the target project, dependencies, SDK and controller
@@ -559,6 +561,10 @@ on that campaign. A new campaign removes a registered directory only after it ca
 acquire the lock, so killing the controller does not make a live Runner's working
 copies eligible for deletion. This also permits recovery after a reboot once all
 owners are gone, if the operating system has retained the temporary directory.
+The native creator transfers already locked descriptors through a private Unix
+socket, so there is no unlocked gap between native creation and controller
+ownership. Cleanup requests still run after campaign cancellation. Closing a
+controller reference never unlocks the references held by surviving owners.
 
 Recovery validates directory ownership, private permissions, protocol metadata
 and lock files. Deletion stays relative to opened directory descriptors and never

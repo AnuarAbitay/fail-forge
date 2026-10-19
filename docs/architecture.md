@@ -329,8 +329,8 @@ The adapter's syntax/type analysis and safe-patch contract are described in the
 [Dart adapter guide](dart-adapter.md). The `mutate` CLI normalizes explicit YAML
 or CLI settings through `failforge-config`, then transfers the effective
 configuration to `python/failforge_campaign`. Prepared package inspection,
-source/dependency/SDK hashes, immutable snapshots and fresh project copies run
-through `failforge-workspace` in Rust. The Python controller schedules these
+source/dependency/SDK hashes, immutable snapshots, fresh project copies and
+workspace lifecycle operations run through `failforge-workspace` in Rust. The Python controller schedules these
 operations and isolated test attempts, then publishes family-specific evidence
 and scores. Each native test process keeps
 the same Rust Runner ownership. Working copies live in a private per-user
@@ -350,10 +350,21 @@ binding request hashes all dependencies, SDK inputs, tools and controller files.
 The bridge validates a bounded versioned JSON response and never falls back to
 Python after an error. Copy owners inherit the current campaign lease. Read-only
 source verification uses an independent cancellation token so a cancelled test
-cannot hide input drift. Registry leases, crash recovery, directory allocation,
-namespace isolation and campaign scheduling remain in Python in this migration
-stage. Direct research helpers without a production client retain their legacy
+cannot hide input drift. Namespace isolation, campaign scheduling and report
+assembly remain in Python in this migration stage. Direct research helpers
+without a production client retain their legacy
 Python implementations for diagnostics and differential tests.
+
+The lifecycle bridge obtains already opened registry, campaign, work and lease
+descriptors through a private Unix socket's `SCM_RIGHTS` handoff. The queued
+message retains the same locked open-file description after the creator exits;
+the controller never reopens a returned pathname to acquire its lease. Subsequent
+native allocation and deletion requests validate the inherited capabilities.
+Parallel workers share the campaign but keep distinct temporary contexts.
+Cleanup runs with an independent cancellation token. Closing the manager drops
+its own lease reference without unlocking inherited references, then lets a
+native reaper determine whether cleanup must be deferred. The registry format
+remains compatible with existing recognized campaigns.
 
 Campaign copies preserve file bytes, read/write/execute permission bits and modification times,
 including directory permissions, apart from deliberately rebased package

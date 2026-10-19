@@ -28,6 +28,9 @@ pub(crate) enum Commands {
     /// Internal prepared-input operations for the campaign controller.
     #[command(hide = true)]
     WorkspaceInputs,
+    /// Internal leased workspace lifecycle for the campaign controller.
+    #[command(hide = true)]
+    WorkspaceLifecycle,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
