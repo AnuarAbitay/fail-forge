@@ -1,6 +1,7 @@
 //! File-scoped static applicability through the Rust adapter cleanup owner.
 //! No author tests, package downloads, or mutant execution happen here.
-mod inputs;
+use failforge_workspace as inputs;
+pub use failforge_workspace::Cancellation;
 mod session;
 mod workspaces;
 
@@ -10,63 +11,11 @@ use std::path::{Path, PathBuf};
 
 use failforge_config::{Context, from_profile_mapping};
 use serde_json::json;
-use tokio::sync::watch;
 
 use crate::{ProfileDraft, ProfileError};
-use inputs::{Hashes, PreparedProject};
+use inputs::{BoundTree, Hashes, PreparedProject};
 
 pub const MAX_DISCOVERY_CANDIDATES: usize = 10_000;
-
-#[derive(Clone, Debug)]
-pub struct Cancellation(watch::Sender<i32>);
-
-impl Default for Cancellation {
-    fn default() -> Self {
-        Self(watch::channel(0).0)
-    }
-}
-
-impl Cancellation {
-    /// The first signal wins. A watch value retains signals received before a
-    /// synchronous snapshot or before a helper installs its signal handlers.
-    pub fn request(&self, signum: i32) {
-        self.0.send_if_modified(|current| {
-            if *current != 0 {
-                return false;
-            }
-            *current = if signum == libc::SIGTERM {
-                libc::SIGTERM
-            } else {
-                libc::SIGINT
-            };
-            true
-        });
-    }
-
-    pub fn signum(&self) -> Option<i32> {
-        let signal = *self.0.borrow();
-        (signal != 0).then_some(signal)
-    }
-
-    pub fn check(&self) -> Result<(), ProfileError> {
-        match self.signum() {
-            Some(signal) => Err(ProfileError::Cancelled(signal)),
-            None => Ok(()),
-        }
-    }
-
-    pub async fn cancelled(&self) -> i32 {
-        let mut receiver = self.0.subscribe();
-        loop {
-            let signal = *receiver.borrow_and_update();
-            if signal != 0 {
-                return signal;
-            }
-            // self retains the sender throughout this method.
-            let _ = receiver.changed().await;
-        }
-    }
-}
 
 #[derive(Clone, Debug, Default)]
 pub struct FamilyApplicability {
@@ -136,6 +85,7 @@ impl Runtime {
             "FAILFORGE_RUNNER_READY_FD",
             "FAILFORGE_TEST_EVIDENCE_FD",
             "FAILFORGE_TEST_CONTEXT_FD",
+            "FAILFORGE_WORKSPACE_REQUEST_FD",
         ] {
             environment.remove(std::ffi::OsStr::new(key));
         }
@@ -189,7 +139,7 @@ impl Runtime {
 }
 
 struct InputBinding {
-    trees: BTreeMap<PathBuf, Hashes>,
+    trees: BTreeMap<PathBuf, BoundTree>,
     files: BTreeMap<PathBuf, String>,
     dependencies: BTreeMap<PathBuf, BTreeMap<String, PathBuf>>,
     environment: BTreeMap<OsString, OsString>,
@@ -347,7 +297,7 @@ pub async fn analyze_profile(
     }
     let original = inputs::inspect_project(profile.campaigns.first().map(|config| &config.project)
         .unwrap_or(&draft.project), cancel).map_err(|error| match error {
-            ProfileError::Cancelled(_) => error,
+            inputs::InputError::Cancelled(signal) => ProfileError::Cancelled(signal),
             _ => ProfileError::Config(format!("applicability analysis requires prepared project dependencies; prepare the package first or use --template: {error}")),
         })?;
     if draft
@@ -483,7 +433,7 @@ mod tests {
         cancel.request(libc::SIGINT);
         assert_eq!(cancel.cancelled().await, libc::SIGTERM);
         assert!(matches!(
-            cancel.check(),
+            cancel.check().map_err(ProfileError::from),
             Err(ProfileError::Cancelled(libc::SIGTERM))
         ));
         let cancel = Cancellation::default();

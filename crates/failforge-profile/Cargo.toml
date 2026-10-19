@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+failforge-workspace = { path = "../failforge-workspace" }
 failforge-config = { path = "../failforge-config" }
 failforge-dart = { path = "../failforge-dart" }
 failforge-runner = { path = "../failforge-runner" }

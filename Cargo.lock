@@ -195,7 +195,9 @@ dependencies = [
  "failforge-dart",
  "failforge-profile",
  "failforge-runner",
+ "failforge-workspace",
  "libc",
+ "serde",
  "serde_json",
  "sha2",
  "tokio",
@@ -236,6 +238,7 @@ dependencies = [
  "failforge-config",
  "failforge-dart",
  "failforge-runner",
+ "failforge-workspace",
  "libc",
  "libyaml-safer",
  "regex",
@@ -256,6 +259,18 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "failforge-workspace"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

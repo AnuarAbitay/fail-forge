@@ -21,6 +21,15 @@ original/mutant/original control through opaque state and validates its order an
 candidate binding. The campaign controller executes those requests and retains
 source-integrity checks, cancellation and report assembly.
 
+Prepared package inspection, source and tool hashes, dependency bindings,
+snapshot copying and fresh attempt copying execute in Rust through
+`failforge-workspace`. Each campaign has its own native input client, including
+its parallel workers; native errors fail the operation without a Python fallback.
+Copy requests retain the campaign workspace lease. Read-only source checks still
+execute after cancellation and report changed inputs as infrastructure failure.
+Workspace registry allocation, leases, crash recovery, namespace isolation and
+overall scheduling remain in the Python controller.
+
 Configuration loading itself needs neither Python nor an SDK and never starts
 author tests. Python is still required for campaign execution. Profile generation
 runs through the native `failforge-profile` crate without Python or PyYAML. The native
@@ -44,6 +53,14 @@ The target must already have its dependencies prepared and contain
 target's dependencies or downloads its source. This version supports one
 standalone Dart package, with `test` or `flutter_test`; Pub workspaces and source
 symlinks are rejected explicitly.
+
+Fresh copies preserve source bytes, read/write/execute permission bits and modification times,
+including directory permissions, except for the deliberate package-config URI
+rebase. Their enclosing directories remain private (`0700`). Retained tool state
+must also contain only regular files and directories; aliases and special files
+are rejected. Extended attributes and ACLs are outside this copy contract.
+Cleanup can remove owned read-only copied directories without changing the
+original project's permissions.
 
 The default SDK is `.toolchain/flutter/bin/cache/dart-sdk` in the installation.
 Use `--dart-sdk /absolute/dart-sdk` for another Dart SDK, or
@@ -324,7 +341,7 @@ process; metadata, multiple timeouts and teardown can still reach the outer limi
 
 ## Results and correctness
 
-The controller snapshots the prepared project, runs fresh discovery and static
+The controller requests a native snapshot of the prepared project, runs fresh discovery and static
 validation, establishes a passing baseline, executes each valid mutant in a
 fresh temporary copy and checks an original control afterward. Framework-name
 collisions such as `pool` use the unchanged snapshot for the test framework and a

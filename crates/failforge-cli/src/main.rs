@@ -6,10 +6,12 @@ mod args;
 mod diagnostics;
 mod display;
 mod mutate;
+mod private_request;
 mod profile;
 mod readiness;
 mod test_context;
 mod test_evidence;
+mod workspace_inputs;
 
 use std::io::Write;
 use std::os::unix::process::ExitStatusExt;
@@ -53,6 +55,7 @@ fn main() -> ExitCode {
     let arguments = match cli.command {
         Commands::Run(arguments) => arguments,
         Commands::Mutate(arguments) => return mutate::execute(*arguments, &invocation_cwd),
+        Commands::WorkspaceInputs => return workspace_inputs::execute(),
         Commands::Profile(arguments) => match arguments.command {
             ProfileCommands::Generate(arguments) => {
                 return profile::execute(*arguments, &invocation_cwd);

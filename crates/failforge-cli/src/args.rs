@@ -25,6 +25,9 @@ pub(crate) enum Commands {
     Mutate(Box<MutateArgs>),
     /// Generate mutation profiles using static analysis or a catalogue template.
     Profile(ProfileArgs),
+    /// Internal prepared-input operations for the campaign controller.
+    #[command(hide = true)]
+    WorkspaceInputs,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

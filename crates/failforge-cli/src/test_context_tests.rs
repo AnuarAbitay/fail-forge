@@ -1,6 +1,7 @@
 use super::*;
-use std::fs::OpenOptions;
-use std::io::Write;
+use crate::private_request::MAX_REQUEST as MAX_CONTEXT;
+use std::fs::{File, OpenOptions};
+use std::io::{Seek, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::PathBuf;

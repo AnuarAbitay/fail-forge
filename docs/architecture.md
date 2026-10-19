@@ -328,9 +328,11 @@ shut down other runs admitted by the shared Runner.
 The adapter's syntax/type analysis and safe-patch contract are described in the
 [Dart adapter guide](dart-adapter.md). The `mutate` CLI normalizes explicit YAML
 or CLI settings through `failforge-config`, then transfers the effective
-configuration to `python/failforge_campaign`. The Python controller
-snapshots prepared standalone packages, schedules fresh isolated attempts and
-publishes family-specific evidence and scores. Each native test process keeps
+configuration to `python/failforge_campaign`. Prepared package inspection,
+source/dependency/SDK hashes, immutable snapshots and fresh project copies run
+through `failforge-workspace` in Rust. The Python controller schedules these
+operations and isolated test attempts, then publishes family-specific evidence
+and scores. Each native test process keeps
 the same Rust Runner ownership. Working copies live in a private per-user
 registry protected by campaign leases. Startup recovery removes only validated
 unlocked campaigns; inherited lease descriptors keep a live Rust cleanup owner
@@ -340,6 +342,26 @@ metadata intact, then uses a bounded empty-directory protocol so interrupted
 recovery itself can be retried. Named profiles, persistent resume and Pub
 workspace support remain outside this implementation. See the
 [mutation CLI](mutation-cli.md).
+
+The input bridge uses one context-scoped client per public campaign or profile,
+explicitly propagated to each worker. A private unlinked JSON descriptor carries
+one bounded workspace request to the existing native owner; a single batched
+binding request hashes all dependencies, SDK inputs, tools and controller files.
+The bridge validates a bounded versioned JSON response and never falls back to
+Python after an error. Copy owners inherit the current campaign lease. Read-only
+source verification uses an independent cancellation token so a cancelled test
+cannot hide input drift. Registry leases, crash recovery, directory allocation,
+namespace isolation and campaign scheduling remain in Python in this migration
+stage. Direct research helpers without a production client retain their legacy
+Python implementations for diagnostics and differential tests.
+
+Campaign copies preserve file bytes, read/write/execute permission bits and modification times,
+including directory permissions, apart from deliberately rebased package
+configuration. Their enclosing workspace directories remain private (`0700`).
+Retained tool-state aliases and special files are rejected; extended attributes
+and ACLs are outside the copy contract. Cleanup grants owner write permission
+through validated directory descriptors when removing owned read-only payloads,
+without changing original source directories or following payload aliases.
 
 `failforge-profile` handles file-scoped profile generation in Rust. It uses the
 same native configuration rules and calls the Dart adapter through the separate

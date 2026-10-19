@@ -1,4 +1,5 @@
-//! Prepared package snapshots and byte bindings used by static analysis.
+//! Prepared package snapshots and byte bindings shared by profiles and campaigns.
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -6,24 +7,41 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use super::{Cancellation, failure};
-use crate::ProfileError;
+use crate::{Cancellation, InputError, failure};
 
-pub(super) type Hashes = BTreeMap<PathBuf, String>;
+pub type Hashes = BTreeMap<PathBuf, String>;
 
-#[derive(Debug, Clone)]
-pub(super) struct PreparedProject {
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PreparedProject {
     pub root: PathBuf,
     pub name: String,
     pub packages: BTreeMap<String, PathBuf>,
+    pub graph: Value,
     pub flutter: bool,
+    pub framework_collision: bool,
 }
 
-pub(super) fn read_regular(path: &Path, limit: usize) -> Result<Vec<u8>, ProfileError> {
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BoundTree {
+    pub root: PathBuf,
+    pub files: Hashes,
+    pub aliases: BTreeMap<PathBuf, BoundAlias>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BoundAlias {
+    pub link: PathBuf,
+    pub target: PathBuf,
+}
+
+pub fn read_regular(path: &Path, limit: usize) -> Result<Vec<u8>, InputError> {
     let bytes = read_regular_prefix(path, limit)?;
     if bytes.len() > limit {
         return Err(failure("prepared metadata exceeds its byte limit"));
@@ -31,14 +49,16 @@ pub(super) fn read_regular(path: &Path, limit: usize) -> Result<Vec<u8>, Profile
     Ok(bytes)
 }
 
-pub(super) fn read_regular_prefix(path: &Path, limit: usize) -> Result<Vec<u8>, ProfileError> {
+pub fn read_regular_prefix(path: &Path, limit: usize) -> Result<Vec<u8>, InputError> {
     let mut file = regular_file(path)?;
     let mut bytes = Vec::new();
-    (&mut file).take(limit as u64 + 1).read_to_end(&mut bytes)?;
+    (&mut file)
+        .take((limit as u64).saturating_add(1))
+        .read_to_end(&mut bytes)?;
     Ok(bytes)
 }
 
-fn regular_file(path: &Path) -> Result<File, ProfileError> {
+pub(crate) fn regular_file(path: &Path) -> Result<File, InputError> {
     let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
@@ -104,19 +124,76 @@ impl<'de> Deserialize<'de> for UniqueValue {
     }
 }
 
-pub(super) fn metadata_json(path: &Path) -> Result<Value, ProfileError> {
+pub fn metadata_json(path: &Path) -> Result<Value, InputError> {
     parse_json(&read_regular(path, 8 * 1024 * 1024)?)
 }
 
-pub(super) fn parse_json(bytes: &[u8]) -> Result<Value, ProfileError> {
-    serde_json::from_slice::<UniqueValue>(bytes)
+pub fn parse_json(bytes: &[u8]) -> Result<Value, InputError> {
+    let guarded = guard_integer_tokens(bytes)?;
+    serde_json::from_slice::<UniqueValue>(&guarded)
         .map(|value| value.0)
         .map_err(|_| failure("invalid or duplicate prepared project metadata"))
 }
 
+/// serde_json otherwise turns overflowing integer tokens into rounded f64s.
+/// Inspect only unquoted numeric tokens; JSON grammar validation still belongs
+/// to serde. Decimal/exponent tokens remain floats, even at integral values.
+fn guard_integer_tokens(bytes: &[u8]) -> Result<Cow<'_, [u8]>, InputError> {
+    let mut guarded = Cow::Borrowed(bytes);
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if bytes[cursor] == b'"' {
+            cursor += 1;
+            while cursor < bytes.len() {
+                match bytes[cursor] {
+                    b'\\' => cursor = (cursor + 2).min(bytes.len()),
+                    b'"' => {
+                        cursor += 1;
+                        break;
+                    }
+                    _ => cursor += 1,
+                }
+            }
+            continue;
+        }
+        if bytes[cursor] != b'-' && !bytes[cursor].is_ascii_digit() {
+            cursor += 1;
+            continue;
+        }
+        let start = cursor;
+        while bytes
+            .get(cursor)
+            .is_some_and(|byte| matches!(byte, b'0'..=b'9' | b'-' | b'+' | b'.' | b'e' | b'E'))
+        {
+            cursor += 1;
+        }
+        let token = &bytes[start..cursor];
+        if token.iter().any(|byte| matches!(byte, b'.' | b'e' | b'E')) {
+            continue;
+        }
+        // Every scanned byte is ASCII. Invalid signs or leading zeroes are
+        // rejected either here or by serde's subsequent grammar validation.
+        let text = std::str::from_utf8(token).expect("ASCII numeric token");
+        let valid = if token[0] == b'-' {
+            text.parse::<i64>().is_ok()
+        } else {
+            text.parse::<u64>().is_ok()
+        };
+        if !valid {
+            return Err(failure(
+                "prepared metadata integer exceeds the supported signed/unsigned 64-bit range",
+            ));
+        }
+        if token == b"-0" {
+            guarded.to_mut()[start] = b' ';
+        }
+    }
+    Ok(guarded)
+}
+
 /// The supported URI subset is deliberately local, matching prepared Dart
 /// package configuration: file URIs and references relative to package_config.
-fn local_uri(config: &Path, text: &str) -> Result<PathBuf, ProfileError> {
+fn local_uri(config: &Path, text: &str) -> Result<PathBuf, InputError> {
     if text.contains('\0') || text.contains('\\') {
         return Err(failure("invalid prepared dependency URI"));
     }
@@ -201,8 +278,17 @@ fn local_uri(config: &Path, text: &str) -> Result<PathBuf, ProfileError> {
     Ok(root)
 }
 
-pub(super) fn dependency_roots(config: &Path) -> Result<BTreeMap<String, PathBuf>, ProfileError> {
+pub fn dependency_roots(config: &Path) -> Result<BTreeMap<String, PathBuf>, InputError> {
     let value = metadata_json(config)?;
+    dependency_roots_from_value(config, &value)
+}
+
+/// Resolve the already captured package bytes against their original location.
+/// Snapshot rebasing must not re-read a mutable source configuration here.
+pub(crate) fn dependency_roots_from_value(
+    config: &Path,
+    value: &Value,
+) -> Result<BTreeMap<String, PathBuf>, InputError> {
     if value.get("configVersion").and_then(Value::as_u64) != Some(2) {
         return Err(failure("package configuration must have version 2"));
     }
@@ -229,10 +315,7 @@ pub(super) fn dependency_roots(config: &Path) -> Result<BTreeMap<String, PathBuf
     Ok(result)
 }
 
-pub(super) fn inspect_project(
-    root: &Path,
-    cancel: &Cancellation,
-) -> Result<PreparedProject, ProfileError> {
+pub fn inspect_project(root: &Path, cancel: &Cancellation) -> Result<PreparedProject, InputError> {
     cancel.check()?;
     let root = root.canonicalize()?;
     if !root.join("pubspec.yaml").is_file() {
@@ -299,12 +382,14 @@ pub(super) fn inspect_project(
         .map(str::to_owned)
         .collect();
     let mut visited = BTreeSet::new();
+    let mut framework_collision = false;
     while let Some(name) = pending.pop() {
         if !visited.insert(name.clone()) {
             continue;
         }
         if name == own {
-            continue;
+            framework_collision = true;
+            break;
         }
         pending.extend(
             adjacency
@@ -319,7 +404,9 @@ pub(super) fn inspect_project(
         root,
         name: own.to_owned(),
         packages,
+        graph,
         flutter,
+        framework_collision,
     })
 }
 
@@ -337,7 +424,8 @@ fn skip(relative: &Path, source: bool) -> bool {
             })
 }
 
-pub(super) fn hash_file(path: &Path, cancel: &Cancellation) -> Result<String, ProfileError> {
+pub fn hash_file(path: &Path, cancel: &Cancellation) -> Result<String, InputError> {
+    cancel.check()?;
     let mut file = regular_file(path)?;
     let mut digest = Sha256::new();
     let mut buffer = [0; 64 * 1024];
@@ -356,10 +444,10 @@ fn tree(
     root: &Path,
     relative: &Path,
     source: bool,
-    result: &mut Hashes,
+    result: &mut BoundTree,
     cancel: &Cancellation,
     depth: usize,
-) -> Result<(), ProfileError> {
+) -> Result<(), InputError> {
     if depth > 128 {
         return Err(failure("input tree exceeds supported depth"));
     }
@@ -369,6 +457,7 @@ fn tree(
         .collect::<Result<Vec<_>, _>>()?;
     paths.sort();
     for name in paths {
+        cancel.check()?;
         let relative = relative.join(name);
         if skip(&relative, source) {
             continue;
@@ -387,27 +476,40 @@ fn tree(
                 return Err(failure("input alias points into excluded tool state"));
             }
             let text = fs::read_link(&path)?;
-            let content = if target.is_file() {
-                hash_file(&target, cancel)?
-            } else {
-                String::new()
-            };
-            result.insert(
+            if target.is_file() {
+                result
+                    .files
+                    .insert(relative.clone(), hash_file(&target, cancel)?);
+            } else if !target.is_dir() {
+                return Err(failure("bound alias target must be a file or directory"));
+            }
+            result.aliases.insert(
                 relative,
-                format!("alias:{text:?}:{target_relative:?}:{content}"),
+                BoundAlias {
+                    link: text,
+                    target: if target_relative.as_os_str().is_empty() {
+                        PathBuf::from(".")
+                    } else {
+                        target_relative.to_owned()
+                    },
+                },
             );
         } else if metadata.is_dir() {
             tree(root, &relative, source, result, cancel, depth + 1)?;
         } else {
-            result.insert(relative, hash_file(&path, cancel)?);
+            result.files.insert(relative, hash_file(&path, cancel)?);
         }
     }
     Ok(())
 }
 
-pub(super) fn source_hashes(root: &Path, cancel: &Cancellation) -> Result<Hashes, ProfileError> {
-    let mut hashes = BTreeMap::new();
-    tree(root, Path::new(""), true, &mut hashes, cancel, 0)?;
+pub fn source_hashes(root: &Path, cancel: &Cancellation) -> Result<Hashes, InputError> {
+    let mut tree_binding = BoundTree {
+        root: root.to_owned(),
+        ..BoundTree::default()
+    };
+    tree(root, Path::new(""), true, &mut tree_binding, cancel, 0)?;
+    let mut hashes = tree_binding.files;
     if fs::symlink_metadata(root.join(".dart_tool")).is_ok_and(|info| info.file_type().is_symlink())
     {
         return Err(failure("symlink prepared configuration"));
@@ -417,6 +519,9 @@ pub(super) fn source_hashes(root: &Path, cancel: &Cancellation) -> Result<Hashes
         ".dart_tool/package_graph.json",
     ] {
         let path = root.join(relative);
+        if fs::symlink_metadata(&path).is_ok_and(|info| info.file_type().is_symlink()) {
+            return Err(failure("symlink prepared configuration"));
+        }
         if path.try_exists()? {
             hashes.insert(relative.into(), hash_file(&path, cancel)?);
         }
@@ -424,17 +529,22 @@ pub(super) fn source_hashes(root: &Path, cancel: &Cancellation) -> Result<Hashes
     Ok(hashes)
 }
 
-pub(super) fn bound_tree(root: &Path, cancel: &Cancellation) -> Result<Hashes, ProfileError> {
-    let mut hashes = BTreeMap::new();
-    tree(root, Path::new(""), false, &mut hashes, cancel, 0)?;
-    Ok(hashes)
+pub fn bound_tree(root: &Path, cancel: &Cancellation) -> Result<BoundTree, InputError> {
+    cancel.check()?;
+    let root = root.canonicalize()?;
+    let mut binding = BoundTree {
+        root: root.clone(),
+        ..BoundTree::default()
+    };
+    tree(&root, Path::new(""), false, &mut binding, cancel, 0)?;
+    Ok(binding)
 }
 
-pub(super) fn verify_source(
+pub fn verify_source(
     root: &Path,
     expected: &Hashes,
     cancel: &Cancellation,
-) -> Result<(), ProfileError> {
+) -> Result<(), InputError> {
     if source_hashes(root, cancel)? != *expected {
         return Err(failure(
             "project inputs changed during applicability analysis",
@@ -443,7 +553,7 @@ pub(super) fn verify_source(
     Ok(())
 }
 
-fn file_uri(path: &Path) -> Result<String, ProfileError> {
+pub(crate) fn file_uri(path: &Path) -> Result<String, InputError> {
     let text = path
         .to_str()
         .ok_or_else(|| failure("dependency path must be UTF-8"))?;
@@ -458,12 +568,12 @@ fn file_uri(path: &Path) -> Result<String, ProfileError> {
     Ok(uri)
 }
 
-pub(super) fn copy_snapshot(
+pub fn copy_snapshot(
     original: &PreparedProject,
     destination: &Path,
     before: &Hashes,
     cancel: &Cancellation,
-) -> Result<PreparedProject, ProfileError> {
+) -> Result<PreparedProject, InputError> {
     fs::create_dir(destination)?;
     for relative in before.keys() {
         cancel.check()?;
@@ -527,208 +637,5 @@ pub(super) fn copy_snapshot(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::os::unix::fs::symlink;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-    struct Fixture(PathBuf);
-    impl Fixture {
-        fn new() -> Self {
-            let root = std::env::temp_dir().join(format!(
-                "failforge-profile-inputs-{}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
-            fs::create_dir(&root).unwrap();
-            Self(root.canonicalize().unwrap())
-        }
-    }
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    #[test]
-    fn duplicate_metadata_is_rejected_at_every_nesting_level() {
-        for text in [
-            r#"{"packages":[],"packages":[]}"#,
-            r#"{"packages":[{"name":"a","name":"b"}]}"#,
-        ] {
-            assert!(serde_json::from_str::<UniqueValue>(text).is_err());
-        }
-        assert!(
-            serde_json::from_str::<UniqueValue>(r#"{"n":null,"b":true,"a":[1,2.5,"s"]}"#).is_ok()
-        );
-    }
-
-    #[test]
-    fn local_package_uris_preserve_spaces_unicode_and_relative_roots() {
-        let fixture = Fixture::new();
-        let package = fixture.0.join("some space Ж");
-        fs::create_dir(&package).unwrap();
-        let config = fixture.0.join("config.json");
-        assert_eq!(
-            local_uri(&config, "some%20space%20%D0%96").unwrap(),
-            package
-        );
-        assert_eq!(
-            local_uri(&config, "%2Fsome%20space%20%D0%96").unwrap(),
-            package
-        );
-        assert_eq!(
-            local_uri(
-                &config,
-                &file_uri(&package).unwrap().replacen("file:", "FILE:", 1)
-            )
-            .unwrap(),
-            package
-        );
-        assert_eq!(
-            local_uri(&config, &file_uri(&package).unwrap()[5..]).unwrap(),
-            package
-        );
-        let outside = Fixture::new();
-        symlink(&outside.0, fixture.0.join("alias")).unwrap();
-        assert_eq!(
-            local_uri(&config, "alias/../some%20space%20%D0%96").unwrap(),
-            package
-        );
-        assert_eq!(
-            local_uri(&config, &file_uri(&package).unwrap()).unwrap(),
-            package
-        );
-        assert_eq!(
-            local_uri(
-                &config,
-                &format!(
-                    "file://localhost{}",
-                    file_uri(&package).unwrap().strip_prefix("file://").unwrap()
-                )
-            )
-            .unwrap(),
-            package
-        );
-        for bad in [
-            "https://example.com/a",
-            "file://remote/a",
-            "//remote/a",
-            "a%00b",
-            "a\\b",
-            "",
-            "#fragment",
-            "file:",
-        ] {
-            assert!(local_uri(&config, bad).is_err(), "{bad}");
-        }
-    }
-
-    #[test]
-    fn snapshot_rebases_only_prepared_roots_and_retains_frozen_source_bytes() {
-        let fixture = Fixture::new();
-        let original = fixture.0.join("original");
-        let test_package = fixture.0.join("test dependency");
-        fs::create_dir_all(original.join(".dart_tool/test")).unwrap();
-        fs::create_dir_all(original.join("lib")).unwrap();
-        fs::create_dir(&test_package).unwrap();
-        fs::write(original.join("pubspec.yaml"), "name: subject\n").unwrap();
-        fs::write(original.join("lib/source.dart"), "bool f() => true;\n").unwrap();
-        fs::write(original.join(".dart_tool/test/old-cache"), "disposable").unwrap();
-        let config = json!({"configVersion":2,"packages":[{"name":"subject","rootUri":"../","packageUri":"lib/"},{"name":"test","rootUri":file_uri(&test_package).unwrap(),"packageUri":"lib/"}]});
-        let graph = json!({"roots":["subject"],"packages":[{"name":"subject","dependencies":["test"]},{"name":"test","dependencies":[]}]});
-        fs::write(
-            original.join(".dart_tool/package_config.json"),
-            serde_json::to_vec(&config).unwrap(),
-        )
-        .unwrap();
-        fs::write(
-            original.join(".dart_tool/package_graph.json"),
-            serde_json::to_vec(&graph).unwrap(),
-        )
-        .unwrap();
-        let cancel = Cancellation::default();
-        let project = inspect_project(&original, &cancel).unwrap();
-        let hashes = source_hashes(&original, &cancel).unwrap();
-        let snapshot =
-            copy_snapshot(&project, &fixture.0.join("snapshot"), &hashes, &cancel).unwrap();
-        assert_eq!(snapshot.packages["subject"], snapshot.root);
-        assert_eq!(snapshot.packages["test"], test_package);
-        assert_eq!(
-            fs::read(snapshot.root.join("lib/source.dart")).unwrap(),
-            fs::read(original.join("lib/source.dart")).unwrap()
-        );
-        assert!(!snapshot.root.join(".dart_tool/test").exists());
-        verify_source(&original, &hashes, &cancel).unwrap();
-        fs::write(original.join("lib/source.dart"), "changed").unwrap();
-        assert!(
-            copy_snapshot(
-                &project,
-                &fixture.0.join("changed-snapshot"),
-                &hashes,
-                &cancel
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn hashes_detect_additions_changes_and_reject_source_symlinks() {
-        let fixture = Fixture::new();
-        fs::write(fixture.0.join("source.dart"), "one").unwrap();
-        let cancel = Cancellation::default();
-        let before = source_hashes(&fixture.0, &cancel).unwrap();
-        fs::create_dir(fixture.0.join(".failforge")).unwrap();
-        fs::write(fixture.0.join(".failforge/report"), "ignored").unwrap();
-        verify_source(&fixture.0, &before, &cancel).unwrap();
-        fs::write(fixture.0.join("source.dart"), "two").unwrap();
-        assert!(verify_source(&fixture.0, &before, &cancel).is_err());
-        symlink("source.dart", fixture.0.join("alias.dart")).unwrap();
-        assert!(source_hashes(&fixture.0, &cancel).is_err());
-        assert!(bound_tree(&fixture.0, &cancel).is_ok());
-        fs::remove_file(fixture.0.join("alias.dart")).unwrap();
-        symlink("/", fixture.0.join("external")).unwrap();
-        assert!(bound_tree(&fixture.0, &cancel).is_err());
-    }
-
-    #[test]
-    fn file_reader_never_blocks_on_fifo_and_enforces_size() {
-        let fixture = Fixture::new();
-        let path = fixture.0.join("pipe");
-        let name = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-        // SAFETY: the C string is live and names a new test-only path.
-        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
-        assert!(read_regular(&path, 5).is_err());
-        fs::write(fixture.0.join("file"), b"123456").unwrap();
-        assert!(read_regular(&fixture.0.join("file"), 5).is_err());
-    }
-
-    #[test]
-    fn streaming_hashes_match_sha256_vectors_across_multiple_read_blocks() {
-        let fixture = Fixture::new();
-        let path = fixture.0.join("input");
-        let cancel = Cancellation::default();
-        for (bytes, expected) in [
-            (
-                vec![],
-                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-            ),
-            (
-                b"abc".to_vec(),
-                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-            ),
-            (
-                vec![b'a'; 1_000_000],
-                "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0",
-            ),
-        ] {
-            fs::write(&path, bytes).unwrap();
-            assert_eq!(hash_file(&path, &cancel).unwrap(), expected);
-        }
-        cancel.request(libc::SIGTERM);
-        assert!(matches!(
-            hash_file(&path, &cancel),
-            Err(ProfileError::Cancelled(libc::SIGTERM))
-        ));
-    }
-}
+#[path = "inputs_tests.rs"]
+mod tests;

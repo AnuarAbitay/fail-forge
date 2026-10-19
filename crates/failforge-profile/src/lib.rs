@@ -59,3 +59,13 @@ pub struct ProfileDraft {
     pub binding: output::OutputBinding,
     pub framework_flutter: Option<bool>,
 }
+
+impl From<failforge_workspace::InputError> for ProfileError {
+    fn from(error: failforge_workspace::InputError) -> Self {
+        match error {
+            failforge_workspace::InputError::Io(error) => Self::Io(error),
+            failforge_workspace::InputError::Invalid(message) => Self::Analysis(message),
+            failforge_workspace::InputError::Cancelled(signal) => Self::Cancelled(signal),
+        }
+    }
+}
