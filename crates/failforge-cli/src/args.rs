@@ -128,7 +128,7 @@ pub(crate) struct ProfileGenerateArgs {
     /// Prepared Dart adapter directory for applicability analysis.
     #[arg(long, value_name = "PATH")]
     adapter_root: Option<PathBuf>,
-    /// Installation root containing the prepared Dart adapter and toolchain.
+    /// Installation root; defaults to the running executable's installation.
     #[arg(long, value_name = "PATH")]
     pub(crate) installation: Option<PathBuf>,
 }
@@ -210,7 +210,7 @@ pub(crate) struct MutateArgs {
     /// Explicit prepared Dart adapter directory.
     #[arg(long, value_name = "PATH")]
     adapter_root: Option<PathBuf>,
-    /// Installation root containing the prepared Dart adapter and toolchain.
+    /// Installation root; defaults to the running executable's installation.
     #[arg(long, value_name = "PATH")]
     pub(crate) installation: Option<PathBuf>,
 }
@@ -244,6 +244,7 @@ pub(crate) struct ReplayArgs {
     flutter_sdk: Option<PathBuf>,
     #[arg(long)]
     adapter_root: Option<PathBuf>,
+    /// Installation root; defaults to the running executable's installation.
     #[arg(long)]
     installation: Option<PathBuf>,
 }

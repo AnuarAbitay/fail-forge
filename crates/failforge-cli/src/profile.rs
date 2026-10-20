@@ -1,6 +1,6 @@
 //! Native profile generation; this CLI owns cancellation until cleanup finishes.
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 
 use failforge_config::Context;
@@ -27,9 +27,9 @@ fn context(
             "invocation directory must be absolute".into(),
         ));
     }
-    let default = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let requested = arguments.installation.as_deref().unwrap_or(&default);
-    let context = Context::new(invocation_cwd, requested)?;
+    let installation = crate::installation::resolve(arguments.installation.as_deref())
+        .map_err(|error| ProfileError::Analysis(error.to_string()))?;
+    let context = Context::new(invocation_cwd, &installation)?;
     if !context.installation.is_dir() {
         return Err(ProfileError::Analysis(
             "profile installation is unavailable; use --installation PATH".into(),
@@ -73,7 +73,7 @@ async fn generate(arguments: &ProfileGenerateArgs, context: &Context) -> Result<
                 std::io::stderr(),
                 "failforge: analysing applicable mutation operators"
             )?;
-            let executable = std::env::current_exe()?;
+            let executable = std::env::current_exe()?.canonicalize()?;
             let helper = executable
                 .parent()
                 .ok_or_else(|| {

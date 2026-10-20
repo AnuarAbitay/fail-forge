@@ -25,6 +25,7 @@ mod display;
 mod family_execution;
 mod family_queue;
 mod family_stream;
+mod installation;
 mod mutant_confirmation;
 mod mutant_execution;
 mod mutate;

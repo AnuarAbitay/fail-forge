@@ -1,7 +1,8 @@
 # Installation and first run
 
-This guide installs FailForge from source. It does not require a published
-release archive. Keep the source checkout available while using this installation.
+This guide installs FailForge from source. You can run it from the checkout or
+arrange a [separate installation](#relocate-an-installation) after building.
+The guide does not assume that a prebuilt release archive is available.
 Read the [beta limitations](beta-limitations.md) before running a campaign.
 
 ## Requirements
@@ -38,8 +39,8 @@ cargo build --workspace --locked
 ```
 
 The first build may download Rust dependencies. The default build is optimized;
-you do not need to add `--release`. Cargo places the executables in
-`target/debug/` with this project's current build settings.
+you do not need to add `--release`. With Cargo's default output directory, this
+project places the executables in `target/debug/`.
 
 Check the public command:
 
@@ -61,7 +62,12 @@ export PATH="$FAILFORGE_HOME/target/debug:$PATH"
 
 Repeat these exports in a new shell or add them to your shell configuration.
 The commands below pass `--installation "$FAILFORGE_HOME"` explicitly so that
-the installation is selected consistently.
+the installation is selected consistently. Standard `target/debug/` and
+`target/release/` builds can also locate the checkout without this flag.
+
+If you use `CARGO_TARGET_DIR`, `cargo --target` or another binary layout, adjust
+the executable paths and `PATH` above, and keep the explicit `--installation`
+option. FailForge does not fall back to the checkout path used at build time.
 
 ## 2. Prepare the adapter
 
@@ -230,12 +236,78 @@ Use Ctrl+C to request cancellation and allow cleanup to finish. An interrupted
 campaign has no final score and does not automatically resume on the next run.
 See the [report guide](mutation-cli.md#results-and-correctness) for details.
 
+## Relocate an installation
+
+After building, the runtime can live separately from the source checkout. Keep
+the two native executables together and preserve this adapter layout:
+
+```text
+installation/
+  bin/
+    failforge
+    failforge-adapter-campaign
+  adapters/
+    dart/
+      bin/
+      lib/
+      pubspec.yaml
+      pubspec.lock
+      LICENSE
+      NOTICE
+```
+
+Copy the executables built for the destination operating system and architecture
+and the adapter files into their new locations. This is the runtime layout,
+not a ready-made release archive. When distributing it, also include the
+licenses, notices and inventory described in the
+[dependency license review](dependency-licenses.md#distribution-boundaries).
+
+Prepare the adapter at its final location using a compatible SDK:
+
+```sh
+export FAILFORGE_HOME="/absolute/path/to/installation"
+export DART_SDK="/absolute/path/to/dart-sdk"
+export PATH="$FAILFORGE_HOME/bin:$PATH"
+"$DART_SDK/bin/dart" --suppress-analytics pub get \
+  --enforce-lockfile --directory "$FAILFORGE_HOME/adapters/dart"
+```
+
+Do not transfer another machine's `.dart_tool/` directory or package cache.
+The SDK and dependencies remain separate prerequisites. When moving an existing
+installation, run this preparation again so the dependency paths match its new
+location. For Flutter, use its bundled compatible Dart SDK for this step and
+select `--flutter-sdk` for campaigns as described above.
+
+For `installation/bin/failforge`, the installation root is discovered from the
+executable's location. No `--installation` flag is necessary in this layout.
+A symlink to the executable uses the real executable's location. You can still
+pass `--installation PATH` to select a different root; an explicit value always
+wins, and a relative value is resolved from the directory where you invoke
+FailForge.
+
+An executable outside the installed or standard Cargo layouts needs
+`--installation PATH`; the error message asks for it. The same selection rules
+apply to `mutate`, `replay` and `profile generate`.
+
+The default adapter is `<installation>/adapters/dart`. To use a separately
+prepared adapter, pass `--adapter-root PATH` in direct commands or profile
+generation; with `mutate --config`, use `adapter_root` in YAML. This override does
+not replace installation selection, and the native analysis helper must still
+remain beside `failforge`. Continue passing `--dart-sdk` or `--flutter-sdk` for
+an SDK outside the installation's default `.toolchain/` location. With a YAML
+profile, set the corresponding SDK path in the profile.
+
+The installed layout does not depend on the original build checkout. Keep the
+checkout if you want to rebuild, and retain the adapter's `bin/` and `lib/`
+files in the installation.
+
 ## Installation troubleshooting
 
 | Symptom | Check |
 | --- | --- |
 | Adapter dependency resolution fails | Confirm the SDK is Dart 3.13.x and use the checked-in adapter lockfile. |
-| Installation or adapter cannot be found | Pass `--installation` pointing to the complete source checkout and prepare `adapters/dart`. |
+| Installation cannot be determined | Use the installed `bin/` layout or pass `--installation` pointing to the installation root. Custom Cargo output locations need an explicit root. |
+| Adapter cannot be found | Prepare `<installation>/adapters/dart`, or select a prepared adapter with `--adapter-root` or the profile's `adapter_root`. |
 | Native analysis helper cannot be found | Build the workspace and keep `failforge-adapter-campaign` beside `failforge`. |
 | Package metadata is missing | Run the appropriate `pub get` in the target with the selected SDK. |
 | Baseline tests fail or time out | Run the target's normal test command first, then review the baseline report and timeout settings. |

@@ -58,8 +58,8 @@ protocols; the public campaign calls the same implementations directly.
 
 ## Prepare the installation and target
 
-The first distribution uses this repository's installation layout. Build the
-native executables and prepare the Dart adapter separately:
+The current installation starts from source. Build the native executables and
+prepare the Dart adapter separately with a compatible SDK:
 
 ```sh
 cargo build --workspace --locked
@@ -88,10 +88,29 @@ documented version constraints. A Flutter project can also use the installation'
 Flutter SDK when its Dart SDK has that layout. Runtime paths and effective rules
 are recorded in the manifest.
 
-`--installation PATH` selects a relocated installation containing `adapters/`
-and, optionally, the prepared `.toolchain/`. Profile applicability analysis also
-uses `failforge-adapter-campaign` from the same binary directory as `failforge`.
-A standalone copied binary without the prepared adapter is insufficient.
+Installation selection is shared by `mutate`, `replay` and `profile generate`:
+
+- An explicit `--installation PATH` takes priority. Relative paths are resolved
+  from the invocation directory.
+- Without that option, `<root>/bin/failforge` selects `<root>`. Source builds at
+  `<root>/target/debug/failforge` or `<root>/target/release/failforge` also select
+  `<root>`. Selection uses the real executable location, including when launched
+  through a symlink.
+- Any other layout requires `--installation PATH`. There is no fallback to the
+  source path recorded at build time. Use the explicit option with a custom
+  `CARGO_TARGET_DIR` or target-triple build output.
+
+The default adapter is `<root>/adapters/dart`; `--adapter-root` still selects a
+separately prepared adapter. SDK selection is independent. In YAML mode, use
+`adapter_root`, `dart_sdk` or `flutter_sdk` in the profile; `--installation`
+remains available on the command line.
+
+Profile applicability analysis uses `failforge-adapter-campaign` beside the real
+`failforge` executable, independently of the installation override. A standalone
+copied binary without the prepared adapter is insufficient. Prepare adapter
+dependencies at their final location. See the
+[installation guide](installation.md#relocate-an-installation) for the relocated
+layout; it does not imply that a prebuilt release archive is available.
 
 ## Generate a profile
 
@@ -219,7 +238,8 @@ are errors. A failed write restores the previous profile and cleans its own
 unpublished temporary files. If the filesystem also refuses restoration, the
 recoverable `.failforge-profile-backup-*.tmp` copy is retained for recovery.
 
-Generation uses the existing installation layout selected by `--installation PATH`.
+Generation uses the installation selected by the rules above, with
+`--installation PATH` available as an explicit override.
 Analysis preserves the source, package metadata, dependencies, SDK and
 adapter inputs and cleans its temporary workspaces. It does not execute author
 tests; template mode also skips discovery and static validation.

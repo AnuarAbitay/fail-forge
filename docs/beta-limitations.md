@@ -55,13 +55,25 @@ installation/
 ```
 
 This tree describes runtime requirements, not an available prebuilt release
-asset. Pass `--installation /absolute/installation` when relocating; the current
-default points to the source checkout used at build time. Supply `--dart-sdk`
-or `--flutter-sdk` for an SDK outside the installation's default `.toolchain`
-location in direct CLI mode. With `mutate --config`, set `dart_sdk` or
-`flutter_sdk` in the YAML profile instead. Prepare adapter dependencies at their
-final location rather than shipping another machine's generated package
-configuration.
+asset. `installation/bin/failforge` finds the installation from its own real
+location; the source layouts `<checkout>/target/debug/failforge` and
+`<checkout>/target/release/failforge` find that checkout. Relocation does not
+depend on the checkout used to build the binary.
+
+An explicit `--installation PATH` takes priority. Relative values are resolved
+from the invocation directory. Other layouts, including custom Cargo output
+directories, need this option instead of a build-time path fallback. Keep
+`failforge-adapter-campaign` beside the actual `failforge` executable even when
+overriding the installation.
+
+Supply `--dart-sdk` or `--flutter-sdk` for an SDK outside the installation's
+default `.toolchain` location in direct CLI mode. With `mutate --config`, set
+`dart_sdk` or `flutter_sdk` in the YAML profile instead. A separately prepared
+adapter remains selectable with `--adapter-root` or YAML `adapter_root`.
+Prepare adapter dependencies at their final location rather than shipping
+another machine's generated package configuration. See
+[relocation instructions](installation.md#relocate-an-installation) and the
+[distribution license requirements](dependency-licenses.md#distribution-boundaries).
 
 ## Supported target projects and isolation
 

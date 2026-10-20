@@ -83,6 +83,9 @@ or Flutter with a Dart SDK in that range. Building from source requires
 Follow the [installation guide](docs/installation.md) to build FailForge,
 prepare its adapter and prepare your target package's dependencies. It also
 explains Flutter setup and the platforms verified so far.
+After building, you can [move FailForge into a separate installation](docs/installation.md#relocate-an-installation)
+without keeping the original checkout. A compatible SDK and prepared adapter
+dependencies are still required.
 
 The examples below run from the **target package root**, with these paths set:
 

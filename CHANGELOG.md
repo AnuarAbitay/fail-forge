@@ -30,6 +30,9 @@ unreleased; no published release or release date is implied.
 
 ### Fixed
 
+- Relocated installations find their installation root relative to the executable
+  instead of the original build checkout. Standard source-build locations work
+  as well; `--installation` remains an explicit override for custom layouts.
 - Invalid Dart package configuration is rejected before starting a test process.
   Malformed metadata, duplicate package roots and an alias pointing outside the
   current working copy are reported as infrastructure failures.

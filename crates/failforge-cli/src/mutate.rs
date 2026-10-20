@@ -2,7 +2,7 @@
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{self, Read};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
@@ -300,11 +300,14 @@ fn execute_selected(
             return ExitCode::from(125);
         }
     };
-    let default = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let context = match Context::new(
-        invocation_cwd,
-        arguments.installation.as_deref().unwrap_or(&default),
-    ) {
+    let installation = match crate::installation::resolve(arguments.installation.as_deref()) {
+        Ok(installation) => installation,
+        Err(error) => {
+            diagnostic(&error.to_string());
+            return ExitCode::from(125);
+        }
+    };
+    let context = match Context::new(invocation_cwd, &installation) {
         Ok(context) => context,
         Err(error) => {
             diagnostic(&error.to_string());
