@@ -159,6 +159,11 @@ fn private_controls_are_removed_from_adapter_environment() {
     for name in PRIVATE_ENV {
         assert!(spec.env.remove.contains(std::ffi::OsStr::new(name)));
     }
+    assert!(
+        spec.env
+            .remove
+            .contains(std::ffi::OsStr::new("FAILFORGE_REPORT_FDS"))
+    );
 }
 
 #[test]

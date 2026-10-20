@@ -94,6 +94,7 @@ impl Runtime {
             "FAILFORGE_WORKSPACE_REQUEST_FD",
             "FAILFORGE_WORKSPACE_HANDOFF_FD",
             "FAILFORGE_WORKSPACE_CAPS_FDS",
+            "FAILFORGE_REPORT_FDS",
         ] {
             environment.remove(std::ffi::OsStr::new(key));
         }
@@ -448,6 +449,7 @@ mod tests {
             "FAILFORGE_WORKSPACE_REQUEST_FD",
             "FAILFORGE_WORKSPACE_HANDOFF_FD",
             "FAILFORGE_WORKSPACE_CAPS_FDS",
+            "FAILFORGE_REPORT_FDS",
         ];
         let mut input = BTreeMap::from([("PATH".into(), "/tools/bin".into())]);
         for key in private {

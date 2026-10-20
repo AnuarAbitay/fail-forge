@@ -133,6 +133,7 @@ fn specifications_preserve_dart_flutter_argv_limits_and_private_environment() {
             assert!(spec.env.remove.contains(OsStr::new(name)));
             assert!(!spec.env.set.contains_key(OsStr::new(name)));
         }
+        assert!(spec.env.remove.contains(OsStr::new("FAILFORGE_REPORT_FDS")));
         let expected_child = if flutter {
             vec![
                 fixture.0.join("flutter/bin/flutter").display().to_string(),

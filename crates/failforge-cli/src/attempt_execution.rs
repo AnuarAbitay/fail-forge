@@ -17,7 +17,7 @@ use serde::Deserialize;
 use crate::args::TestReporter;
 use crate::test_evidence::AttemptEvidence;
 
-const PRIVATE_ENV: [&str; 8] = [
+const PRIVATE_ENV: [&str; 9] = [
     "FAILFORGE_WORKSPACE_LEASE_FD",
     "FAILFORGE_ADAPTER_CANCEL_FD",
     "FAILFORGE_RUNNER_READY_FD",
@@ -26,6 +26,7 @@ const PRIVATE_ENV: [&str; 8] = [
     "FAILFORGE_WORKSPACE_REQUEST_FD",
     "FAILFORGE_WORKSPACE_HANDOFF_FD",
     "FAILFORGE_WORKSPACE_CAPS_FDS",
+    "FAILFORGE_REPORT_FDS",
 ];
 
 #[derive(Debug, Clone, Deserialize)]

@@ -55,6 +55,9 @@ pub(crate) enum Commands {
     /// Private pure final summary and terminal rendering operation.
     #[command(hide = true)]
     CampaignReport,
+    /// Private descriptor-bound atomic publication of final campaign reports.
+    #[command(hide = true)]
+    CampaignPublish,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

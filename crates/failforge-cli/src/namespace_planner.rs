@@ -339,6 +339,7 @@ fn command(
         "FAILFORGE_WORKSPACE_REQUEST_FD",
         "FAILFORGE_WORKSPACE_HANDOFF_FD",
         "FAILFORGE_WORKSPACE_CAPS_FDS",
+        "FAILFORGE_REPORT_FDS",
     ] {
         env.remove.insert(key.into());
     }

@@ -25,7 +25,7 @@ use validation::{candidate, candidate_limit, discovered, operator_catalogue, pac
 pub const MAX_TRANSCRIPT_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_SOURCE_BYTES: usize = 4 * 1024 * 1024;
 const CLEANUP_RESERVE: usize = 64 * 1024;
-const PRIVATE_ENV: [&str; 8] = [
+const PRIVATE_ENV: [&str; 9] = [
     "FAILFORGE_WORKSPACE_LEASE_FD",
     "FAILFORGE_ADAPTER_CANCEL_FD",
     "FAILFORGE_RUNNER_READY_FD",
@@ -34,6 +34,7 @@ const PRIVATE_ENV: [&str; 8] = [
     "FAILFORGE_WORKSPACE_REQUEST_FD",
     "FAILFORGE_WORKSPACE_HANDOFF_FD",
     "FAILFORGE_WORKSPACE_CAPS_FDS",
+    "FAILFORGE_REPORT_FDS",
 ];
 
 /// Validated inputs. Constructing this object never starts an adapter process.

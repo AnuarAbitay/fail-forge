@@ -84,6 +84,18 @@ fn quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', "'\"'\"'"))
 }
 
+#[test]
+fn planner_command_removes_private_report_descriptors_from_child_environment() {
+    let fixture = Fixture::new();
+    let project = fixture.project();
+    let runtime = fixture.runtime();
+    let report = report_directory(&project, &fixture.0.join("report"), &runtime).unwrap();
+    let (spec, _) = command(&project, &report, &runtime, &[]).unwrap();
+    let key = std::ffi::OsStr::new("FAILFORGE_REPORT_FDS");
+    assert!(spec.env.remove.contains(key));
+    assert!(!spec.env.set.contains_key(key));
+}
+
 #[tokio::test]
 async fn native_planner_publishes_private_source_bound_artifacts() {
     let _permit = PLANNER_RUN.lock().await;

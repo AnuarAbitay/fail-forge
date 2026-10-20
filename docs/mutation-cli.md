@@ -108,17 +108,22 @@ already includes final source checks and workspace cleanup. After draining the
 owner and final callbacks, Rust constructs the final aggregate JSON and terminal
 table in one pure report operation. It counts each family separately and excludes
 TIMEOUT and other unscored outcomes from the KILLED/SURVIVED denominator. Partial
-campaigns publish no score. Python retains the existing atomic file publication
-before the campaign can report success.
+campaigns publish no score. A separate Rust publication operation makes the
+final files visible before the campaign can report success.
 
 Report construction does not launch tests or touch project files and still runs
 after cancellation. Only identities, outcomes, reasons and metadata cross its
 private channel; detailed retained attempt evidence is attached unchanged afterward.
 Its request and response each retain the 64 MiB limit without duplicating opaque
-attempt payloads. If final publication fails, the failed summary and its table are
-rebuilt together. If native report construction fails, no successful aggregate
-is published and no Python scoring fallback is used. Manifests, the event journal,
-running progress/checkpoints and the atomic file publisher remain in Python.
+attempt payloads. Final publication streams the complete documents from private
+file descriptors, so that metadata limit does not cap the report files.
+If publication fails before commit, the failed summary and its table are rebuilt
+together. If confirmation is lost, the controller verifies the files after the
+publisher exits. An unresolved commit is preserved and reported as an error,
+never overwritten with a failed summary. If native report construction fails,
+no successful aggregate is published and no Python scoring fallback is used.
+Manifests, the event journal, running progress/checkpoints and the initial report
+layout remain in Python.
 
 An attempt becomes terminal after source verification and cleanup. Cancellation
 observed before that point is recorded in its result; a later cancellation stops
@@ -135,8 +140,9 @@ author tests. Python is still required for campaign execution. Profile generatio
 runs through the native `failforge-profile` crate without Python or PyYAML. The native
 configuration library also exposes the direct settings and profile APIs for
 later migration stages. Preflight, snapshot/bootstrap, final workspace cleanup
-and final report calculation run in Rust. The Python controller still transports
-configuration/environment/signals and publishes aggregate files. Standalone diagnostic tools
+and final report calculation/publication run in Rust. The Python controller still
+transports configuration/environment/signals and writes live progress, manifests
+and the journal. Standalone diagnostic tools
 retain their Python transcript implementation during migration; a native
 production error never falls back to that implementation.
 
@@ -569,7 +575,12 @@ commit pointer. Final reports become visible together only after all of them
 have been written and synchronized. Preserve the hidden `.profile-reports/`
 directory and `.profile-reports-current` link when copying the report directory,
 or dereference the public `summary.json` paths when exporting individual files.
-An interrupted publication leaves the public reports incomplete and unscored.
+An interruption before the commit leaves the previous incomplete view visible.
+An interruption after the pointer switch can leave the completed report visible;
+the controller verifies this state before reporting an uncertain outcome.
+Failed or ambiguous publication can retain private staging files for inspection.
+The atomic switch guarantees consistent visibility, not persistence of the
+rename across power loss.
 The journal's `campaign_finalizing` event records an intended status, not a
 committed result; use the root `summary.json` to determine completion.
 
@@ -601,8 +612,8 @@ summary to monitor a large campaign.
 A terminal report for a failed or gracefully cancelled campaign contains the
 available partial results and remains incomplete and unscored. A profile clears
 the scores of every selected family, including families that finished earlier.
-The existing atomic profile publication rule still applies: root and family
-reports must agree before a final successful profile is visible.
+The atomic profile publication rule applies to incomplete reports too: root
+and family reports are prepared in a fresh generation and published together.
 
 SIGKILL or a host crash can prevent terminal publication. In that case the
 initial summary can remain visible while `progress.json`, per-mutant results

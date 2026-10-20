@@ -333,7 +333,8 @@ source/dependency/SDK hashes, immutable snapshots, fresh project copies and
 workspace lifecycle operations run through `failforge-workspace` in Rust. One
 native campaign owner schedules discovery and selected families; shared family
 execution owns the baseline, bounded mutant queue and final original control.
-The Python controller transports normalized settings and publishes aggregate evidence.
+The Python controller transports normalized settings and writes live progress
+and journal evidence; Rust constructs and publishes terminal summaries.
 Rust computes final summaries, scores and terminal tables. Native preflight, snapshot creation and final cleanup share the same owner. Each native test process keeps
 the same Rust Runner ownership. Working copies live in a private per-user
 registry protected by campaign leases. Startup recovery removes only validated
@@ -465,12 +466,29 @@ clean completion, then counts outcomes/reasons and computes separate family
 scores. Only KILLED and SURVIVED enter the denominator. Incomplete campaigns have
 no final scores, including completed children of an incomplete profile.
 The response also carries the final terminal table outside the public summary
-schema. Python checks the response binding and keeps the existing atomic file
-publisher: a complete profile becomes visible through one pointer switch. A
-publication error rebuilds an incomplete summary and table in Rust; a native
-report error never falls back to Python aggregation. No callbacks or helper
-operations follow a successful publication. Running progress/checkpoints,
-manifests, the event journal and publication remain migration work.
+schema. Python checks the response binding, then passes private unlinked report
+files to one `campaign-publish` owner. These payloads are streamed independently
+of the 64 MiB metadata limit. The output directory is bound at preparation;
+profile directories and aliases are bound immediately after initialization.
+Rust validates those bindings, descriptor types, sizes and SHA-256 digests,
+then writes and synchronizes a fresh generation using directory descriptors.
+One atomic rename publishes a direct summary or switches the profile pointer.
+Both complete and incomplete profile summaries become visible as one generation.
+
+The commit rename is the last fallible publication operation. No callback,
+logging or success response follows it. Exit code zero confirms the commit;
+125 denotes a failure before commit. After any other uncertain exit or transport
+failure, the controller joins the owner and verifies the expected files without
+writing: matching published contents confirm success, an unchanged previous
+view permits a failed-report retry, and any other state remains unresolved.
+An unresolved publication is never overwritten with a failed report.
+A confirmed failure before commit rebuilds the incomplete summary and table
+in Rust; native construction errors never fall back to Python aggregation.
+Private staging files from failed or ambiguous operations are retained.
+File synchronization and atomic visibility do not guarantee that the final
+rename survives power loss; no directory synchronization follows that rename.
+Running progress/checkpoints, manifests, the event journal and their initial
+profile layout remain migration work.
 
 Discovery has a shared native implementation and a standalone private operation. It owns one
 `AdapterClient` session directly through Runner, checks the selected family's
@@ -510,8 +528,9 @@ Rust discovery owner. A cancellation or controller crash closes the private
 control channel so that owner drains its adapter before releasing the workspace
 lease. Generation verifies complete static evidence and unchanged inputs before
 publishing through directory-bound atomic filesystem operations. Campaign
-aggregate publication, manifests, running checkpoints and the journal remain in
-Python during the migration; final aggregation and terminal tables run in Rust.
+manifests, running checkpoints, the initial report layout and the journal remain
+in Python during the migration; final aggregation, terminal tables and atomic
+publication run in Rust.
 
 Primary Dart/Flutter test classification lives in `failforge-dart`. The native
 test owner parses the complete JSON reporter stream after Runner shutdown and
