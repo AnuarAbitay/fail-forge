@@ -52,6 +52,9 @@ pub(crate) enum Commands {
     /// Private owner of preflight, snapshot, campaign execution and cleanup.
     #[command(hide = true)]
     CampaignRun,
+    /// Private pure final summary and terminal rendering operation.
+    #[command(hide = true)]
+    CampaignReport,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

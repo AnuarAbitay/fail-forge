@@ -104,8 +104,21 @@ validate coverage without separate byte commitments. Records arriving
 after cancellation remain in the partial report. If a progress or report callback
 fails, the controller requests cancellation and retains subsequent records without
 calling that failing publication path again. A successful native terminal still
-already includes final source checks and workspace cleanup. Python then atomically
-publishes the aggregate report before the campaign can report success.
+already includes final source checks and workspace cleanup. After draining the
+owner and final callbacks, Rust constructs the final aggregate JSON and terminal
+table in one pure report operation. It counts each family separately and excludes
+TIMEOUT and other unscored outcomes from the KILLED/SURVIVED denominator. Partial
+campaigns publish no score. Python retains the existing atomic file publication
+before the campaign can report success.
+
+Report construction does not launch tests or touch project files and still runs
+after cancellation. Only identities, outcomes, reasons and metadata cross its
+private channel; detailed retained attempt evidence is attached unchanged afterward.
+Its request and response each retain the 64 MiB limit without duplicating opaque
+attempt payloads. If final publication fails, the failed summary and its table are
+rebuilt together. If native report construction fails, no successful aggregate
+is published and no Python scoring fallback is used. Manifests, the event journal,
+running progress/checkpoints and the atomic file publisher remain in Python.
 
 An attempt becomes terminal after source verification and cleanup. Cancellation
 observed before that point is recorded in its result; a later cancellation stops
@@ -121,8 +134,9 @@ Configuration loading itself needs neither Python nor an SDK and never starts
 author tests. Python is still required for campaign execution. Profile generation
 runs through the native `failforge-profile` crate without Python or PyYAML. The native
 configuration library also exposes the direct settings and profile APIs for
-later migration stages. Initial preflight, snapshot/bootstrap lifecycle, final
-workspace cleanup and aggregate reports still use the Python controller. Standalone diagnostic tools
+later migration stages. Preflight, snapshot/bootstrap, final workspace cleanup
+and final report calculation run in Rust. The Python controller still transports
+configuration/environment/signals and publishes aggregate files. Standalone diagnostic tools
 retain their Python transcript implementation during migration; a native
 production error never falls back to that implementation.
 

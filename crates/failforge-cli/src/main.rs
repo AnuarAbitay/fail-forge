@@ -8,6 +8,9 @@ mod attempt;
 mod attempt_artifacts;
 mod attempt_execution;
 mod campaign_execution;
+mod campaign_report;
+mod campaign_report_command;
+mod campaign_report_terminal;
 mod campaign_session;
 mod campaign_workspace;
 mod dart_namespace;
@@ -81,6 +84,7 @@ fn main() -> ExitCode {
         Commands::FamilyExecute => return family_execution::execute(),
         Commands::CampaignExecute => return campaign_execution::execute(),
         Commands::CampaignRun => return campaign_session::execute(),
+        Commands::CampaignReport => return campaign_report_command::execute(),
         Commands::Profile(arguments) => match arguments.command {
             ProfileCommands::Generate(arguments) => {
                 return profile::execute(*arguments, &invocation_cwd);
