@@ -11,9 +11,10 @@ use serde_json::{Value, json};
 use tokio::signal::unix::{SignalKind, signal};
 
 use crate::campaign_execution::CampaignEvents;
+use crate::campaign_progress::{State as ProgressState, Writer as ProgressWriter};
 use crate::campaign_workspace::{self as workspace, Preflight, Request, Workspace};
 use crate::dart_namespace::invalid;
-use crate::family_stream::Stream;
+use crate::family_stream::{FrameWriter, Stream};
 
 type Owner = Arc<Mutex<Option<Workspace>>>;
 
@@ -59,15 +60,21 @@ struct Completion {
     error: Option<String>,
 }
 
-struct CampaignSink<'a> {
-    stream: &'a mut Stream,
+struct CampaignSink<'a, W: FrameWriter> {
+    stream: &'a mut Stream<W>,
     completion: Option<Completion>,
+    progress: &'a mut LiveProgress,
+    cancel: &'a Cancellation,
 }
 
-impl CampaignEvents for CampaignSink<'_> {
+impl<W: FrameWriter> CampaignEvents for CampaignSink<'_, W> {
     fn emit_campaign(&mut self, event: Value) -> io::Result<()> {
         self.stream
-            .emit_session(json!({"kind":"campaign_event","event":event}))
+            .emit_session(json!({"kind":"campaign_event","event":event}))?;
+        // A reporting failure requests cancellation but must not poison the
+        // event sink: sealed results from already-started workers still drain.
+        self.progress.observe(&event, self.cancel);
+        Ok(())
     }
 
     fn finish_campaign(
@@ -92,6 +99,64 @@ impl CampaignEvents for CampaignSink<'_> {
     }
 }
 
+struct LiveProgress {
+    state: ProgressState,
+    writer: ProgressWriter,
+    started: Instant,
+    error: Option<String>,
+}
+
+impl LiveProgress {
+    fn new(
+        preflight: &Preflight,
+        report: &crate::family_execution::DirectoryGuard,
+    ) -> Result<Self, NamespaceError> {
+        let families = preflight
+            .families
+            .iter()
+            .map(|family| family.family.clone())
+            .collect::<Vec<_>>();
+        Ok(Self {
+            state: ProgressState::new(
+                preflight.mode.as_str(),
+                &preflight.run_id,
+                &preflight.output,
+                &families,
+            )?,
+            writer: ProgressWriter::new(&preflight.output, report.descriptor()?)?,
+            started: Instant::now(),
+            error: None,
+        })
+    }
+
+    fn fail(&mut self, error: io::Error, cancel: &Cancellation) {
+        self.error
+            .get_or_insert_with(|| format!("campaign progress publication failed: {error}"));
+        cancel.request(libc::SIGINT);
+    }
+
+    fn observe(&mut self, event: &Value, cancel: &Cancellation) {
+        match self.state.observe(event) {
+            Ok(true) if self.error.is_none() => self.write(None, cancel),
+            Ok(_) => {}
+            Err(error) => self.fail(error, cancel),
+        }
+    }
+
+    fn write(&mut self, status: Option<&str>, cancel: &Cancellation) {
+        if self.error.is_some() {
+            return;
+        }
+        let result = self
+            .state
+            .snapshot(self.started.elapsed().as_secs_f64(), status)
+            .and_then(|value| self.writer.write(&value));
+        if let Err(error) = result {
+            self.fail(error, cancel);
+        }
+    }
+}
+
 fn runtime_value(preflight: &Preflight) -> Value {
     let runtime = &preflight.runtime;
     json!({"installation":runtime.installation,"runner":runtime.runner,
@@ -113,6 +178,7 @@ async fn campaign(
     owner: Owner,
     cancel: &Cancellation,
     stream: &mut Stream,
+    progress: &mut LiveProgress,
 ) -> Result<Completion, NamespaceError> {
     let preparing = Arc::clone(&preflight);
     let retained = Arc::clone(&owner);
@@ -193,6 +259,8 @@ async fn campaign(
     let mut sink = CampaignSink {
         stream,
         completion: None,
+        progress,
+        cancel,
     };
     crate::campaign_execution::run_owned(Arc::new(inner), caps, cancel, &mut sink).await?;
     sink.completion
@@ -300,6 +368,19 @@ fn outcome(
     }
 }
 
+fn with_progress_failure(
+    result: Result<Completion, NamespaceError>,
+    message: &str,
+) -> Result<Completion, NamespaceError> {
+    // Reporting must prevent success and supersede its own cancellation, while
+    // an established execution failure keeps its original diagnostic.
+    match result {
+        Ok(completion) if completion.status == "failed" => Ok(completion),
+        Err(error) if !matches!(error, NamespaceError::Cancelled(_)) => Err(error),
+        _ => Err(invalid(message)),
+    }
+}
+
 async fn run(
     request: Arc<Request>,
     cancel: &Cancellation,
@@ -316,14 +397,28 @@ async fn run(
         "runtime":runtime_value(&preflight),"families":selections(&preflight)}))?;
 
     let owner = Arc::new(Mutex::new(None));
-    let mut result = campaign(
-        request,
-        Arc::clone(&preflight),
-        Arc::clone(&owner),
-        cancel,
-        stream,
-    )
-    .await;
+    let mut progress = LiveProgress::new(&preflight, &report);
+    let mut result = match &mut progress {
+        Ok(progress) => {
+            campaign(
+                request,
+                Arc::clone(&preflight),
+                Arc::clone(&owner),
+                cancel,
+                stream,
+                progress,
+            )
+            .await
+        }
+        Err(error) => Err(invalid(&format!(
+            "campaign progress publication failed: {error}"
+        ))),
+    };
+    if let Ok(progress) = &progress {
+        if let Some(error) = &progress.error {
+            result = with_progress_failure(result, error);
+        }
+    }
     // Retain the report inode through cleanup and terminal publication. An
     // altered output path may not be used as evidence of successful completion.
     if let Err(error) = report.verify() {
@@ -333,7 +428,15 @@ async fn run(
     if let Err(error) = report.verify() {
         result = Err(error);
     }
-    let completion = outcome(result, &cleanup, cancel);
+    let mut completion = outcome(result, &cleanup, cancel);
+    if let Ok(progress) = &mut progress {
+        progress.write(Some(&completion.status), cancel);
+        if let Some(error) = &progress.error {
+            completion.status = "failed".into();
+            // Preserve a more specific execution/cleanup failure if present.
+            completion.error.get_or_insert_with(|| error.clone());
+        }
+    }
     stream.finish_session(&completion.status, completion.error.as_deref())?;
     drop(report);
     Ok(())

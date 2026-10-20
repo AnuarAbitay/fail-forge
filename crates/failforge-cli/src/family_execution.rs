@@ -199,6 +199,11 @@ impl DirectoryGuard {
         self.verify()?;
         Ok(self.canonical.clone())
     }
+
+    pub(crate) fn descriptor(&self) -> Result<File, NamespaceError> {
+        self.verify()?;
+        Ok(self.file.try_clone()?)
+    }
 }
 
 async fn blocking<T: Send + 'static>(

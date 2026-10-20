@@ -33,8 +33,9 @@ pub(crate) fn execute() -> ExitCode {
         // occur here. Cancellation of the campaign must still allow its report.
         let summary = crate::campaign_report::build(&raw)?;
         let terminal = crate::campaign_report_terminal::format_summary(&summary)?;
+        let progress = crate::campaign_progress::from_summary(&summary)?;
         let response = crate::private_response::encode(json!({
-            "summary": summary, "terminal": terminal
+            "summary": summary, "terminal": terminal, "progress": progress
         }))?;
         crate::private_response::publish(&response, &Cancellation::default())?;
         Ok(())

@@ -119,13 +119,39 @@ impl Fixture {
                 value
             })
             .collect::<Vec<_>>();
+        let mut summary = json!({
+            "runId":"b".repeat(32),"output":root,
+            "status":if complete {"no_mutants"} else {"failed"},
+            "complete":complete,"expectedMutants":0,"completedMutants":0,
+            "outcomeCounts":{},"reasonCounts":{},"wallSeconds":0.25,
+        });
+        if profile {
+            summary["kind"] = "profile".into();
+            let mut families = serde_json::Map::new();
+            for family in FAMILIES {
+                let mut entry = json!({
+                    "enabled":true,"status":"no_mutants","expectedMutants":0,
+                    "summary":{"expectedMutants":0,"completedMutants":0,"outcomeCounts":{},"reasonCounts":{}},
+                });
+                if family == "language_specific" {
+                    entry["language"] = "dart".into();
+                    entry["summary"]["language"] = "dart".into();
+                }
+                families.insert(family.into(), entry);
+            }
+            summary["families"] = families.into();
+        } else {
+            summary["family"] = "classic".into();
+        }
+        let progress = crate::campaign_progress::from_summary(&summary).unwrap();
         Self {
             base,
             root: root.clone(),
             payloads,
             wire: json!({
                 "operation":"campaign-publish","output":root,"token":"a".repeat(32),
-                "profile":profile,"complete":complete,"runId":"b".repeat(32),"bindings":bindings,"files":files
+                "profile":profile,"complete":complete,"runId":"b".repeat(32),"bindings":bindings,
+                "files":files,"progress":progress
             }),
         }
     }
@@ -183,6 +209,15 @@ impl Fixture {
     }
 
     fn published(&self) {
+        if !self.wire["progress"].is_null() {
+            assert_eq!(
+                serde_json::from_slice::<Value>(
+                    &fs::read(self.root.join("progress.json")).unwrap()
+                )
+                .unwrap(),
+                self.wire["progress"]
+            );
+        }
         for (payload, metadata) in self
             .payloads
             .iter()
@@ -275,6 +310,81 @@ fn every_precommit_failure_keeps_old_reports_and_allows_a_fresh_retry() {
 }
 
 #[test]
+fn final_progress_sync_failure_prevents_any_final_summary_staging() {
+    for profile in [false, true] {
+        for failure in [
+            "progress:sync-file",
+            "progress:sync-root",
+            "progress:sync-commit",
+        ] {
+            let fixture = Fixture::new(profile, true);
+            let mut steps = Vec::new();
+            let error = publish(&fixture.request(), fixture.caps(), &mut |step| {
+                steps.push(step.to_owned());
+                if step == failure {
+                    Err(io::Error::other("progress sync failed"))
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap_err();
+            assert_eq!(error.to_string(), "progress sync failed", "{failure}");
+            assert!(steps.iter().all(|step| step.starts_with("progress:")));
+            assert!(
+                !fixture
+                    .root
+                    .join(".summary-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.tmp")
+                    .exists()
+            );
+            assert!(
+                !fixture
+                    .root
+                    .join(".profile-reports/final-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                    .exists()
+            );
+            fixture.pending();
+        }
+    }
+}
+
+#[test]
+fn incomplete_retry_can_preserve_an_unwritable_progress_target() {
+    for profile in [false, true] {
+        let mut fixture = Fixture::new(profile, false);
+        let target = fixture.root.join("progress.json");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("sentinel"), b"foreign").unwrap();
+        assert!(publish(&fixture.request(), fixture.caps(), &mut |_| Ok(())).is_err());
+        fixture.pending();
+        fixture.wire["progress"] = Value::Null;
+        let mut steps = Vec::new();
+        publish(&fixture.request(), fixture.caps(), &mut |step| {
+            steps.push(step.to_owned());
+            Ok(())
+        })
+        .unwrap();
+        assert!(!steps.iter().any(|step| step.starts_with("progress:")));
+        fixture.published();
+        assert_eq!(fs::read(target.join("sentinel")).unwrap(), b"foreign");
+        assert_eq!(fs::read_dir(target).unwrap().count(), 1);
+    }
+}
+
+#[test]
+fn unsupported_progress_outcome_is_rejected_before_any_filesystem_operation() {
+    let mut fixture = Fixture::new(false, true);
+    let progress = &mut fixture.wire["progress"];
+    progress["intendedStatus"] = "completed".into();
+    progress["expectedMutants"] = 1.into();
+    progress["completedMutants"] = 1.into();
+    progress["outcomeCounts"] = json!({"FUTURE_OUTCOME":1});
+    progress["reasonCounts"] = json!({"reason":1});
+    assert!(decode(&serde_json::to_vec(&fixture.wire).unwrap()).is_err());
+    assert!(!fixture.root.join("progress.json").exists());
+    fixture.pending();
+}
+
+#[test]
 fn malformed_request_paths_shapes_bindings_and_file_order_fail_before_writes() {
     let fixture = Fixture::new(true, true);
     for (pointer, value) in [
@@ -290,6 +400,13 @@ fn malformed_request_paths_shapes_bindings_and_file_order_fail_before_writes() {
         ("/bindings/0/kind", json!("file")),
         ("/bindings/1/target", Value::Null),
         ("/files/1/path", json!("families/rust/summary.json")),
+        ("/progress", Value::Null),
+        ("/progress", json!([])),
+        ("/progress/runId", json!("c".repeat(32))),
+        ("/progress/output", json!("/different")),
+        ("/progress/complete", json!(true)),
+        ("/progress/status", json!("completed")),
+        ("/progress/intendedStatus", json!("failed")),
     ] {
         let mut wire = fixture.wire.clone();
         if pointer == "/bindings/1/target" {
@@ -302,7 +419,7 @@ fn malformed_request_paths_shapes_bindings_and_file_order_fail_before_writes() {
             "{pointer}"
         );
     }
-    for pointer in ["", "/files/0", "/bindings/0"] {
+    for pointer in ["", "/files/0", "/bindings/0", "/progress"] {
         let mut wire = fixture.wire.clone();
         wire.pointer_mut(pointer)
             .unwrap()
@@ -316,6 +433,9 @@ fn malformed_request_paths_shapes_bindings_and_file_order_fail_before_writes() {
     assert!(decode(&serde_json::to_vec(&wire).unwrap()).is_err());
     let mut wire = fixture.wire.clone();
     wire["bindings"].as_array_mut().unwrap().pop();
+    assert!(decode(&serde_json::to_vec(&wire).unwrap()).is_err());
+    let mut wire = fixture.wire.clone();
+    wire.as_object_mut().unwrap().remove("progress");
     assert!(decode(&serde_json::to_vec(&wire).unwrap()).is_err());
     assert!(decode(b"{\"operation\":1,\"operation\":2}").is_err());
     fixture.pending();
@@ -366,7 +486,8 @@ fn profile_alias_replacement_and_ancestor_alias_are_rejected_without_following_t
     let mut fixture = Fixture::new(false, true);
     let alias = fixture.base.join("alias");
     symlink(&fixture.root, &alias).unwrap();
-    fixture.wire["output"] = json!(alias);
+    fixture.wire["output"] = json!(&alias);
+    fixture.wire["progress"]["output"] = json!(&alias);
     assert!(publish(&fixture.request(), fixture.caps(), &mut |_| Ok(())).is_err());
     fixture.pending();
 }

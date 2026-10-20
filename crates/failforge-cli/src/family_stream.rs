@@ -45,7 +45,7 @@ impl Stream<PipeWriter> {
 }
 
 impl<W: FrameWriter> Stream<W> {
-    fn new(writer: W) -> Self {
+    pub(crate) fn new(writer: W) -> Self {
         Self {
             writer,
             hash: Sha256::new(),

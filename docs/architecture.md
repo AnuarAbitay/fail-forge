@@ -333,8 +333,9 @@ source/dependency/SDK hashes, immutable snapshots, fresh project copies and
 workspace lifecycle operations run through `failforge-workspace` in Rust. One
 native campaign owner schedules discovery and selected families; shared family
 execution owns the baseline, bounded mutant queue and final original control.
-The Python controller transports normalized settings and writes live progress
-and journal evidence; Rust constructs and publishes terminal summaries.
+The Python controller transports normalized settings and writes manifests,
+initial report layout and journal evidence; Rust owns live progress and
+constructs and publishes terminal summaries.
 Rust computes final summaries, scores and terminal tables. Native preflight, snapshot creation and final cleanup share the same owner. Each native test process keeps
 the same Rust Runner ownership. Working copies live in a private per-user
 registry protected by campaign leases. Startup recovery removes only validated
@@ -465,13 +466,14 @@ Rust validates unique identities within each family, known outcomes, totals and
 clean completion, then counts outcomes/reasons and computes separate family
 scores. Only KILLED and SURVIVED enter the denominator. Incomplete campaigns have
 no final scores, including completed children of an incomplete profile.
-The response also carries the final terminal table outside the public summary
-schema. Python checks the response binding, then passes private unlinked report
+The response also carries the final terminal table and compact progress outside
+the public summary schema. Python checks the response binding, then passes private unlinked report
 files to one `campaign-publish` owner. These payloads are streamed independently
 of the 64 MiB metadata limit. The output directory is bound at preparation;
 profile directories and aliases are bound immediately after initialization.
 Rust validates those bindings, descriptor types, sizes and SHA-256 digests,
-then writes and synchronizes a fresh generation using directory descriptors.
+publishes the final compact progress, then writes and synchronizes a fresh
+generation using directory descriptors.
 One atomic rename publishes a direct summary or switches the profile pointer.
 Both complete and incomplete profile summaries become visible as one generation.
 
@@ -487,8 +489,21 @@ in Rust; native construction errors never fall back to Python aggregation.
 Private staging files from failed or ambiguous operations are retained.
 File synchronization and atomic visibility do not guarantee that the final
 rename survives power loss; no directory synchronization follows that rename.
-Running progress/checkpoints, manifests, the event journal and their initial
-profile layout remain migration work.
+If progress cannot be written, the failed-summary retry can omit that checkpoint.
+This exception applies only to incomplete reports, so a permanently occupied
+`progress.json` cannot prevent retained results from being published as failed.
+Manifests, the event journal and initial report layout remain migration work.
+
+During execution, the same `campaign-run` owner updates compact progress counters
+on discovery completion, family transitions, baseline and mutation results.
+It retains IDs and counts, never opaque attempt evidence. A descriptor-bound
+writer verifies the output directory and prior checkpoint, writes a fresh private
+stage, verifies its expected content hash, then atomically replaces `progress.json`.
+No subprocess is started for a progress event. A write failure is latched and
+requests cancellation, while the event sink continues forwarding sealed late
+worker results. The final summary determines the terminal progress after all
+controller callbacks have run. Progress always has `complete: false`; even a
+`finalizing` checkpoint with all results is not proof of final summary publication.
 
 Discovery has a shared native implementation and a standalone private operation. It owns one
 `AdapterClient` session directly through Runner, checks the selected family's
@@ -528,8 +543,8 @@ Rust discovery owner. A cancellation or controller crash closes the private
 control channel so that owner drains its adapter before releasing the workspace
 lease. Generation verifies complete static evidence and unchanged inputs before
 publishing through directory-bound atomic filesystem operations. Campaign
-manifests, running checkpoints, the initial report layout and the journal remain
-in Python during the migration; final aggregation, terminal tables and atomic
+manifests, the initial report layout and the journal remain in Python during the
+migration; live progress, final aggregation, terminal tables and atomic
 publication run in Rust.
 
 Primary Dart/Flutter test classification lives in `failforge-dart`. The native

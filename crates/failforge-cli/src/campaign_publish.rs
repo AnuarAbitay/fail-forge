@@ -11,9 +11,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use serde::Deserialize;
+use serde_json::Value;
 
-#[path = "campaign_publish_fs.rs"]
-mod files;
+use crate::campaign_publish_fs as files;
 use files::invalid;
 
 const CAPS_ENV: &str = "FAILFORGE_REPORT_FDS";
@@ -56,6 +56,7 @@ struct Request {
     run_id: String,
     bindings: Vec<Binding>,
     files: Vec<Payload>,
+    progress: Option<Value>,
 }
 
 fn hex(value: &str, length: usize) -> bool {
@@ -70,6 +71,9 @@ fn decode(raw: &[u8]) -> io::Result<Request> {
         failforge_workspace::parse_json(raw).map_err(|_| invalid("invalid publication JSON"))?;
     if !value.is_object() {
         return Err(invalid("publication request must be an object"));
+    }
+    if value.get("progress").is_none() {
+        return Err(invalid("publication requires explicit final progress"));
     }
     for key in ["bindings", "files"] {
         let rows = value[key]
@@ -155,6 +159,18 @@ fn validate(request: &Request) -> io::Result<()> {
         return Err(invalid("invalid publication identity or payload"));
     }
     files::path_text(&request.output)?;
+    match &request.progress {
+        Some(progress) => crate::campaign_progress::validate_final(
+            progress,
+            &request.run_id,
+            &request.output,
+            request.complete,
+        )?,
+        None if request.complete => {
+            return Err(invalid("complete publication requires final progress"));
+        }
+        None => {}
+    }
     let expected = expected_bindings(request)?;
     let mut seen = BTreeSet::new();
     if request.bindings.len() != expected.len() {
@@ -312,6 +328,17 @@ fn publish(
         .zip(&request.files)
         .map(|(file, payload)| files::payload(file, payload.bytes, &payload.sha256))
         .collect::<io::Result<Vec<_>>>()?;
+    if !request.profile {
+        direct_target(bound.root())?;
+    }
+    if let Some(progress) = &request.progress {
+        hook("progress:prepare")?;
+        bound.verify()?;
+        let mut writer =
+            crate::campaign_progress::Writer::new(&request.output, bound.root().try_clone()?)?;
+        writer.write_with_hook(progress, &mut |step| hook(&format!("progress:{step}")))?;
+        bound.verify()?;
+    }
     if !request.profile {
         direct_target(bound.root())?;
         let name = format!(".summary-{}.tmp", request.token);

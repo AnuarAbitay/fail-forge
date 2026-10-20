@@ -122,8 +122,9 @@ together. If confirmation is lost, the controller verifies the files after the
 publisher exits. An unresolved commit is preserved and reported as an error,
 never overwritten with a failed summary. If native report construction fails,
 no successful aggregate is published and no Python scoring fallback is used.
-Manifests, the event journal, running progress/checkpoints and the initial report
-layout remain in Python.
+Manifests, the event journal and the initial report layout remain in Python.
+Rust writes live progress inside the campaign owner, and derives final progress
+from the final summary after callbacks have completed.
 
 An attempt becomes terminal after source verification and cleanup. Cancellation
 observed before that point is recorded in its result; a later cancellation stops
@@ -141,8 +142,8 @@ runs through the native `failforge-profile` crate without Python or PyYAML. The 
 configuration library also exposes the direct settings and profile APIs for
 later migration stages. Preflight, snapshot/bootstrap, final workspace cleanup
 and final report calculation/publication run in Rust. The Python controller still
-transports configuration/environment/signals and writes live progress, manifests
-and the journal. Standalone diagnostic tools
+transports configuration/environment/signals and writes manifests, initial report
+layout and the journal. Standalone diagnostic tools
 retain their Python transcript implementation during migration; a native
 production error never falls back to that implementation.
 
@@ -592,6 +593,13 @@ the accumulated test catalogues, mutation records or scores. Counters include
 only processed results; a discovered total can remain unknown until discovery
 finishes. A profile also shows each selected family's progress. Read this file
 for live monitoring, and use `events.jsonl` for the ordered event history.
+
+The native campaign process owns these updates; no helper process is started
+for each event. A checkpoint is written to a private stage, checked and atomically
+renamed into place. A failed write stops admission of new mutants, but results
+from already running workers still drain and cleanup still runs. If final
+progress cannot be written, an incomplete summary may be published without
+updating progress; the stale checkpoint is never evidence of success.
 
 `progress.json` always has `complete: false`. Its status is `running` or
 `finalizing`; an `intendedStatus` during finalization describes the controller's
