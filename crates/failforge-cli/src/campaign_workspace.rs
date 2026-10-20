@@ -7,6 +7,7 @@ use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 use failforge_config::catalogue::{FAMILIES, default_operators};
 use failforge_dart::namespace::NamespaceError;
@@ -21,6 +22,7 @@ use serde_json::{Value, json};
 use crate::attempt::Config;
 use crate::dart_namespace::{absolute, invalid};
 use crate::family_execution::DirectoryGuard;
+use crate::retained_replay::{LoadedReplay, ReplayPaths};
 use crate::workspace_inputs::RuntimeInputs;
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -69,6 +71,8 @@ pub(crate) struct Request {
     pub(crate) environment: BTreeMap<String, String>,
     pub(crate) max_mutants: usize,
     pub(crate) families: Vec<Family>,
+    #[serde(default)]
+    pub(crate) replay: Option<ReplayPaths>,
 }
 
 fn default_registry() -> PathBuf {
@@ -87,6 +91,12 @@ pub(crate) fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
     }
     if value.get("output").is_none() || value.get("registry").is_none() {
         return Err(invalid("campaign output and registry fields are required"));
+    }
+    if value
+        .get("replay")
+        .is_some_and(|replay| !replay.is_null() && !replay.is_object())
+    {
+        return Err(invalid("retained replay paths must be a named object"));
     }
     for family in value["families"]
         .as_array()
@@ -121,6 +131,19 @@ fn validate_request(request: &Request) -> Result<(), NamespaceError> {
     }
     if let Some(registry) = &request.registry {
         absolute(registry)?;
+    }
+    if let Some(replay) = &request.replay {
+        if request.mode != Mode::Direct
+            || request.families.len() != 1
+            || request.families[0].family != "classic"
+        {
+            return Err(invalid(
+                "retained replay requires one direct classic family",
+            ));
+        }
+        for path in [&replay.transcript, &replay.baseline, &replay.framework] {
+            absolute(path)?;
+        }
     }
     // Reuse strict family, rule, timeout, worker and environment validation.
     // The real project is inspected only in preflight, without filesystem writes.
@@ -159,6 +182,7 @@ pub(crate) struct Preflight {
     pub(crate) families: Vec<Family>,
     pub(crate) run_id: String,
     pub(crate) mode: Mode,
+    pub(crate) replay: Option<Arc<LoadedReplay>>,
     original_guard: DirectoryGuard,
 }
 
@@ -183,12 +207,7 @@ fn validate_runtime(runtime: &mut RuntimeInputs, flutter: bool) -> Result<(), Na
             }
         }
     }
-    let helper = runtime
-        .runner
-        .parent()
-        .ok_or_else(|| invalid("native runner has no parent"))?
-        .join("failforge-adapter-campaign");
-    for path in [&runtime.runner, &runtime.dart_sdk.join("bin/dart"), &helper] {
+    for path in [&runtime.runner, &runtime.dart_sdk.join("bin/dart")] {
         executable(path)?;
     }
     for path in [
@@ -211,7 +230,7 @@ fn validate_runtime(runtime: &mut RuntimeInputs, flutter: bool) -> Result<(), Na
     Ok(())
 }
 
-fn literal_includes(project: &Path, rules: &Value) -> Result<(), NamespaceError> {
+pub(crate) fn literal_includes(project: &Path, rules: &Value) -> Result<(), NamespaceError> {
     let selections = rules
         .get("includePaths")
         .and_then(Value::as_array)
@@ -335,6 +354,11 @@ pub(crate) fn preflight(
     cancel.check()?;
     let original = inspect_project(&request.project, cancel)?;
     let original_guard = DirectoryGuard::open(&original.root)?;
+    let replay = request
+        .replay
+        .as_ref()
+        .map(|paths| LoadedReplay::load(paths, &original, cancel).map(Arc::new))
+        .transpose()?;
     let mut runtime = request.runtime.clone();
     validate_runtime(&mut runtime, original.flutter)?;
     let mut families = request.families.clone();
@@ -378,11 +402,6 @@ pub(crate) fn preflight(
     let mut protected = vec![
         runtime.dart_sdk.canonicalize()?,
         runtime.adapter_root.canonicalize()?,
-        runtime
-            .installation
-            .join("python/failforge_campaign")
-            .canonicalize()?,
-        runtime.installation.join("scripts").canonicalize()?,
         runtime.runner.canonicalize()?,
     ];
     if let Some(flutter) = &runtime.flutter_sdk {
@@ -395,6 +414,9 @@ pub(crate) fn preflight(
             .filter(|path| **path != original.root)
             .cloned(),
     );
+    if let Some(replay) = &replay {
+        protected.extend(replay.protected_paths());
+    }
     if protected.iter().any(|path| overlaps(&output, path)) || overlaps(&output, &registry) {
         return Err(invalid("campaign report overlaps protected inputs"));
     }
@@ -415,6 +437,7 @@ pub(crate) fn preflight(
         families,
         run_id: request.run_id.clone(),
         mode: request.mode,
+        replay,
         original_guard,
     })
 }
@@ -499,6 +522,9 @@ pub(crate) fn create_output(preflight: &Preflight) -> Result<DirectoryGuard, Nam
 
 pub(crate) fn verify_original(preflight: &Preflight) -> Result<(), NamespaceError> {
     preflight.original_guard.verify()?;
+    if let Some(replay) = &preflight.replay {
+        replay.verify()?;
+    }
     verify_source(
         &preflight.original.root,
         &preflight.hashes,

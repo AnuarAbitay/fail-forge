@@ -28,7 +28,7 @@ There are no direct imports of `package:analyzer/src/...`.
 dart --suppress-analytics pub get --enforce-lockfile --directory adapters/dart
 # Explicitly prepare only the example; the adapter never does this operation.
 (cd examples/flutter_fixture && flutter --suppress-analytics pub get --enforce-lockfile)
-cargo build --workspace --examples --locked
+cargo build --workspace --bins --examples --locked
 ```
 
 A target must already have a readable `pubspec.yaml` and valid version-2
@@ -231,9 +231,10 @@ include `dedupHashedBytes`. A larger request fails with
 selection keeps the request within the bound. Disabled and file-excluded
 operators are filtered before scans and consume no candidate/diagnostic budget.
 
-The fixture report retains chronological `records` and separately exposes
-`resultsByFamily`. Those groups contain mutation results; baseline and diagnostic
-control runs are kept outside them. There is no combined score for the families.
+Production reports retain mutation `records` in deterministic family/ID order;
+`events.jsonl` preserves event order. A profile also exposes a separate summary
+for each selected family. Baseline and diagnostic controls remain separate from
+mutation records. There is no combined score for the families.
 
 Operators use resolved AST nodes, semantic SDK bindings and types. They exclude
 metadata, defaults, nonexecutable initializers and constant contexts; switch
@@ -301,45 +302,44 @@ these checks do not turn arbitrary concurrent file writes into a transaction.
 
 ## Integration boundary and verification
 
-Current Rust Core contains the Runner and run CLI. The new `failforge-dart` crate
-adds protocol models, persistent `AdapterClient`, safe in-memory patching and a
-small process-plus-test-evidence classification extension point. It reuses the
-same Runner; only optional caller-owned stdin and observable stream-loss counters
-were added to the Runner. It does not add another process supervisor.
+The `failforge-dart` crate owns protocol models, persistent `AdapterClient`,
+exact byte patching, namespace isolation and test-evidence classification.
+It uses the shared `failforge-runner` process supervisor. Dart code owns AST/type
+resolution, candidate discovery and analyzer-overlay validation.
 
-The [mutation CLI](mutation-cli.md) now provides explicit YAML and CLI settings,
-fresh snapshots, bounded parallel attempts, machine-event evidence and reports
-through the Python campaign package. It supports prepared standalone Dart and
-Flutter packages. Named profiles, persistent resume and Pub workspaces remain
-outside that implementation. `session` remains a low-level Rust example.
-Production discovery itself now has a native owner: it calls `AdapterClient`
-directly, validates source-bound candidates, drains the adapter and publishes
-the complete transcript and receipt while retaining the campaign lease. The
-Python controller only transports this private response and schedules subsequent
-attempts; its diagnostic transcript reader is not a fallback on native failure.
-`scripts/dart_adapter_e2e.py` is an executable fixture harness demonstrating
-snapshot/baseline/discover/validate/copy/patch/test/cleanup with explicit test files.
-Its Flutter-3.47.7 reporter extraction distinguishes assertion/test failures,
-compile failures, missing-input infrastructure failures, timeouts and no tests.
-Nonzero status alone does not establish KILLED. Production callers must supply
-validated `TestEvidence`; the Rust extension does not assign mutation scores.
+The [mutation CLI](mutation-cli.md) resolves YAML or direct settings in Rust and
+owns the complete campaign: preflight, one immutable source snapshot, discovery,
+bounded parallel attempts in fresh copies, confirmation controls, cleanup and
+reports. A small Rust launcher watches the campaign owner; loss of the launcher's
+liveness pipe requests cancellation so the owner can drain workers and clean up.
+No Python runtime or campaign bridge is involved. Prepared standalone Dart and
+Flutter packages are supported; persistent resume and Pub workspaces remain
+outside the supported scope. Each YAML file describes one profile. `session`
+remains a low-level Rust example.
 
-The prepared Dart campaign scripts use `dart_test_evidence.py` to validate the
-complete raw JSON reporter stream together with Runner completion, capture and
-cleanup evidence. A compiler diagnostic during suite loading is `INVALID`.
+Discovery calls `AdapterClient` directly, validates source-bound candidates,
+drains the adapter and publishes its transcript and receipt while retaining the
+campaign lease. The same owner collects completed results, writes manifests,
+input bindings, the ordered journal and compact progress, and builds the final
+summary. Profile root/family summaries become visible through one atomic pointer
+change. Publication failures retain incomplete reports without scores whenever
+the bound output directory still permits a safe write.
+
+The Rust evidence path validates the complete raw JSON reporter stream together
+with Runner completion, capture and cleanup evidence. Nonzero exit status alone
+does not establish `KILLED`. A compiler diagnostic during suite loading is `INVALID`.
 Other failed synthetic loading tests produce neutral `LOAD_FAILURE` evidence,
 including the original error, stack trace and suite path. They do not count as
 author assertion failures or automatically establish infrastructure failure.
 
-`run_public_dart_campaign.py` and `run_isolated_dart_replay.py` can confirm a
-runtime exception during test initialization. Confirmation requires namespace
-isolation from the unchanged test framework (`run_isolated_dart_replay.py`), a
+Production campaigns can confirm a runtime exception during test initialization.
+Confirmation requires namespace isolation from the unchanged test framework, a
 bound passing baseline, the same selected suites, an explicit runtime diagnostic
 and a frame in the exact mutated library called from the failed author suite.
-An unisolated campaign leaves loading failures `UNCLASSIFIED`, since a subject
-may also be a dependency of the test framework. Following an isolated failed
-mutant run, the scripts run a fresh original, a fresh mutant replay, then another
-fresh original. Both
+Without that isolation and evidence, loading failures remain `UNCLASSIFIED`,
+since a subject may also be a dependency of the test framework. Following an
+eligible failed mutant run, Rust runs a fresh original, a fresh mutant replay,
+then another fresh original. Both
 original controls must pass the complete original author-test catalog; the
 replay must reproduce the same error and stack after replacing only its generated
 workspace path. Every command uses a separate copy and Runner-owned timeout.
@@ -350,29 +350,27 @@ snapshot taken before the first run. The snapshot is shared within a campaign.
 Only this confirmed sequence produces `KILLED` with reason
 `mutation_caused_initialization_failure` and phase `suite_loading`. Its author
 test count may be zero: a group callback can throw before registering any tests.
-The legacy script partial-catalog exception applies only to this verdict. The
-production `mutate` controller additionally supports an authenticated ordinary
+The production controller additionally supports an authenticated ordinary
 failure witness when a failed `setUpAll` suppresses other registrations, and a
 bounded author-null-check fallback to initiate causal initialization controls;
 see [campaign correctness](mutation-cli.md#results-and-correctness). Survivors
 still require the complete author-test catalog. In production, signature
-extraction and the ordered confirmation policy run in `failforge-dart`; the
-Python controller schedules native-requested controls and checks source integrity
-and cancellation before accepting their results. Legacy diagnostic scripts retain
-their separate Python implementation during migration. Raw loader evidence and all
+extraction and the ordered confirmation policy run in `failforge-dart`; the Rust
+campaign owner schedules controls and checks input integrity and cancellation
+before accepting their results. Raw loader evidence and all
 three diagnostic controls are retained separately in the case
 directory. Unknown or unreproduced loading failures become `UNCLASSIFIED`;
 failed Runner capture/cleanup or changed inputs remain `INFRA_ERROR`. Both are
 excluded from the score. Historical reports are not relabelled automatically.
 
-Both `run_public_dart_campaign.py` and `run_isolated_dart_replay.py` expose two
-independent limits: `--test-timeout` (default `30s`) is passed explicitly to
-`dart test`, and `--timeout` (default `60s`) is the Runner budget for the entire
+`failforge mutate` exposes two independent limits: `--test-timeout` (default
+`30s`) is passed explicitly to `dart test`, and `--command-timeout` (default
+`120s`) is the Runner budget for the entire
 process. Positive integer `ms`, `s`, and `m` durations are accepted; Runner must
 have at least `5s` more than the test timeout. Invalid policies fail before
-creating output directories or starting commands. Both normalized limits and
-their semantics appear in `timeoutPolicy` and the immutable execution binding,
-including initialization confirmation controls.
+creating output directories or starting commands. Both normalized limits are
+recorded in the manifest's effective configuration and applied to native attempt
+requests, including initialization confirmation controls.
 Runner durations fit unsigned 64-bit milliseconds; the inner duration is bounded
 to `9007199254740ms` so package:test's floating-point parsing retains exact
 microseconds instead of silently rounding or saturating an oversized duration.
@@ -383,11 +381,14 @@ change its effective duration. The process budget includes loading, all tests
 and teardown; it does not guarantee that several sequential test timeouts fit.
 The headroom check gives a single default test timeout room to report in an
 otherwise short run, rather than predicting compilation or whole-suite time.
-Before processing mutations, both entrypoints require two fresh passing
-original controls under the requested policy and the complete baseline catalog.
-If the originals time out, increase the budgets and rerun with a fresh output
+Before executing mutants in a family, the campaign requires a passing original
+baseline under the requested policy and retains its author-test catalog. After
+processing the family, a fresh original control must also pass. Initialization
+confirmation adds its own original/replay/original controls. An empty profile
+family can skip test execution. If an original times out, increase the budgets
+and rerun with a fresh output
 directory. For an intentionally short diagnostic run, pass both limits:
-`--test-timeout 1s --timeout 15s`.
+`--test-timeout 1s --command-timeout 15s`.
 
 A normally completed, fully validated reporter session with an errored author
 test can produce `KILLED` with `reason: test_timeout`. This subtype requires the
@@ -423,43 +424,47 @@ always has `cause: not_established`: a loop, disabled inner timeout, slow loadin
 teardown or several test timeouts cannot be distinguished from a capture alone.
 Shutdown events are observations and do not establish that an inner error
 preceded cancellation. New runs do not inherit historical investigation labels.
-The main `summary.json` adds `reasonCounts`, `outcomeReasonCounts` and
-`timeoutKindCounts`; per-case diagnostics stay in `records`. Outcome counts and
-the score formula retain their existing meaning. Historical files are unchanged.
+The main `summary.json` contains `outcomeCounts` and `reasonCounts`; per-case
+timeout evidence remains in `records`. Outcome counts and the score formula
+retain their existing meaning. Historical files are unchanged.
 
-The native regression below uses the prepared adapter dependencies, the bundled
-SDK at `.toolchain/flutter`, and an already built `target/debug/failforge`. It
-checks registration failure, ordinary assertion failure, compilation failure,
-ambiguous resource failure and a survivor, executing nine sequential commands.
+The Rust `failforge-tools` executable provides sequential regression scenarios
+through the public CLI. It requires prepared adapter dependencies and built
+workspace binaries/examples. `classification` covers causal registration
+confirmation and distinguishes an ordinary failure witness from an inconclusive
+setup-only failure. `timeouts` checks both a completed inner test timeout
+(`KILLED`, `test_timeout`) and an interrupted busy loop (`TIMEOUT`, excluded from
+the score). `recovery` checks cleanup after owner interruption. Each scenario
+validates its expected report rather than treating process success as sufficient.
 
-The timeout regression executes four suites through the shared campaign path:
-one asynchronous wait, two sequential waits, a busy loop and an asynchronous
-wait with `Timeout.none`. Completed suites retain the complete catalog and inner
-timeout counts; interrupted suites retain prefix progress and an unknown cause.
-Both outer-timeout examples deliberately have different mechanisms. All cases
-check report reasons, capture evidence, source preservation and copy cleanup.
-The main-report regression discovers and statically validates one real boolean
-literal mutation through Rust, then runs both public and isolated entrypoints.
-Seven sequential test commands verify fresh original controls, the full author
-catalog, timeout reasons, score exclusions and both published summaries.
-
-```sh
-python3 scripts/dart_initialization_e2e.py --output /absolute/new-evidence-directory
-python3 scripts/dart_timeout_e2e.py --output /absolute/another-new-evidence-directory
-python3 scripts/dart_timeout_campaign_e2e.py --output /absolute/main-report-evidence
-```
+Available suites are `smoke`, `profiles`, `classification`, `timeouts`,
+`cancellation`, `recovery`, `applicability`, `flutter` and `all`. `all` runs them
+sequentially; Flutter scenarios are included when `--flutter-sdk` is supplied.
+There is no separate `initialization` suite: those cases belong to
+`classification`.
 
 ```sh
 (cd adapters/dart && dart --suppress-analytics analyze && dart --suppress-analytics test)
 cargo test --workspace --all-targets --locked -- --test-threads=1
-python3 -m unittest discover -s scripts -p 'test_*.py'
-python3 scripts/dart_adapter_e2e.py --flutter-sdk /absolute/flutter \
-  --output /absolute/new-evidence-directory --p1
+cargo build --workspace --bins --examples --locked
+target/debug/failforge-tools regression --suite classification \
+  --dart-sdk /absolute/flutter/bin/cache/dart-sdk \
+  --output /absolute/new-classification-evidence
+target/debug/failforge-tools regression --suite timeouts \
+  --dart-sdk /absolute/flutter/bin/cache/dart-sdk \
+  --output /absolute/new-timeout-evidence
+target/debug/failforge-tools regression --suite recovery \
+  --dart-sdk /absolute/flutter/bin/cache/dart-sdk \
+  --output /absolute/new-recovery-evidence
+target/debug/failforge-tools regression --suite all \
+  --dart-sdk /absolute/flutter/bin/cache/dart-sdk --flutter-sdk /absolute/flutter \
+  --output /absolute/new-full-regression-evidence
 ```
 
-Use a fresh evidence directory each time; raw captures are created exclusively.
-The harness creates and removes its temporary copies, records commands and hashes,
-and asserts original source bytes remain identical. Discovery and validation
-measurements are separate from Flutter test durations. Record the executed
-commands, toolchain versions, results, and remaining platform limits alongside
-the generated evidence.
+Use a fresh evidence directory each time. Finish code changes and rebuild before
+running SDK scenarios; changing inputs during a campaign invalidates its frozen
+bindings. The tools preserve command captures and summaries under the selected
+output directory; production campaigns own and clean their fresh attempt copies.
+These commands describe the verification workflow, not a claim that every suite
+has passed on every supported SDK or platform. Record actual commands, toolchain
+versions, outcomes and remaining limits with the generated evidence.

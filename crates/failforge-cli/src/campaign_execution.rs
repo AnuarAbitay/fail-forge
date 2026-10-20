@@ -22,6 +22,7 @@ use crate::dart_namespace::{absolute, invalid};
 use crate::family_execution::{DirectoryGuard, FamilyEvents};
 use crate::family_stream::Stream;
 use crate::namespace_planner::{PlanProject, PlanRuntime};
+use crate::retained_replay::LoadedReplay;
 use crate::workspace_inputs::RuntimeInputs;
 
 const FAMILIES: [&str; 3] = ["classic", "failure_mode", "language_specific"];
@@ -63,6 +64,8 @@ pub(crate) struct Request {
     environment: BTreeMap<String, String>,
     max_mutants: usize,
     families: Vec<Family>,
+    #[serde(skip)]
+    pub(crate) replay: Option<Arc<LoadedReplay>>,
 }
 
 fn rules(value: &Value, component: bool) -> Result<(), NamespaceError> {
@@ -156,7 +159,7 @@ fn family_request(
     family: &Family,
     candidates: Vec<Value>,
 ) -> Result<crate::family_execution::Request, NamespaceError> {
-    crate::family_execution::decode_value(json!({
+    let mut child = crate::family_execution::decode_value(json!({
         "operation":"family", "project":request.project, "output":family_output(request,family),
         "runtime":{"installation":request.runtime.installation,"runner":request.runtime.runner,
             "dartSdk":request.runtime.dart_sdk,"flutterSdk":request.runtime.flutter_sdk,
@@ -165,8 +168,12 @@ fn family_request(
         "config":{"commandTimeout":family.config.command_timeout,"testTimeout":family.config.test_timeout},
         "candidates":candidates, "family":family.family,"workers":family.workers,
         "emptyPolicy":if request.mode==Mode::Direct {"controls"} else {"skip"},
-        "frozen":request.frozen,"environment":request.environment
-    }))
+        "frozen":request.frozen,"environment":request.environment,
+        "retainedExpected":request.replay.as_ref().map(|replay|&replay.expected),
+        "frameworkRoot":request.replay.as_ref().map(|replay|replay.framework())
+    }))?;
+    child.replay = request.replay.clone();
+    Ok(child)
 }
 
 fn discovery_request(
@@ -285,20 +292,6 @@ async fn prepare(
             },
         )?;
         protected.push(request.workspace.root.canonicalize()?);
-        protected.push(
-            request
-                .runtime
-                .installation
-                .join("python/failforge_campaign")
-                .canonicalize()?,
-        );
-        protected.push(
-            request
-                .runtime
-                .installation
-                .join("scripts")
-                .canonicalize()?,
-        );
         protected.push(request.runtime.runner.canonicalize()?);
         if protected
             .iter()
@@ -341,6 +334,9 @@ async fn prepare(
 
 async fn verify_inputs(request: Arc<Request>) -> Result<(), NamespaceError> {
     blocking(move || {
+        if let Some(replay) = &request.replay {
+            replay.verify()?;
+        }
         let cancel = Cancellation::default();
         verify_source(&request.original.root, &request.original.hashes, &cancel)?;
         let actual = crate::workspace_inputs::bind_inputs(
@@ -357,6 +353,20 @@ async fn verify_inputs(request: Arc<Request>) -> Result<(), NamespaceError> {
         Ok(())
     })
     .await
+}
+
+enum Discovery {
+    Fresh(Box<crate::adapter_discovery::OwnedDiscovery>),
+    Retained(Value),
+}
+
+impl Discovery {
+    fn value(&self) -> &Value {
+        match self {
+            Self::Fresh(owned) => &owned.value,
+            Self::Retained(value) => value,
+        }
+    }
 }
 
 /// Shared campaign semantics; the enclosing lifecycle owns the wire commitment.
@@ -484,19 +494,29 @@ async fn schedule(
     for family in &request.families {
         cancel.check()?;
         guards.verify()?;
-        let child = discovery_request(&request, family)?;
-        let lease = WorkspaceLease::from_borrowed(
-            caps.lease
-                .as_ref()
-                .ok_or_else(|| invalid("missing campaign lease"))?
-                .as_fd(),
-        )?;
         stage(stream, "discovery_validation", Some(&family.family), None)?;
         let started = Instant::now();
-        let discovery = crate::adapter_discovery::run_owned(child, lease, cancel).await;
+        let discovery = async {
+            if let Some(replay) = &request.replay {
+                replay.verify()?;
+                Ok(Discovery::Retained(replay.discovery.clone()))
+            } else {
+                let child = discovery_request(&request, family)?;
+                let lease = WorkspaceLease::from_borrowed(
+                    caps.lease
+                        .as_ref()
+                        .ok_or_else(|| invalid("missing campaign lease"))?
+                        .as_fd(),
+                )?;
+                crate::adapter_discovery::run_owned(child, lease, cancel)
+                    .await
+                    .map(|owned| Discovery::Fresh(Box::new(owned)))
+            }
+        }
+        .await;
         // Selection validation is part of discovery, before the result is exposed.
         let discovery = discovery.and_then(|owned| {
-            validate_selection(&owned.value, family)?;
+            validate_selection(owned.value(), family)?;
             guards.verify()?;
             Ok(owned)
         });
@@ -505,7 +525,7 @@ async fn schedule(
         // still preserve the actual error. A broken pipe remains poisoned.
         let discovery = discovery.and_then(|owned| {
             stream.emit_campaign(
-                json!({"kind":"discovery","family":family.family,"value":owned.value}),
+                json!({"kind":"discovery","family":family.family,"value":owned.value()}),
             )?;
             Ok(owned)
         });
@@ -530,7 +550,11 @@ async fn schedule(
     }
     let total = discoveries
         .iter()
-        .map(|discovery| discovery.value["candidates"].as_array().map_or(0, Vec::len))
+        .map(|discovery| {
+            discovery.value()["candidates"]
+                .as_array()
+                .map_or(0, Vec::len)
+        })
         .sum();
     stream.emit_campaign(json!({"kind":"discovery_finished","expectedMutants":total}))?;
     ledger.expected = Some(total);
@@ -556,7 +580,7 @@ async fn schedule(
         let child = family_request(
             &request,
             family,
-            discovery.value["candidates"]
+            discovery.value()["candidates"]
                 .as_array()
                 .ok_or_else(|| invalid("missing discovery candidates"))?
                 .clone(),

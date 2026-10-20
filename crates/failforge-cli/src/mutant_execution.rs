@@ -22,6 +22,7 @@ use crate::attempt::{NamespaceCache, OwnedAttempt, Publication};
 use crate::dart_namespace::{absolute, invalid};
 use crate::mutant_confirmation::Confirmation;
 use crate::namespace_planner::{PlanProject, PlanRuntime, ReportDirectory};
+use crate::retained_replay::LoadedReplay;
 use crate::workspace_inputs::RuntimeInputs;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -38,6 +39,10 @@ pub(crate) struct Request {
     namespace_plan: Option<NamespaceCache>,
     frozen: Value,
     environment: BTreeMap<String, String>,
+    #[serde(default)]
+    framework_root: Option<PathBuf>,
+    #[serde(skip)]
+    pub(crate) replay: Option<Arc<LoadedReplay>>,
 }
 
 fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
@@ -129,13 +134,17 @@ fn attempt_request(
     patch_sha256: Option<String>,
     namespace_plan: Option<NamespaceCache>,
 ) -> Result<crate::attempt::Request, NamespaceError> {
-    crate::attempt::decode_value(json!({"operation":"attempt", "project":request.project,
+    let mut attempt = crate::attempt::decode_value(
+        json!({"operation":"attempt", "project":request.project,
         "case":case, "runtime":{"runner":request.runtime.runner,"dartSdk":request.runtime.dart_sdk,
             "flutterSdk":request.runtime.flutter_sdk,"adapterRoot":request.runtime.adapter_root},
         "config":{"commandTimeout":request.config.command_timeout,"testTimeout":request.config.test_timeout},
         "workspace":{"root":request.workspace.root,"campaign":request.workspace.campaign},
-        "context":context,"patchSha256":patch_sha256,
-        "namespacePlan":namespace_plan.map(|cache| json!({"plan":cache.plan,"receipt":cache.receipt}))}))
+        "context":context,"patchSha256":patch_sha256,"frameworkRoot":request.framework_root,
+        "namespacePlan":namespace_plan.map(|cache| json!({"plan":cache.plan,"receipt":cache.receipt}))}),
+    )?;
+    attempt.replay = request.replay.clone();
+    Ok(attempt)
 }
 
 struct InputGuard {
@@ -180,6 +189,9 @@ async fn blocking<T: Send + 'static>(
 async fn verify_frozen(request: &Request) -> Result<(), NamespaceError> {
     let request = request.clone();
     blocking(move || {
+        if let Some(replay) = &request.replay {
+            replay.verify()?;
+        }
         let current = crate::workspace_inputs::bind_inputs(
             &request.runtime,
             &request.project,
@@ -407,7 +419,7 @@ async fn run_valid(
         directory,
         record: result,
         namespace_plan,
-        namespace_checked: request.project.framework_collision,
+        namespace_checked: request.project.framework_collision || request.framework_root.is_some(),
         _attempts: attempts,
     })
 }
@@ -431,6 +443,9 @@ async fn run_invalid(
             adapter_root: request.runtime.adapter_root,
         };
         let mut protected = crate::namespace_planner::protected_inputs(&project, &runtime)?;
+        if let Some(framework) = &request.framework_root {
+            protected.push(framework.canonicalize()?);
+        }
         protected.push(request.workspace.root.canonicalize()?);
         crate::attempt_artifacts::create(&request.case, &protected)
     })
@@ -472,6 +487,9 @@ async fn run_owned_inner(
             &preparing,
         )?;
         let guard = InputGuard::new(&request.project)?;
+        if let Some(replay) = &request.replay {
+            replay.verify()?;
+        }
         let candidate = verify_candidate(&request.project.root, &request.candidate)
             .map_err(|error| invalid(&error.to_string()))?;
         Ok((request, caps, guard, candidate))
@@ -486,11 +504,19 @@ async fn run_owned_inner(
     blocking(move || {
         // Always verify the original and capability binding, including failures
         // and cancellation; preserve failures rather than relabel them clean.
-        let original = guard.verify().and_then(|()| {
-            verify_candidate(&request.project.root, &request.candidate)
-                .map(|_| ())
-                .map_err(|error| invalid(&error.to_string()))
-        });
+        let original = guard
+            .verify()
+            .and_then(|()| {
+                verify_candidate(&request.project.root, &request.candidate)
+                    .map(|_| ())
+                    .map_err(|error| invalid(&error.to_string()))
+            })
+            .and_then(|()| {
+                request
+                    .replay
+                    .as_ref()
+                    .map_or(Ok(()), |replay| replay.verify())
+            });
         caps.verify(
             &request.workspace.root,
             &request.workspace.campaign,

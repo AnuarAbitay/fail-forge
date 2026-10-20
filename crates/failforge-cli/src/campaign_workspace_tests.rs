@@ -49,21 +49,11 @@ impl Fixture {
         };
         put(&sdk, "bin/dart", "#!/bin/sh\nexit 0\n");
         put(&sdk, "lib/core.dart", "library core;\n");
-        for relative in [
-            "tools/failforge",
-            "tools/failforge-adapter-campaign",
-            "tools/python/failforge_campaign/controller.py",
-            "tools/scripts/helper",
-            "adapter/bin/failforge_dart_adapter.dart",
-        ] {
+        for relative in ["tools/failforge", "adapter/bin/failforge_dart_adapter.dart"] {
             put(&root, relative, "fixture\n");
         }
         put(&root, "adapter/.dart_tool/package_config.json", br#"{"configVersion":2,"packages":[{"name":"adapter","rootUri":"../","packageUri":"lib/"}]}"#);
-        for path in [
-            sdk.join("bin/dart"),
-            root.join("tools/failforge"),
-            root.join("tools/failforge-adapter-campaign"),
-        ] {
+        for path in [sdk.join("bin/dart"), root.join("tools/failforge")] {
             fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
         }
         if flutter {
@@ -102,6 +92,42 @@ impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);
     }
+}
+
+#[test]
+fn retained_replay_bootstrap_requires_named_absolute_paths_and_direct_classic_scope() {
+    let fixture = Fixture::new(false);
+    let mut value = fixture.request.clone();
+    assert!(
+        decode(&serde_json::to_vec(&value).unwrap())
+            .unwrap()
+            .replay
+            .is_none()
+    );
+    value["mode"] = "direct".into();
+    value["replay"] = json!({
+        "transcript":"/archive/discovery.jsonl",
+        "baseline":"/archive/baseline-result.json",
+        "framework":"/archive/upstream"
+    });
+    assert!(decode(&serde_json::to_vec(&value).unwrap()).is_ok());
+    for (pointer, bad) in [
+        ("/mode", json!("profile")),
+        ("/families/0/family", json!("failure_mode")),
+        ("/replay", json!(["/archive/a", "/archive/b", "/archive/c"])),
+        ("/replay/transcript", json!("relative")),
+        ("/replay/baseline", Value::Null),
+        ("/replay/framework", json!("/archive/\0bad")),
+    ] {
+        let mut invalid = value.clone();
+        *invalid.pointer_mut(pointer).unwrap() = bad;
+        assert!(
+            decode(&serde_json::to_vec(&invalid).unwrap()).is_err(),
+            "{pointer}"
+        );
+    }
+    value["replay"]["unexpected"] = true.into();
+    assert!(decode(&serde_json::to_vec(&value).unwrap()).is_err());
 }
 
 #[test]
@@ -243,11 +269,7 @@ fn preflight_rejects_output_and_registry_overlap_without_creating_directories() 
         assert!(preflight(&fixture.decode(), &Cancellation::default()).is_err());
     }
     fixture.request["output"] = Value::Null;
-    for registry in [
-        "subject/cache",
-        "sdk/workspaces",
-        "tools/scripts/workspaces",
-    ] {
+    for registry in ["subject/cache", "sdk/workspaces", "adapter/workspaces"] {
         fixture.request["registry"] = json!(fixture.root.join(registry));
         assert!(preflight(&fixture.decode(), &Cancellation::default()).is_err());
     }
@@ -350,7 +372,7 @@ fn partial_copy_cancellation_and_bind_failure_still_release_the_owned_workspace(
     workspace
         .snapshot(&ready, &Cancellation::default())
         .unwrap();
-    fs::remove_file(fixture.root.join("tools/failforge-adapter-campaign")).unwrap();
+    fs::remove_file(fixture.root.join("tools/failforge")).unwrap();
     assert!(
         workspace
             .bind_inputs(&ready, &BTreeMap::new(), &Cancellation::default())

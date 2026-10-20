@@ -18,8 +18,10 @@ use serde_json::{Value, json};
 use crate::{AdapterClient, ClientError, ClientOptions, MAX_LINE_BYTES, MutationFamily};
 
 mod candidate_proof;
+mod retained_transcript;
 mod validation;
 pub use candidate_proof::{VerifiedCandidate, verify_candidate};
+pub use retained_transcript::{RetainedTranscript, load_retained_transcript};
 use validation::{candidate, candidate_limit, discovered, operator_catalogue, package_root};
 
 pub const MAX_TRANSCRIPT_BYTES: usize = 64 * 1024 * 1024;

@@ -1,5 +1,5 @@
 //! A small measurement client of the production Runner, not another backend.
-//! The Python harness supplies an external process deadline and aggregates CSV.
+//! The Rust tools harness supplies an external process deadline and aggregates CSV.
 use std::ffi::OsString;
 use std::io;
 use std::os::unix::process::ExitStatusExt;

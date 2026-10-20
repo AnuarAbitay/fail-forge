@@ -7,6 +7,8 @@ mod args;
 mod attempt;
 mod attempt_artifacts;
 mod attempt_execution;
+mod campaign_controller;
+mod campaign_display;
 mod campaign_execution;
 mod campaign_progress;
 mod campaign_publish;
@@ -14,6 +16,7 @@ mod campaign_publish_fs;
 mod campaign_report;
 mod campaign_report_command;
 mod campaign_report_terminal;
+mod campaign_reports;
 mod campaign_session;
 mod campaign_workspace;
 mod dart_namespace;
@@ -30,6 +33,7 @@ mod private_request;
 mod private_response;
 mod profile;
 mod readiness;
+mod retained_replay;
 mod test_context;
 mod test_evidence;
 mod workspace_handoff;
@@ -78,6 +82,10 @@ fn main() -> ExitCode {
     let arguments = match cli.command {
         Commands::Run(arguments) => arguments,
         Commands::Mutate(arguments) => return mutate::execute(*arguments, &invocation_cwd),
+        Commands::Replay(arguments) => {
+            let (arguments, replay) = arguments.into_campaign(&invocation_cwd);
+            return mutate::execute_replay(arguments, &invocation_cwd, replay);
+        }
         Commands::WorkspaceInputs => return workspace_inputs::execute(),
         Commands::WorkspaceLifecycle => return workspace_lifecycle::execute(),
         Commands::DartNamespace => return dart_namespace::execute(),

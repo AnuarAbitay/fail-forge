@@ -781,3 +781,87 @@ fn aggregate_payload_larger_than_private_json_limit_is_streamed() {
         fixture.wire["files"][0]["sha256"].as_str().unwrap()
     );
 }
+
+#[test]
+fn in_process_payloads_are_unlinked_private_files_at_offset_zero() {
+    let fixture = Fixture::new(false, false);
+    let root = files::walk(&fixture.root).unwrap();
+    let before = fs::read_dir(&fixture.root).unwrap().count();
+    let raw = b"full retained reporting evidence\n";
+    let mut file = anonymous_payload(&root, raw).unwrap();
+    let hash = format!("{:x}", Sha256::digest(raw));
+    files::payload(&file, raw.len() as u64, &hash).unwrap();
+    let mut actual = Vec::new();
+    file.read_to_end(&mut actual).unwrap();
+    assert_eq!(actual, raw);
+    assert_eq!(file.metadata().unwrap().nlink(), 0);
+    assert_eq!(fs::read_dir(&fixture.root).unwrap().count(), before);
+}
+
+#[test]
+fn in_process_payload_substitution_before_unlink_preserves_foreign_entry() {
+    for alias in [false, true] {
+        let fixture = Fixture::new(false, false);
+        let root = files::walk(&fixture.root).unwrap();
+        let mut substituted = None;
+        let result = anonymous_payload_with_hook(&root, b"report", &mut |step| {
+            assert_eq!(step, "unlink:payload");
+            let path = fs::read_dir(&fixture.root)?
+                .map(|entry| entry.unwrap().path())
+                .find(|path| {
+                    path.file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with(".report-payload-")
+                })
+                .unwrap();
+            fs::rename(&path, fixture.root.join("held-payload"))?;
+            if alias {
+                symlink("foreign-target", &path)?;
+            } else {
+                fs::write(&path, b"foreign")?;
+            }
+            substituted = Some(path);
+            Ok(())
+        });
+        assert!(result.is_err());
+        let path = substituted.unwrap();
+        if alias {
+            assert_eq!(
+                fs::read_link(path).unwrap(),
+                PathBuf::from("foreign-target")
+            );
+        } else {
+            assert_eq!(fs::read(path).unwrap(), b"foreign");
+        }
+        assert!(fixture.root.join("held-payload").is_file());
+        fixture.pending();
+    }
+}
+
+#[test]
+fn multiply_linked_in_process_payload_is_not_unlinked() {
+    let fixture = Fixture::new(false, false);
+    let root = files::walk(&fixture.root).unwrap();
+    let mut staged = None;
+    assert!(
+        anonymous_payload_with_hook(&root, b"report", &mut |_| {
+            let path = fs::read_dir(&fixture.root)?
+                .map(|entry| entry.unwrap().path())
+                .find(|path| {
+                    path.file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .starts_with(".report-payload-")
+                })
+                .unwrap();
+            fs::hard_link(&path, fixture.root.join("extra-payload-link"))?;
+            staged = Some(path);
+            Ok(())
+        })
+        .is_err()
+    );
+    assert_eq!(fs::metadata(staged.unwrap()).unwrap().nlink(), 2);
+    assert!(fixture.root.join("extra-payload-link").is_file());
+    fixture.pending();
+}

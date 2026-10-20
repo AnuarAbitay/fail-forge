@@ -1,9 +1,9 @@
-//! An inherited campaign lease survives its Python controller until this owner exits.
+//! An inherited campaign lease survives its controller until this owner exits.
 //!
 //! Only the Rust CLI/helper owns this capability. Both inherited and duplicated
 //! descriptors are close-on-exec before a managed command can start, so subject
 //! code receives neither. No lock operation is performed here: unlocking a
-//! duplicated flock would also unlock the Python controller's shared description.
+//! duplicated flock would also unlock the controller's shared description.
 
 use std::ffi::OsStr;
 use std::fs::{File, Metadata};

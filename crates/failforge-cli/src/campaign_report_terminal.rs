@@ -99,7 +99,7 @@ fn border(widths: &[usize]) -> String {
     line
 }
 
-/// Render exactly the public Python terminal schema, excluding its `Report:` line.
+/// Render exactly the public terminal schema, excluding its `Report:` line.
 pub(crate) fn format_summary(summary: &Value) -> Result<String> {
     object(summary)?;
     if summary.get("kind").and_then(Value::as_str) == Some("profile") {

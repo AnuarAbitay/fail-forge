@@ -28,3 +28,9 @@ name = "failforge-cli-process-fixture"
 path = "../failforge-runner/tests/support/process_fixture.rs"
 test = false
 bench = false
+
+[[bin]]
+name = "failforge-campaign-sdk-fixture"
+path = "tests/support/campaign_sdk_fixture.rs"
+test = false
+bench = false

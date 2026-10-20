@@ -84,6 +84,39 @@ pub struct AdapterClient {
     next_id: u64,
     in_flight: bool,
     poisoned: bool,
+    pending_response: Option<PendingResponse>,
+}
+
+/// Owned by the client so dropping a request future does not lose either the
+/// response identity or a prefix already consumed from the protocol stream.
+struct PendingResponse {
+    request_id: String,
+    command: AdapterCommand,
+    line: Vec<u8>,
+}
+
+impl PendingResponse {
+    fn receive(
+        &mut self,
+        bytes: &[u8],
+        limit: usize,
+    ) -> Result<Option<ResponseEnvelope>, ClientError> {
+        if !append_response_chunk(&mut self.line, bytes, limit)? {
+            return Ok(None);
+        }
+        // Preserve the syntax-error category while rejecting duplicate nested
+        // keys before Value can collapse contradictory adapter metadata.
+        let value =
+            failforge_workspace::parse_json(&self.line).map_err(
+                |_| match serde_json::from_slice::<ResponseEnvelope>(&self.line) {
+                    Err(error) => ClientError::Json(error),
+                    Ok(_) => ClientError::InvalidMetadata,
+                },
+            )?;
+        let response: ResponseEnvelope = serde_json::from_value(value)?;
+        response.validate_for(&self.request_id, self.command)?;
+        Ok(Some(response))
+    }
 }
 
 /// The process receipt survives post-execution protocol and capture failures.
@@ -145,6 +178,7 @@ impl AdapterClient {
             next_id: 1,
             in_flight: false,
             poisoned: false,
+            pending_response: None,
         })
     }
 
@@ -178,14 +212,17 @@ impl AdapterClient {
         };
         let bytes = encode_request(&request, self.options.max_line_bytes)?;
         self.in_flight = true;
-        let result = tokio::time::timeout(
-            self.options.request_timeout,
-            self.exchange(&bytes, &request.request_id, command),
-        )
-        .await;
+        self.pending_response = Some(PendingResponse {
+            request_id: request.request_id,
+            command,
+            line: Vec::new(),
+        });
+        let result =
+            tokio::time::timeout(self.options.request_timeout, self.exchange(&bytes)).await;
         match result {
             Ok(Ok(response)) => {
                 self.in_flight = false;
+                self.pending_response = None;
                 if response.kind == ResponseKind::Error {
                     return Err(ClientError::Remote(
                         response.error.expect("validated structured error"),
@@ -209,40 +246,25 @@ impl AdapterClient {
         self.handle.force_cancel(CancelReason::User);
     }
 
-    async fn exchange(
-        &mut self,
-        request: &[u8],
-        id: &str,
-        command: AdapterCommand,
-    ) -> Result<ResponseEnvelope, ClientError> {
+    async fn exchange(&mut self, request: &[u8]) -> Result<ResponseEnvelope, ClientError> {
         self.check_loss()?;
         self.writer.write_all(request).await?;
         self.writer.write_all(b"\n").await?;
-        let mut line = Vec::new();
         loop {
             let mut chunk = self.stream.recv().await.ok_or(ClientError::UnexpectedEof)?;
             let bytes = chunk.bytes();
-            let finished = if chunk.stream == OutputStream::Stdout {
-                append_response_chunk(&mut line, bytes, self.options.max_line_bytes)?
+            let response = if chunk.stream == OutputStream::Stdout {
+                self.pending_response
+                    .as_mut()
+                    .expect("request owns its pending response")
+                    .receive(bytes, self.options.max_line_bytes)?
             } else {
-                false
+                None
             };
             let consumed = chunk.bytes().len();
             chunk.mark_displayed(consumed);
             self.check_loss()?;
-            if finished {
-                // Preserve the existing syntax-error category, then reject
-                // duplicate nested keys before Value can silently collapse
-                // contradictory adapter metadata.
-                let value =
-                    failforge_workspace::parse_json(&line).map_err(
-                        |_| match serde_json::from_slice::<ResponseEnvelope>(&line) {
-                            Err(error) => ClientError::Json(error),
-                            Ok(_) => ClientError::InvalidMetadata,
-                        },
-                    )?;
-                let response: ResponseEnvelope = serde_json::from_value(value)?;
-                response.validate_for(id, command)?;
+            if let Some(response) = response {
                 return Ok(response);
             }
         }
@@ -272,6 +294,11 @@ impl AdapterClient {
         mut self,
         evidence: &mut Option<Arc<CommandResult>>,
     ) -> Result<Arc<CommandResult>, ClientError> {
+        let mut pending = if self.in_flight && !self.poisoned {
+            self.pending_response.take()
+        } else {
+            None
+        };
         if self.poisoned {
             self.handle.force_cancel(CancelReason::User);
         } else if self.in_flight {
@@ -282,15 +309,33 @@ impl AdapterClient {
             self.handle.cancel(CancelReason::User);
         }
         let input_error = self.writer.shutdown().await.err();
-        let mut unsolicited = false;
-        let outcome=tokio::time::timeout(self.close_budget,async {
-            loop {
+        let mut protocol_error = None;
+        let outcome = tokio::time::timeout(self.close_budget, async {
+            let result = loop {
                 tokio::select! {
-                    result=self.handle.wait()=>break result,
-                    chunk=self.stream.recv()=>if let Some(mut chunk)=chunk { let length=chunk.bytes().len();if chunk.stream==OutputStream::Stdout && length!=0 {unsolicited=true;}chunk.mark_displayed(length); }
-                        else { break self.handle.wait().await; }
+                    result = self.handle.wait() => break result,
+                    chunk = self.stream.recv() => if let Some(mut chunk) = chunk {
+                        let length = chunk.bytes().len();
+                        if chunk.stream == OutputStream::Stdout {
+                            drain_response_chunk(&mut pending, &mut protocol_error, chunk.bytes(), self.options.max_line_bytes);
+                        }
+                        chunk.mark_displayed(length);
+                    } else {
+                        break self.handle.wait().await;
+                    }
                 }
+            };
+            // A completed Runner can race already-queued stdout. Drain that
+            // queue as well so extra responses cannot evade validation merely
+            // because wait() won the select.
+            while let Some(mut chunk) = self.stream.recv().await {
+                let length = chunk.bytes().len();
+                if chunk.stream == OutputStream::Stdout {
+                    drain_response_chunk(&mut pending, &mut protocol_error, chunk.bytes(), self.options.max_line_bytes);
+                }
+                chunk.mark_displayed(length);
             }
+            result
         }).await;
         let result = match outcome {
             Ok(Ok(result)) => result,
@@ -318,13 +363,43 @@ impl AdapterClient {
         if result.stdout.stream_dropped_bytes != 0 || result.stderr.stream_dropped_bytes != 0 {
             return Err(ClientError::OutputLost);
         }
-        if unsolicited {
-            return Err(ClientError::UnsolicitedResponse);
+        if let Some(error) = protocol_error {
+            return Err(error);
+        }
+        if pending.is_some_and(|response| !response.line.is_empty()) {
+            return Err(ClientError::UnexpectedEof);
         }
         if let Some(error) = input_error {
             return Err(ClientError::Io(error));
         }
         Ok(result)
+    }
+}
+
+fn drain_response_chunk(
+    pending: &mut Option<PendingResponse>,
+    error: &mut Option<ClientError>,
+    bytes: &[u8],
+    limit: usize,
+) {
+    if bytes.is_empty() || error.is_some() {
+        return;
+    }
+    let Some(response) = pending.as_mut() else {
+        *error = Some(ClientError::UnsolicitedResponse);
+        return;
+    };
+    match response.receive(bytes, limit) {
+        Ok(None) => {}
+        Ok(Some(response)) => {
+            *pending = None;
+            if response.kind == ResponseKind::Error {
+                *error = Some(ClientError::Remote(
+                    response.error.expect("validated structured error"),
+                ));
+            }
+        }
+        Err(failure) => *error = Some(failure),
     }
 }
 
@@ -423,6 +498,49 @@ fn append_response_chunk(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pending_handshake() -> Option<PendingResponse> {
+        Some(PendingResponse {
+            request_id: "rust-1".into(),
+            command: AdapterCommand::Handshake,
+            line: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn interrupted_response_retains_consumed_prefix_and_rejects_a_second_line() {
+        let response =
+            "{\"protocolVersion\":1,\"requestId\":\"rust-1\",\"kind\":\"handshake\",\"payload\":{\"message\":\"привет\"}}\n".as_bytes();
+        // Split at every byte, including within UTF-8/JSON token boundaries,
+        // before transferring an interrupted request's retained state to close.
+        for split in 0..response.len() {
+            let mut pending = pending_handshake();
+            assert!(
+                pending
+                    .as_mut()
+                    .unwrap()
+                    .receive(&response[..split], 512)
+                    .unwrap()
+                    .is_none()
+            );
+            let mut error = None;
+            drain_response_chunk(&mut pending, &mut error, &response[split..], 512);
+            assert!(pending.is_none(), "split {split}");
+            assert!(error.is_none(), "split {split}: {error:?}");
+            drain_response_chunk(&mut pending, &mut error, response, 512);
+            assert!(matches!(error, Some(ClientError::UnsolicitedResponse)));
+        }
+    }
+
+    #[test]
+    fn a_poisoned_or_completed_request_has_no_pending_response_exception() {
+        let response =
+            b"{\"protocolVersion\":1,\"requestId\":\"rust-1\",\"kind\":\"handshake\",\"payload\":{}}\n";
+        let mut error = None;
+        drain_response_chunk(&mut None, &mut error, response, 512);
+        assert!(matches!(error, Some(ClientError::UnsolicitedResponse)));
+    }
+
     #[test]
     fn serialization_is_bounded_before_any_transport_write() {
         let request = RequestEnvelope {

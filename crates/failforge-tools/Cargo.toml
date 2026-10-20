@@ -1,0 +1,20 @@
+[package]
+name = "failforge-tools"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+clap.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+libc.workspace = true
+failforge-dart = { path = "../failforge-dart" }
+failforge-config = { path = "../failforge-config" }
+failforge-workspace = { path = "../failforge-workspace" }
+
+
+[[bin]]
+name = "failforge-tools"
+path = "src/main.rs"

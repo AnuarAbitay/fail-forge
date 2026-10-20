@@ -107,6 +107,39 @@ fn in_process_and_wire_request_decoders_share_all_binding_validation() {
     }
 }
 
+#[test]
+fn replay_mutants_and_original_controls_keep_the_explicit_pristine_framework() {
+    let fixture = Fixture::new();
+    let mut value = fixture.value(true);
+    value["frameworkRoot"] = json!(fixture.base.join("pristine"));
+    value["context"]["alias"] = "failforge_subject".into();
+    let request = decoded(&value).unwrap();
+    let patched = attempt_request(
+        &request,
+        request.case.clone(),
+        request.context.clone(),
+        request.candidate["safePatch"]["patchedHash"]
+            .as_str()
+            .map(str::to_owned),
+        None,
+    )
+    .unwrap();
+    assert_eq!(patched.framework_root, Some(fixture.base.join("pristine")));
+    let mut original = request.context.clone();
+    original.initialization = None;
+    original.mutant = None;
+    let control = attempt_request(
+        &request,
+        request.case.join("original-before"),
+        original,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(control.framework_root, patched.framework_root);
+    assert_eq!(control.context.alias, "failforge_subject");
+}
+
 #[tokio::test]
 async fn owned_static_invalid_seals_without_wire_and_pins_the_exact_lease_until_drop() {
     use failforge_workspace::lifecycle::{close, start};

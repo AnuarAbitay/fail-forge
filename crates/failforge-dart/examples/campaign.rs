@@ -164,7 +164,7 @@ struct Cancellation {
 impl Cancellation {
     fn new() -> io::Result<Self> {
         // Subscribe before any managed child exists. External callers can
-        // signal this owner; Python uses the race-free buffered control pipe.
+        // signal this owner or use the race-free buffered control pipe.
         let interrupt = signal(SignalKind::interrupt())?;
         let terminate = signal(SignalKind::terminate())?;
         let control = std::env::var_os(CANCEL_ENV)
@@ -280,7 +280,7 @@ async fn control_request(control: &Option<AsyncFd<OwnedFd>>) -> io::Result<&'sta
 
 #[tokio::main]
 pub async fn main() -> Result<(), Failure> {
-    // This owner outlives Python on controller death; do not unlock its shared
+    // This owner outlives its controller on channel closure; do not unlock its shared
     // open description or pass the lease capability into the Dart adapter.
     let _workspace_lease = WorkspaceLease::from_env()?;
     let configuration = Configuration::from_args(std::env::args_os().skip(1).collect())?;

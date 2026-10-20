@@ -66,8 +66,8 @@ impl RunConfig {
         }
     }
 
-    /// A transitional handoff to execution owners that have not migrated yet.
-    /// Both the effective document and every selected campaign are retained.
+    /// A normalized projection containing the effective document and each
+    /// selected campaign, suitable for diagnostics and configuration benchmarks.
     pub fn to_transport_value(&self) -> Value {
         match self {
             Self::Campaign(value) => json!({"kind":"campaign", "configuration":value.to_value(),

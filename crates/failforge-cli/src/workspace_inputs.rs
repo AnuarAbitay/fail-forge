@@ -191,12 +191,7 @@ pub(crate) fn bind_inputs(
     if current_dependencies != project.packages {
         return Err(invalid("prepared dependency roots changed during campaign"));
     }
-    let helper = runtime
-        .runner
-        .parent()
-        .ok_or_else(|| invalid("native runner has no parent"))?
-        .join("failforge-adapter-campaign");
-    let mut paths = vec![runtime.runner.clone(), helper, adapter_config];
+    let mut paths = vec![runtime.runner.clone(), adapter_config];
     let graph = runtime.adapter_root.join(".dart_tool/package_graph.json");
     if graph.is_file() {
         paths.push(graph);
@@ -226,13 +221,6 @@ pub(crate) fn bind_inputs(
         .map(|path| trees.get(&path).map(|tree| (path, tree)))
         .collect::<Result<BTreeMap<_, _>, _>>()?;
     let adapter = trees.get(&runtime.adapter_root)?;
-    let controller = [
-        runtime.installation.join("python/failforge_campaign"),
-        runtime.installation.join("scripts"),
-    ]
-    .into_iter()
-    .map(|path| trees.get(&path).map(|tree| (path, tree)))
-    .collect::<Result<BTreeMap<_, _>, _>>()?;
     let tools = paths
         .into_iter()
         .map(|path| inputs::hash_file(&path, cancellation).map(|hash| (path, hash)))
@@ -240,7 +228,7 @@ pub(crate) fn bind_inputs(
     Ok(
         json!({"project":source,"dependencies":dependencies,"adapterDependencies":adapter_bound,
         "adapterDependencyRoots":adapter_dependencies,"sdk":sdk,"adapter":adapter,
-        "controller":controller,"tools":tools,"environmentSha256":environment_hash(environment)}),
+        "executionEngine":"rust","tools":tools,"environmentSha256":environment_hash(environment)}),
     )
 }
 

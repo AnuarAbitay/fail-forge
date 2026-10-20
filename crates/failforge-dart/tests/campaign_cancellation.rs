@@ -1,11 +1,11 @@
 //! The installed helper cooperatively drains an actual quiet protocol process.
-//! The finite Python fixture needs neither Dart nor network access. Its natural
+//! The finite Rust fixture needs neither Dart nor network access. Its natural
 //! 1.5-second response makes an ignored cancellation fail without orphaning it.
 use serde_json::{Value, json};
 use std::fs::{self, File};
 use std::io::{self, BufRead, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -14,38 +14,6 @@ use std::time::{Duration, Instant};
 
 const CANCEL_ENV: &str = "FAILFORGE_ADAPTER_CANCEL_FD";
 static NEXT: AtomicU64 = AtomicU64::new(0);
-
-const ADAPTER: &str = r##"#!/usr/bin/env python3
-import json, os, sys, time
-from pathlib import Path
-marker = Path(os.environ['FAILFORGE_CANCEL_MARKER'])
-probe = int(os.environ['FAILFORGE_CANCEL_PROBE_FD'])
-try:
-    info = os.fstat(probe)
-    inherited = [info.st_dev, info.st_ino] == json.loads(os.environ['FAILFORGE_CANCEL_PROBE_INODE'])
-except OSError:
-    inherited = False
-state = dict(pid=os.getpid(), inheritedControl=inherited,
-             privateEnvironmentPresent='FAILFORGE_ADAPTER_CANCEL_FD' in os.environ)
-def report(stage):
-    marker.write_text(json.dumps(dict(state, stage=stage)))
-report('started')
-for line in sys.stdin:
-    request = json.loads(line)
-    command = request['command']
-    if command == 'handshake':
-        payload = dict(operators=[])
-    else:
-        report('discover')
-        if os.environ.get('FAILFORGE_CANCEL_MODE') != 'close':
-            time.sleep(1.5)
-        payload = dict(mutants=[], truncated=False, totalCandidates=0, returnedCandidates=0)
-    print(json.dumps(dict(protocolVersion=1, requestId=request['requestId'],
-                         kind=command, payload=payload)), flush=True)
-if os.environ.get('FAILFORGE_CANCEL_MODE') == 'close':
-    report('close')
-    time.sleep(1.5)
-"##;
 
 struct Fixture(PathBuf);
 impl Fixture {
@@ -58,8 +26,6 @@ impl Fixture {
         fs::create_dir(&path).unwrap();
         let path = path.canonicalize().unwrap();
         fs::create_dir(path.join("lib")).unwrap();
-        fs::write(path.join("adapter"), ADAPTER).unwrap();
-        fs::set_permissions(path.join("adapter"), fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(
             path.join("payload.json"),
             json!({
@@ -113,7 +79,7 @@ impl Owner {
             write.write_all(&[byte]).unwrap();
         }
         let mut child = Command::new(env!("CARGO_BIN_EXE_failforge-adapter-campaign"))
-            .arg(fixture.0.join("adapter"))
+            .arg(env!("CARGO_BIN_EXE_failforge-adapter-fixture"))
             .arg(&fixture.0)
             .arg(fixture.0.join("payload.json"))
             .env(CANCEL_ENV, read.as_raw_fd().to_string())

@@ -174,6 +174,26 @@ impl Control {
             }
         }
     }
+
+    async fn response_observed(&mut self) {
+        use tokio::io::AsyncReadExt;
+        let mut line = Vec::new();
+        loop {
+            let byte = tokio::time::timeout(
+                Duration::from_secs(2),
+                self.stream.as_mut().unwrap().read_u8(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            line.push(byte);
+            assert!(line.len() < 128);
+            if byte == b'\n' {
+                assert_eq!(line, b"RESPONSE\n");
+                return;
+            }
+        }
+    }
 }
 impl Drop for Control {
     fn drop(&mut self) {
@@ -302,6 +322,101 @@ async fn interrupted_request_close_keeps_actual_cleanup_evidence() {
             .iter()
             .all(|record| record.signal != libc::SIGKILL)
     );
+}
+
+async fn buffered_response_after_interruption(case: &str) -> failforge_dart::ClientClose {
+    let runner = Arc::new(Runner::new());
+    let mut control = Control::new();
+    let release = control.path.with_extension("release");
+    let mut specification = spec("buffered-valid-response");
+    specification.env.set.insert(
+        "FAILFORGE_ADAPTER_CONTROL".into(),
+        control.path.clone().into_os_string(),
+    );
+    specification.env.set.insert(
+        "FAILFORGE_ADAPTER_RESPONSE_RELEASE".into(),
+        release.clone().into_os_string(),
+    );
+    specification
+        .env
+        .set
+        .insert("FAILFORGE_ADAPTER_RESPONSE_CASE".into(), case.into());
+    let mut client = AdapterClient::start(runner.clone(), specification, options()).unwrap();
+    let mut pending = Box::pin(client.handshake());
+    tokio::select! {
+        result = &mut pending => panic!("blocked fixture unexpectedly replied: {result:?}"),
+        _ = control.request_observed() => {}
+    }
+    // Reproduce a normal response racing the owner's cancellation: the request
+    // future has stopped consuming stdout, but the adapter has read that request.
+    drop(pending);
+    std::fs::write(&release, b"release").unwrap();
+    control.response_observed().await;
+    std::fs::remove_file(&release).unwrap();
+    let closed = tokio::time::timeout(Duration::from_secs(5), client.close_with_result())
+        .await
+        .unwrap();
+    shutdown(&runner).await;
+    let result = closed
+        .result
+        .as_ref()
+        .expect("native cleanup receipt retained");
+    assert!(result.cleanup.is_complete(), "{result:?}");
+    assert!(result.stdout.eof && result.stderr.eof);
+    closed
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn valid_pending_response_buffered_after_request_interruption_is_not_unsolicited() {
+    let closed = buffered_response_after_interruption("valid").await;
+    assert!(
+        closed.outcome.is_ok(),
+        "valid reply to the interrupted request was rejected: {:?}",
+        closed.outcome
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn interrupted_response_is_still_strictly_validated_after_native_cleanup() {
+    for case in [
+        "wrong-id",
+        "wrong-version",
+        "wrong-kind",
+        "remote",
+        "malformed",
+        "duplicate",
+        "oversize",
+        "partial",
+        "second-response",
+        "extra",
+    ] {
+        let error = buffered_response_after_interruption(case)
+            .await
+            .outcome
+            .unwrap_err();
+        assert!(
+            match case {
+                "wrong-id" => matches!(
+                    error,
+                    ClientError::Protocol(ProtocolError::RequestIdMismatch)
+                ),
+                "wrong-version" =>
+                    matches!(error, ClientError::Protocol(ProtocolError::VersionMismatch)),
+                "wrong-kind" => matches!(
+                    error,
+                    ClientError::Protocol(ProtocolError::ResponseKindMismatch)
+                ),
+                "remote" => matches!(error, ClientError::Remote(_)),
+                "malformed" => matches!(error, ClientError::Json(_)),
+                "duplicate" => matches!(error, ClientError::InvalidMetadata),
+                "oversize" => matches!(error, ClientError::LineTooLarge),
+                "partial" => matches!(error, ClientError::UnexpectedEof),
+                "second-response" | "extra" => matches!(error, ClientError::UnsolicitedResponse),
+                _ => unreachable!(),
+            },
+            "{case}: {error}"
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

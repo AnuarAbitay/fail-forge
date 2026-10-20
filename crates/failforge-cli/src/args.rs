@@ -23,6 +23,8 @@ pub(crate) enum Commands {
     Run(RunArgs),
     /// Run a mutation campaign from a config file or explicit project options.
     Mutate(Box<MutateArgs>),
+    /// Replay a retained classic discovery transcript against fresh isolated copies.
+    Replay(Box<ReplayArgs>),
     /// Generate mutation profiles using static analysis or a catalogue template.
     Profile(ProfileArgs),
     /// Internal prepared-input operations for the campaign controller.
@@ -126,9 +128,6 @@ pub(crate) struct ProfileGenerateArgs {
     /// Prepared Dart adapter directory for applicability analysis.
     #[arg(long, value_name = "PATH")]
     adapter_root: Option<PathBuf>,
-    // Accepted for compatibility with existing launch scripts. Generation is native.
-    #[arg(long = "python", value_name = "PROGRAM", hide = true)]
-    _python: Option<OsString>,
     /// Installation root containing the prepared Dart adapter and toolchain.
     #[arg(long, value_name = "PATH")]
     pub(crate) installation: Option<PathBuf>,
@@ -211,12 +210,76 @@ pub(crate) struct MutateArgs {
     /// Explicit prepared Dart adapter directory.
     #[arg(long, value_name = "PATH")]
     adapter_root: Option<PathBuf>,
-    /// Python interpreter program or path for the campaign controller.
-    #[arg(long, value_name = "PROGRAM", default_value = "python3")]
-    pub(crate) python: OsString,
-    /// Installation root containing python/failforge_campaign/cli.py.
+    /// Installation root containing the prepared Dart adapter and toolchain.
     #[arg(long, value_name = "PATH")]
     pub(crate) installation: Option<PathBuf>,
+}
+
+#[derive(Args)]
+pub(crate) struct ReplayArgs {
+    /// Prepared project whose source bytes match the retained candidates.
+    #[arg(long)]
+    project: PathBuf,
+    /// Unmodified upstream framework checkout matching the subject library.
+    #[arg(long)]
+    framework: PathBuf,
+    /// Complete JSONL discovery and static-validation transcript.
+    #[arg(long)]
+    transcript: PathBuf,
+    /// Retained passing baseline with capture and source provenance.
+    #[arg(long)]
+    baseline: PathBuf,
+    /// New directory for replay reports and raw captures.
+    #[arg(long)]
+    output: PathBuf,
+    #[arg(long, default_value_t = 3, value_parser = clap::value_parser!(u8).range(1..=4))]
+    workers: u8,
+    #[arg(long, value_name = "DURATION", value_parser = parse_campaign_timeout)]
+    test_timeout: Option<String>,
+    #[arg(long, alias = "timeout", value_name = "DURATION", value_parser = parse_campaign_timeout)]
+    command_timeout: Option<String>,
+    #[arg(long, conflicts_with = "flutter_sdk")]
+    dart_sdk: Option<PathBuf>,
+    #[arg(long)]
+    flutter_sdk: Option<PathBuf>,
+    #[arg(long)]
+    adapter_root: Option<PathBuf>,
+    #[arg(long)]
+    installation: Option<PathBuf>,
+}
+
+impl ReplayArgs {
+    pub(crate) fn into_campaign(
+        self,
+        cwd: &Path,
+    ) -> (MutateArgs, crate::retained_replay::ReplayPaths) {
+        let replay = crate::retained_replay::ReplayPaths {
+            transcript: cwd.join(self.transcript),
+            baseline: cwd.join(self.baseline),
+            framework: cwd.join(self.framework),
+        };
+        let campaign = MutateArgs {
+            config: None,
+            project: Some(self.project),
+            family: Some(MutationFamily::Classic),
+            language: None,
+            workers: Some(self.workers),
+            test_timeout: self.test_timeout,
+            command_timeout: self.command_timeout,
+            output: Some(self.output),
+            dart_sdk: self.dart_sdk,
+            flutter_sdk: self.flutter_sdk,
+            operator: Vec::new(),
+            include: Vec::new(),
+            exclude: Vec::new(),
+            method: Vec::new(),
+            class: Vec::new(),
+            max_mutants: Some(10_000),
+            adapter_root: self.adapter_root,
+            installation: self.installation,
+        };
+        (campaign, replay)
+    }
 }
 
 impl MutateArgs {
@@ -270,62 +333,6 @@ impl MutateArgs {
             }
         }
         Ok(serde_json::Value::Object(values))
-    }
-
-    pub(crate) fn engine_arguments(&self) -> Vec<OsString> {
-        let mut arguments = Vec::new();
-        let mut pair = |name: &str, value: OsString| {
-            arguments.push(name.into());
-            arguments.push(value);
-        };
-        if let Some(path) = &self.config {
-            pair("--config", path.as_os_str().to_owned());
-        }
-        if let Some(path) = &self.project {
-            pair("--project", path.as_os_str().to_owned());
-        }
-        if let Some(family) = self.family {
-            pair("--family", family.as_str().into());
-        }
-        if let Some(language) = &self.language {
-            pair("--language", language.into());
-        }
-        if let Some(value) = self.workers {
-            pair("--workers", value.to_string().into());
-        }
-        for (name, value) in [
-            ("--test-timeout", self.test_timeout.as_deref()),
-            ("--command-timeout", self.command_timeout.as_deref()),
-        ] {
-            if let Some(value) = value {
-                pair(name, value.into());
-            }
-        }
-        for (name, path) in [
-            ("--output", self.output.as_ref()),
-            ("--dart-sdk", self.dart_sdk.as_ref()),
-            ("--flutter-sdk", self.flutter_sdk.as_ref()),
-            ("--adapter-root", self.adapter_root.as_ref()),
-        ] {
-            if let Some(path) = path {
-                pair(name, path.as_os_str().to_owned());
-            }
-        }
-        for (name, values) in [
-            ("--operator", &self.operator),
-            ("--include", &self.include),
-            ("--exclude", &self.exclude),
-            ("--method", &self.method),
-            ("--class", &self.class),
-        ] {
-            for value in values {
-                pair(name, value.into());
-            }
-        }
-        if let Some(value) = self.max_mutants {
-            pair("--max-mutants", value.to_string().into());
-        }
-        arguments
     }
 }
 

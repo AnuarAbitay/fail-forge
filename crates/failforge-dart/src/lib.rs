@@ -49,4 +49,7 @@ pub use test_catalog::{
     CatalogError, CatalogSnapshot, SelectionContext, analyze_catalogue, apply_selection,
     parse_selection_context, validate_selection_context,
 };
-pub use test_outcome::{ReporterMode, classify_dart_capture, classify_dart_result};
+pub use test_outcome::{
+    ReporterMode, RunnerSummaryError, classify_dart_capture, classify_dart_result,
+    parse_cli_summary,
+};

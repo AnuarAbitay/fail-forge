@@ -63,6 +63,24 @@ fn decoded_value_and_wire_requests_share_binding_validation() {
 }
 
 #[test]
+fn explicit_replay_framework_requires_isolated_alias_even_without_name_collision() {
+    let mut value = request();
+    value["frameworkRoot"] = "/archive/pristine".into();
+    assert!(decoded(&value).is_err());
+    value["context"]["alias"] = "failforge_subject".into();
+    let replay = decoded(&value).unwrap();
+    assert_eq!(
+        replay.framework_root,
+        Some(PathBuf::from("/archive/pristine"))
+    );
+    assert!(!replay.project.framework_collision);
+    value["frameworkRoot"] = "relative".into();
+    assert!(decoded(&value).is_err());
+    value["frameworkRoot"] = Value::Null;
+    assert!(decoded(&value).is_err());
+}
+
+#[test]
 fn deferred_attempt_leaves_the_final_mutation_report_unoccupied() {
     let fixture = Fixture::new();
     let (receipt, bytes) = seal_receipt(

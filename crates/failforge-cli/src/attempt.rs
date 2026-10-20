@@ -19,6 +19,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use crate::attempt_execution::ExecutionConfig;
 use crate::dart_namespace::{absolute, invalid};
 use crate::namespace_planner::{PlanProject, PlanRuntime, ReportDirectory};
+use crate::retained_replay::LoadedReplay;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -32,6 +33,10 @@ pub(crate) struct Request {
     pub context: SelectionContext,
     pub patch_sha256: Option<String>,
     pub namespace_plan: Option<NamespaceCache>,
+    #[serde(default)]
+    pub framework_root: Option<PathBuf>,
+    #[serde(skip)]
+    pub replay: Option<Arc<LoadedReplay>>,
 }
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -94,6 +99,7 @@ fn validate_request(request: &Request) -> Result<(), NamespaceError> {
         .runtime
         .flutter_sdk
         .iter()
+        .chain(request.framework_root.iter())
         .chain(request.project.packages.values())
     {
         absolute(path)?;
@@ -106,7 +112,7 @@ fn validate_request(request: &Request) -> Result<(), NamespaceError> {
     if campaign.len() != 32 || !hex(campaign) {
         return Err(invalid("invalid attempt campaign"));
     }
-    let alias = if request.project.framework_collision {
+    let alias = if request.project.framework_collision || request.framework_root.is_some() {
         "failforge_subject"
     } else {
         &request.project.name
@@ -152,7 +158,7 @@ fn validate_request(request: &Request) -> Result<(), NamespaceError> {
         }
     }
     if let Some(cache) = &request.namespace_plan {
-        if !request.project.framework_collision
+        if !(request.project.framework_collision || request.framework_root.is_some())
             || !cache.plan.is_object()
             || cache.plan["kind"] != "dart_namespace_plan"
             || cache.plan["version"] != 1
@@ -241,6 +247,9 @@ async fn run_attempt(
         adapter_root: request.runtime.adapter_root.clone(),
     };
     let mut protected = crate::namespace_planner::protected_inputs(&project, &runtime)?;
+    if let Some(framework) = &request.framework_root {
+        protected.push(framework.canonicalize()?);
+    }
     let inputs = protected.clone();
     step(workspace, move |workspace| {
         workspace.protect_inputs(&inputs)
@@ -261,9 +270,13 @@ async fn run_attempt(
     .await?;
     let copied = step(workspace, |workspace| Ok(workspace.copy_path().to_owned())).await?;
     let mut cache = request.namespace_plan.clone();
-    let isolation = if request.project.framework_collision {
+    let isolation = if request.project.framework_collision || request.framework_root.is_some() {
         let isolate = |cache: Option<&NamespaceCache>| {
             let source = request.project.root.clone();
+            let framework = request
+                .framework_root
+                .clone()
+                .unwrap_or_else(|| source.clone());
             let copied = copied.clone();
             let plan = cache.map(|cache| cache.plan.clone());
             let cancel = cancel.clone();
@@ -271,7 +284,7 @@ async fn run_attempt(
                 isolate_subject(
                     &source,
                     &copied,
-                    &source,
+                    &framework,
                     "failforge_subject",
                     plan.as_ref(),
                     &cancel,
@@ -484,6 +497,7 @@ async fn run_owned_inner(
     retain_transport: bool,
 ) -> Result<OwnedAttempt, NamespaceError> {
     validate_request(&request)?;
+    verify_replay(request.replay.clone()).await?;
     let started = Instant::now();
     let root = request.workspace.root.clone();
     let campaign = request.workspace.campaign.clone();
@@ -499,11 +513,13 @@ async fn run_owned_inner(
     // capability lives past cleanup, through terminal response publication.
     let original = step(&workspace, |workspace| workspace.verify_original()).await;
     let cleanup = step(&workspace, |workspace| workspace.cleanup()).await;
+    let replay = verify_replay(request.replay.clone()).await;
     let mut receipt = match result {
         Ok(receipt) => receipt,
         Err(error) => {
             original?;
             cleanup?;
+            replay?;
             return Err(error);
         }
     };
@@ -512,6 +528,9 @@ async fn run_owned_inner(
     }
     if cleanup.is_err() {
         override_infra(&mut receipt, "workspace_cleanup_failed");
+    }
+    if replay.is_err() {
+        override_infra(&mut receipt, "retained_replay_input_changed");
     }
     receipt.attempt["temporaryCopyCleaned"] = cleanup.is_ok().into();
     receipt.attempt["wallSeconds"] = started.elapsed().as_secs_f64().into();
@@ -530,6 +549,15 @@ async fn run_owned_inner(
         workspace,
         private_response,
     })
+}
+
+async fn verify_replay(replay: Option<Arc<LoadedReplay>>) -> Result<(), NamespaceError> {
+    if let Some(replay) = replay {
+        tokio::task::spawn_blocking(move || replay.verify())
+            .await
+            .map_err(|_| invalid("retained replay verification failed"))??;
+    }
+    Ok(())
 }
 
 async fn perform(

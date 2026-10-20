@@ -18,6 +18,27 @@ use crate::family_stream::{FrameWriter, Stream};
 
 type Owner = Arc<Mutex<Option<Workspace>>>;
 
+/// Shared in-process events; the diagnostic wire is only one possible sink.
+pub(crate) trait SessionEvents {
+    fn bind_output(
+        &mut self,
+        _directory: &crate::family_execution::DirectoryGuard,
+    ) -> io::Result<()> {
+        Ok(())
+    }
+    fn emit_session(&mut self, event: Value) -> io::Result<()>;
+    fn finish_session(&mut self, status: &str, error: Option<&str>) -> io::Result<()>;
+}
+
+impl<W: FrameWriter> SessionEvents for Stream<W> {
+    fn emit_session(&mut self, event: Value) -> io::Result<()> {
+        Stream::emit_session(self, event)
+    }
+    fn finish_session(&mut self, status: &str, error: Option<&str>) -> io::Result<()> {
+        Stream::finish_session(self, status, error)
+    }
+}
+
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, NamespaceError> + Send + 'static,
 ) -> Result<T, NamespaceError> {
@@ -26,7 +47,7 @@ async fn blocking<T: Send + 'static>(
         .map_err(|_| invalid("campaign lifecycle operation failed"))?
 }
 
-fn stage(stream: &mut Stream, name: &str, seconds: Option<f64>) -> io::Result<()> {
+fn stage(stream: &mut dyn SessionEvents, name: &str, seconds: Option<f64>) -> io::Result<()> {
     stream.emit_session(match seconds {
         None => json!({"kind":"stage_started","stage":name}),
         Some(seconds) => {
@@ -36,7 +57,7 @@ fn stage(stream: &mut Stream, name: &str, seconds: Option<f64>) -> io::Result<()
 }
 
 async fn phase(
-    stream: &mut Stream,
+    stream: &mut dyn SessionEvents,
     name: &str,
     cancel: &Cancellation,
     work: impl Future<Output = Result<Value, NamespaceError>>,
@@ -60,14 +81,14 @@ struct Completion {
     error: Option<String>,
 }
 
-struct CampaignSink<'a, W: FrameWriter> {
-    stream: &'a mut Stream<W>,
+struct CampaignSink<'a> {
+    stream: &'a mut dyn SessionEvents,
     completion: Option<Completion>,
     progress: &'a mut LiveProgress,
     cancel: &'a Cancellation,
 }
 
-impl<W: FrameWriter> CampaignEvents for CampaignSink<'_, W> {
+impl CampaignEvents for CampaignSink<'_> {
     fn emit_campaign(&mut self, event: Value) -> io::Result<()> {
         self.stream
             .emit_session(json!({"kind":"campaign_event","event":event}))?;
@@ -177,7 +198,7 @@ async fn campaign(
     preflight: Arc<Preflight>,
     owner: Owner,
     cancel: &Cancellation,
-    stream: &mut Stream,
+    stream: &mut dyn SessionEvents,
     progress: &mut LiveProgress,
 ) -> Result<Completion, NamespaceError> {
     let preparing = Arc::clone(&preflight);
@@ -247,7 +268,7 @@ async fn campaign(
             workspace.campaign().to_owned(),
         )
     };
-    let inner = crate::campaign_execution::decode_value(json!({
+    let mut inner = crate::campaign_execution::decode_value(json!({
         "operation":"campaign","mode":request.mode.as_str(),
         "project":snapshot["project"],
         "original":{"root":preflight.original.root,"hashes":preflight.hashes},
@@ -256,6 +277,7 @@ async fn campaign(
         "environment":request.environment,"frozen":bindings["value"],
         "maxMutants":request.max_mutants,"families":selections(&preflight)
     }))?;
+    inner.replay = preflight.replay.clone();
     let mut sink = CampaignSink {
         stream,
         completion: None,
@@ -272,7 +294,7 @@ async fn campaign(
 async fn finish(
     preflight: Arc<Preflight>,
     owner: Owner,
-    stream: &mut Stream,
+    stream: &mut dyn SessionEvents,
 ) -> Result<Value, NamespaceError> {
     let mut wire_error = stage(stream, "workspace_cleanup", None).err();
     let begin = Instant::now();
@@ -381,10 +403,10 @@ fn with_progress_failure(
     }
 }
 
-async fn run(
+pub(crate) async fn run_owned(
     request: Arc<Request>,
     cancel: &Cancellation,
-    stream: &mut Stream,
+    stream: &mut dyn SessionEvents,
 ) -> Result<(), NamespaceError> {
     let preparing = Arc::clone(&request);
     let working = cancel.clone();
@@ -392,9 +414,14 @@ async fn run(
     cancel.check()?;
     let preparing = Arc::clone(&preflight);
     let report = blocking(move || workspace::create_output(&preparing)).await?;
-    stream.emit_session(json!({"kind":"prepared","runId":preflight.run_id,
+    stream.bind_output(&report)?;
+    let mut prepared = json!({"kind":"prepared","runId":preflight.run_id,
         "output":preflight.output,"original":preflight.original,"originalHashes":preflight.hashes,
-        "runtime":runtime_value(&preflight),"families":selections(&preflight)}))?;
+        "runtime":runtime_value(&preflight),"families":selections(&preflight)});
+    if let Some(replay) = &preflight.replay {
+        prepared["retainedReplay"] = replay.binding();
+    }
+    stream.emit_session(prepared)?;
 
     let owner = Arc::new(Mutex::new(None));
     let mut progress = LiveProgress::new(&preflight, &report);
@@ -460,7 +487,7 @@ async fn process(
         if let Some(ready) = ready {
             ready.acknowledge()?;
         }
-        run(Arc::new(request), &cancel, &mut stream).await
+        run_owned(Arc::new(request), &cancel, &mut stream).await
     }
     .await;
     listener.abort();

@@ -142,8 +142,22 @@ fn template_and_analysis_sdk_overrides_conflict() {
 fn template_is_explicit_and_default_analysis_needs_no_python_option() {
     assert!(!parse(&[]).template);
     assert!(parse(&["--template"]).template);
-    // Legacy scripts remain accepted, but the interpreter is never executed.
-    assert!(parse(&["--python", "/missing/python", "--template"]).template);
+    assert!(
+        Cli::try_parse_from([
+            "failforge",
+            "profile",
+            "generate",
+            "--file",
+            "a.dart",
+            "--family",
+            "classic",
+            "--output",
+            "a.yml",
+            "--python",
+            "/missing/python"
+        ])
+        .is_err()
+    );
 }
 
 #[test]

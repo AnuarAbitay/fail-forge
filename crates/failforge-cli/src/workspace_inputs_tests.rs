@@ -44,8 +44,6 @@ impl Fixture {
             "dart/bin/dart",
             "dart/lib/core.dart",
             "adapter/lib/adapter.dart",
-            "installation/python/failforge_campaign/controller.py",
-            "installation/scripts/shared.py",
             "flutter/bin/flutter",
             "flutter/bin/cache/flutter_tools.snapshot",
             "flutter/bin/cache/artifacts/engine/kernel.bin",
@@ -103,7 +101,7 @@ fn environment_fingerprint_matches_sorted_python_ascii_json() {
 }
 
 #[test]
-fn binding_covers_project_dependencies_sdk_tools_controller_and_environment() {
+fn binding_covers_project_dependencies_sdk_native_tools_and_environment() {
     let fixture = Fixture::new();
     let project = fixture.prepared();
     let runtime = fixture.runtime();
@@ -119,10 +117,6 @@ fn binding_covers_project_dependencies_sdk_tools_controller_and_environment() {
         ("test/lib/test.dart", "dependencies"),
         ("dart/lib/core.dart", "sdk"),
         ("installation/bin/failforge", "tools"),
-        (
-            "installation/python/failforge_campaign/controller.py",
-            "controller",
-        ),
         ("adapter/lib/adapter.dart", "adapter"),
         ("flutter/bin/cache/artifacts/engine/kernel.bin", "sdk"),
     ] {

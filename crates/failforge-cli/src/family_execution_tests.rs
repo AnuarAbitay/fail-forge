@@ -40,6 +40,37 @@ fn typed_and_wire_decoders_share_validation() {
 }
 
 #[test]
+fn retained_replay_baselines_receive_historical_selection_and_explicit_framework() {
+    let mut value = value();
+    value["retainedExpected"] = json!([["test/a_test.dart", "author"]]);
+    value["frameworkRoot"] = "/archive/upstream".into();
+    let request = decode_value(&value).unwrap();
+    let baseline = attempt_request(&request, request.output.join("baseline"), None, None).unwrap();
+    assert_eq!(
+        baseline.context.expected,
+        Some(vec![["test/a_test.dart".into(), "author".into()]])
+    );
+    assert_eq!(baseline.context.alias, "failforge_subject");
+    assert_eq!(
+        baseline.framework_root,
+        Some(PathBuf::from("/archive/upstream"))
+    );
+    for (key, bad) in [
+        ("retainedExpected", Value::Null),
+        ("retainedExpected", json!([])),
+        ("retainedExpected", json!([["test/a_test.dart", ""]])),
+        ("frameworkRoot", Value::Null),
+        ("frameworkRoot", json!("relative")),
+        ("family", json!("failure_mode")),
+        ("emptyPolicy", json!("skip")),
+    ] {
+        let mut invalid = value.clone();
+        invalid[key] = bad;
+        assert!(decode_value(&invalid).is_err(), "{key}");
+    }
+}
+
+#[test]
 fn family_decode_preserves_empty_policies_and_bounded_worker_configuration() {
     for policy in ["controls", "skip"] {
         for workers in [1, 4] {
@@ -266,8 +297,6 @@ fn owned_fixture() -> (Temp, Request, LifecycleCaps) {
         "sdk/lib/core.dart",
         "tools/failforge",
         "tools/failforge-adapter-campaign",
-        "tools/python/failforge_campaign/controller.py",
-        "tools/scripts/helper",
         "adapter/lib/main.dart",
     ] {
         put(&temp.0, relative, "fixture\n");

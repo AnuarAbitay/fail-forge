@@ -48,14 +48,6 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests
         run: cargo test --workspace --all-targets --locked -- --test-threads=1
-      - name: Benchmark statistics and protocol tests
-        run: python3 -m unittest discover -s scripts -p 'test_*.py'
-      - name: Mutation campaign configuration and lifecycle tests
-        shell: bash
-        run: |
-          python3 -m venv "$RUNNER_TEMP/campaign-python"
-          "$RUNNER_TEMP/campaign-python/bin/python" -m pip install -r python/requirements.txt
-          PYTHONPATH=python:scripts "$RUNNER_TEMP/campaign-python/bin/python" -B -m unittest discover -s python/tests -v
 
   msrv:
     name: Rust 1.85.1 / ${{ matrix.os }}
@@ -128,7 +120,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/install_test_flutter.py --destination "$RUNNER_TEMP"
+          cargo run -p failforge-tools --locked -- install-test-flutter --destination "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
           echo "PUB_CACHE=$RUNNER_TEMP/pub-cache" >> "$GITHUB_ENV"
           echo "FLUTTER_SUPPRESS_ANALYTICS=true" >> "$GITHUB_ENV"
@@ -144,33 +136,21 @@ jobs:
         run: |
           dart --suppress-analytics format --output=none --set-exit-if-changed adapters/dart examples/flutter_fixture
           (cd adapters/dart && dart --suppress-analytics analyze && dart --suppress-analytics test --concurrency 1)
-      - name: Rust integration and actual Flutter mutation fixture
+      - name: Build Rust tools and check adapter integration
         shell: bash
         run: |
           cargo build --workspace --examples --locked
           cargo build --workspace --locked
+          cargo build --release --workspace --bins --examples --locked
           cargo test -p failforge-dart --all-targets --locked -- --test-threads=1
-          python3 -m unittest discover -s scripts -p 'test_dart_adapter_e2e.py'
-          python3 scripts/dart_adapter_e2e.py --flutter-sdk "$RUNNER_TEMP/flutter" --output "$RUNNER_TEMP/adapter-e2e" --p1
-      - name: Native Dart initialization and timeout regressions
-        shell: bash
-        run: |
           mkdir -p .toolchain
           ln -s "$RUNNER_TEMP/flutter" .toolchain/flutter
           ln -s "$PUB_CACHE" .toolchain/pub-cache
-          python3 scripts/dart_initialization_e2e.py --output "$RUNNER_TEMP/initialization-e2e"
-          python3 scripts/dart_timeout_e2e.py --output "$RUNNER_TEMP/timeout-e2e"
-          python3 scripts/dart_timeout_campaign_e2e.py --output "$RUNNER_TEMP/timeout-campaign-e2e"
       - name: All 19 Dart semantic operators through Rust and the Dart VM
         shell: bash
         run: |
-          python3 scripts/dart_semantic_e2e.py --output "$RUNNER_TEMP/dart-semantic-e2e"
-      - name: Real mutation CLI, YAML parity, cancellation and Flutter failures
+          target/debug/failforge-tools semantic-e2e --output "$RUNNER_TEMP/dart-semantic-e2e" --dart-sdk "$RUNNER_TEMP/flutter/bin/cache/dart-sdk"
+      - name: Native CLI, profiles, initialization, timeouts and recovery regressions
         shell: bash
         run: |
-          python3 -m venv "$RUNNER_TEMP/mutate-python"
-          "$RUNNER_TEMP/mutate-python/bin/python" -m pip install -r python/requirements.txt
-          "$RUNNER_TEMP/mutate-python/bin/python" scripts/mutate_cli_e2e.py --output "$RUNNER_TEMP/mutate-cli-e2e" --flutter-sdk "$RUNNER_TEMP/flutter"
-          "$RUNNER_TEMP/mutate-python/bin/python" -B scripts/mutation_profile_e2e.py --output "$RUNNER_TEMP/mutation-profile-e2e" --flutter-sdk "$RUNNER_TEMP/flutter"
-          "$RUNNER_TEMP/mutate-python/bin/python" -B scripts/profile_applicability_e2e.py --output "$RUNNER_TEMP/profile-applicability-e2e" --dart-sdk "$RUNNER_TEMP/flutter/bin/cache/dart-sdk"
-          "$RUNNER_TEMP/mutate-python/bin/python" scripts/workspace_recovery_e2e.py --output "$RUNNER_TEMP/workspace-recovery-e2e"
+          target/release/failforge-tools regression --binary-dir target/release --output "$RUNNER_TEMP/native-regression" --dart-sdk "$RUNNER_TEMP/flutter/bin/cache/dart-sdk" --flutter-sdk "$RUNNER_TEMP/flutter"

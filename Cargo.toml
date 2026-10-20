@@ -6,6 +6,7 @@ members = [
     "crates/failforge-config",
     "crates/failforge-profile",
     "crates/failforge-workspace",
+    "crates/failforge-tools",
 ]
 resolver = "3"
 

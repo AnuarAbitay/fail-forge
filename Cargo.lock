@@ -263,6 +263,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "failforge-tools"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "failforge-config",
+ "failforge-dart",
+ "failforge-workspace",
+ "libc",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "failforge-workspace"
 version = "0.1.0"
 dependencies = [

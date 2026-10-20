@@ -1,260 +1,199 @@
 use super::*;
-use crate::args::{Cli, Commands};
 use clap::Parser;
-use std::fs;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-static NEXT: AtomicU64 = AtomicU64::new(0);
+fn configuration() -> (Context, RunConfig) {
+    let cwd = std::env::current_dir().unwrap();
+    let context = Context::new(&cwd, &cwd).unwrap();
+    let config = failforge_config::resolve_config(&json!({"family":"classic"}), &context).unwrap();
+    (context, config)
+}
 
-struct Fixture(PathBuf);
-
-impl Fixture {
-    fn new() -> Self {
-        let directory = std::env::temp_dir().join(format!(
-            "ff-mutate-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        fs::create_dir_all(directory.join("installation with spaces/python/failforge_campaign"))
-            .unwrap();
-        fs::write(
-            directory.join("installation with spaces/python/failforge_campaign/cli.py"),
-            "# test entry\n",
+#[test]
+fn profile_selection_rejects_missing_literals_but_preserves_globs_and_direct_filters() {
+    let (context, _) = configuration();
+    for (include, valid) in [
+        ("Cargo.toml", true),
+        ("lib/no-such-file.dart", false),
+        ("lib/no-such-directory/*.dart", true),
+    ] {
+        let profile = failforge_config::from_profile_mapping(
+            &json!({"mutations":{"classic":{"enabled":true,"operators":{"BOOLEAN_LITERAL_FLIP":true}}},
+                "rules":{"include":[include]}}),
+            &context.cwd,
+            &context,
+            None,
         )
         .unwrap();
-        fs::write(directory.join("runner"), "test runner bytes").unwrap();
-        Self(directory)
+        assert_eq!(
+            validate_profile_selection(&RunConfig::Profile(profile)).is_ok(),
+            valid,
+            "{include}"
+        );
     }
-
-    fn installation(&self) -> PathBuf {
-        self.0.join("installation with spaces")
-    }
-    fn runner(&self) -> PathBuf {
-        self.0.join("runner")
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn arguments(values: &[&str]) -> MutateArgs {
-    let Commands::Mutate(arguments) = Cli::try_parse_from(values).unwrap().command else {
-        panic!("expected mutate");
-    };
-    *arguments
+    let direct = failforge_config::resolve_config(
+        &json!({"family":"classic","include":["lib/no-such-file.dart"]}),
+        &context,
+    )
+    .unwrap();
+    validate_profile_selection(&direct).unwrap();
 }
 
 #[test]
-fn dispatch_uses_isolated_environment_flag_and_canonical_runtime_paths() {
-    let fixture = Fixture::new();
-    let arguments = arguments(&[
-        "failforge",
-        "mutate",
-        "--family",
-        "classic",
-        "--python",
-        "custom-python",
-    ]);
-    let command = prepare(
-        &arguments,
-        &fixture.0,
-        &fixture.installation(),
-        &fixture.runner(),
+fn direct_plan_keeps_omitted_operators_and_uses_no_python_handoff() {
+    let (context, config) = configuration();
+    let expected = config.to_value();
+    let plan = prepare(
+        config,
+        &context.installation,
+        &context.cwd.join("runner"),
+        BTreeMap::new(),
+        "a".repeat(32),
     )
     .unwrap();
-    assert_eq!(command.get_program(), "custom-python");
-    let actual: Vec<_> = command.get_args().collect();
+    assert_eq!(plan.request.mode, crate::campaign_workspace::Mode::Direct);
+    assert_eq!(plan.configuration, expected);
+    assert_eq!(plan.families["classic"], expected);
+    assert!(plan.request.families[0].rules.get("operators").is_none());
+    assert_eq!(plan.request.project, context.cwd);
+    assert!(plan.request.output.is_none());
+    assert!(plan.request.registry.is_none());
+}
+
+#[test]
+fn profile_plan_retains_canonical_family_order_and_shared_configuration() {
+    let (context, _) = configuration();
+    let config = failforge_config::from_profile_mapping(
+        &json!({"mutations":{
+            "language_specific":{"enabled":true,"language":"dart","operators":{"NSM-001":true}},
+            "classic":{"enabled":true,"operators":{"BOOLEAN_LITERAL_FLIP":true}}
+        }}),
+        &context.cwd,
+        &context,
+        None,
+    )
+    .unwrap();
+    let expected = config.to_value();
+    let plan = prepare(
+        RunConfig::Profile(config),
+        &context.installation,
+        &context.cwd.join("runner"),
+        BTreeMap::new(),
+        "b".repeat(32),
+    )
+    .unwrap();
+    assert_eq!(plan.request.mode, crate::campaign_workspace::Mode::Profile);
+    assert_eq!(plan.configuration, expected);
     assert_eq!(
-        actual,
+        plan.request
+            .families
+            .iter()
+            .map(|family| family.family.as_str())
+            .collect::<Vec<_>>(),
+        ["classic", "language_specific"]
+    );
+    assert_eq!(plan.families["language_specific"]["language"], "dart");
+}
+
+#[test]
+fn invalid_identity_is_rejected_before_any_execution() {
+    let (context, config) = configuration();
+    assert!(
+        prepare(
+            config,
+            &context.installation,
+            &context.cwd.join("runner"),
+            BTreeMap::new(),
+            "bad".into()
+        )
+        .is_err()
+    );
+    let one = identity().unwrap();
+    let two = identity().unwrap();
+    assert_ne!(one, two);
+    assert_eq!(one.len(), 32);
+    assert!(
+        one.bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    );
+}
+
+#[test]
+fn environment_preserves_user_cache_and_sets_noninteractive_sdk_flags() {
+    let result = environment(
+        Path::new("/not-installed"),
         [
-            std::ffi::OsStr::new("-E"),
-            fixture
-                .installation()
-                .canonicalize()
-                .unwrap()
-                .join("python/failforge_campaign/cli.py")
-                .as_os_str(),
-            std::ffi::OsStr::new("--family"),
-            std::ffi::OsStr::new("classic"),
-            std::ffi::OsStr::new("--installation"),
-            fixture.installation().canonicalize().unwrap().as_os_str(),
-            std::ffi::OsStr::new("--runner"),
-            fixture.runner().canonicalize().unwrap().as_os_str(),
-        ]
+            ("PUB_CACHE".into(), "/custom/cache".into()),
+            ("CI".into(), "false".into()),
+        ],
     );
-    assert_eq!(command.get_current_dir(), Some(fixture.0.as_path()));
+    assert_eq!(result["PUB_CACHE"], "/custom/cache");
+    for key in [
+        "CI",
+        "FLUTTER_SUPPRESS_ANALYTICS",
+        "DART_SUPPRESS_ANALYTICS",
+    ] {
+        assert_eq!(result[key], "true");
+    }
+    assert!(!environment(Path::new("/not-installed"), []).contains_key("PUB_CACHE"));
 }
 
 #[test]
-fn explicit_installation_is_resolved_from_the_invocation_directory() {
-    let fixture = Fixture::new();
-    let arguments = arguments(&[
-        "failforge",
-        "mutate",
-        "--config",
-        "config.yaml",
-        "--installation",
-        "installation with spaces",
-    ]);
-    let command = prepare(
-        &arguments,
-        &fixture.0,
-        Path::new("/missing-default"),
-        &fixture.runner(),
-    )
-    .unwrap();
+fn exit_codes_preserve_signal_cancellation_and_non_test_failures() {
+    for signum in [None, Some(libc::SIGINT), Some(libc::SIGTERM)] {
+        assert_eq!(
+            exit_status(&json!({"status":"cancelled"}), signum),
+            if signum == Some(libc::SIGTERM) {
+                143
+            } else {
+                130
+            }
+        );
+    }
+    for outcome in ["KILLED", "SURVIVED", "TIMEOUT", "INVALID", "CANCELLED"] {
+        assert_eq!(
+            exit_status(
+                &json!({"status":"completed","complete":true,"records":[{"outcome":outcome}]}),
+                None
+            ),
+            0
+        );
+    }
+    for outcome in ["INFRA_ERROR", "UNCLASSIFIED", "NO_TESTS"] {
+        assert_eq!(
+            exit_status(
+                &json!({"status":"completed","complete":true,"records":[{"outcome":outcome}]}),
+                None
+            ),
+            125
+        );
+    }
     assert_eq!(
-        command.get_args().nth(1).unwrap(),
-        fixture
-            .installation()
-            .canonicalize()
-            .unwrap()
-            .join("python/failforge_campaign/cli.py")
+        exit_status(
+            &json!({"status":"no_mutants","complete":true,"records":[]}),
+            None
+        ),
+        0
     );
-}
-
-#[test]
-fn missing_installation_entry_and_runner_are_distinct_failures() {
-    let fixture = Fixture::new();
-    let arguments = arguments(&["failforge", "mutate", "--family", "classic"]);
     assert_eq!(
-        prepare(
-            &arguments,
-            &fixture.0,
-            Path::new("/missing-installation"),
-            &fixture.runner()
-        )
-        .unwrap_err(),
-        LaunchError::Installation
-    );
-    fs::remove_file(
-        fixture
-            .installation()
-            .join("python/failforge_campaign/cli.py"),
-    )
-    .unwrap();
-    assert_eq!(
-        prepare(
-            &arguments,
-            &fixture.0,
-            &fixture.installation(),
-            &fixture.runner()
-        )
-        .unwrap_err(),
-        LaunchError::Controller
-    );
-    fs::write(
-        fixture
-            .installation()
-            .join("python/failforge_campaign/cli.py"),
-        "# entry\n",
-    )
-    .unwrap();
-    assert_eq!(
-        prepare(
-            &arguments,
-            &fixture.0,
-            &fixture.installation(),
-            &fixture.0.join("missing-runner")
-        )
-        .unwrap_err(),
-        LaunchError::Runner
+        exit_status(
+            &json!({"status":"failed","complete":false,"records":[]}),
+            None
+        ),
+        125
     );
 }
 
 #[test]
-fn relative_invocation_directory_is_rejected() {
-    let fixture = Fixture::new();
-    let arguments = arguments(&["failforge", "mutate", "--family", "classic"]);
-    assert_eq!(
-        prepare(
-            &arguments,
-            Path::new("relative"),
-            &fixture.installation(),
-            &fixture.runner()
-        )
-        .unwrap_err(),
-        LaunchError::InvocationDirectory
-    );
-}
-
-#[test]
-fn native_settings_preserve_omission_limits_repeated_filters_and_literal_paths() {
-    let minimum = arguments(&["failforge", "mutate", "--family", "classic"]);
-    assert_eq!(
-        minimum.configuration_values().unwrap(),
-        serde_json::json!({"family":"classic"})
-    );
-    let selected = arguments(&[
-        "failforge",
-        "mutate",
-        "--family",
-        "language_specific",
-        "--language",
-        "dart",
-        "--project",
-        "project with spaces",
-        "--workers",
-        "4",
-        "--test-timeout",
-        "2s",
-        "--command-timeout",
-        "9s",
-        "--max-mutants",
-        "0",
-        "--operator",
-        "NSM-001",
-        "--operator",
-        "ENM-001",
-        "--include",
-        "lib/a.dart",
-        "--include",
-        "lib/b.dart",
-        "--exclude",
-        "lib/generated/**",
-        "--class",
-        "Gateway",
-        "--method",
-        "read",
-        "--output",
-        "reports",
-        "--dart-sdk",
-        "sdk",
-        "--adapter-root",
-        "adapter",
-    ]);
-    assert_eq!(
-        selected.configuration_values().unwrap(),
-        serde_json::json!({
-        "family":"language_specific", "language":"dart", "project":"project with spaces",
-        "workers":4, "test_timeout":"2s", "command_timeout":"9s", "max_mutants":0,
-        "operators":["NSM-001","ENM-001"], "include":["lib/a.dart","lib/b.dart"],
-        "exclude":["lib/generated/**"], "classes":["Gateway"], "methods":["read"],
-        "output":"reports", "dart_sdk":"sdk", "adapter_root":"adapter"})
-    );
-}
-
-#[test]
-fn native_configuration_rejects_non_unicode_paths_without_lossy_conversion() {
-    use std::os::unix::ffi::OsStringExt;
-    let Commands::Mutate(arguments) = Cli::try_parse_from([
-        std::ffi::OsString::from("failforge"),
-        "mutate".into(),
-        "--family".into(),
-        "classic".into(),
-        "--project".into(),
-        std::ffi::OsString::from_vec(vec![b'p', 0xff]),
-    ])
-    .unwrap()
-    .command
-    else {
-        panic!("expected mutate");
-    };
-    assert_eq!(
-        arguments.configuration_values().unwrap_err(),
-        "configuration paths must contain valid Unicode"
+fn obsolete_interpreter_flag_is_rejected() {
+    assert!(
+        crate::args::Cli::try_parse_from([
+            "failforge",
+            "mutate",
+            "--family",
+            "classic",
+            "--python",
+            "anything"
+        ])
+        .is_err()
     );
 }

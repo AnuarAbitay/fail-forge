@@ -4,7 +4,63 @@ use serde_json::json;
 use std::io::{self, BufRead, Read, Write};
 use std::os::unix::net::UnixStream;
 
+/// Finite protocol actor for the installed helper's cancellation boundary.
+fn cancellation_fixture(marker: std::path::PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    let probe: i32 = std::env::var("FAILFORGE_CANCEL_PROBE_FD")?.parse()?;
+    let expected: serde_json::Value =
+        serde_json::from_str(&std::env::var("FAILFORGE_CANCEL_PROBE_INODE")?)?;
+    // SAFETY: fstat initializes the supplied storage when it succeeds. An
+    // intentionally closed probe descriptor returns EBADF without mutation.
+    let inherited = unsafe {
+        let mut info = std::mem::MaybeUninit::<libc::stat>::uninit();
+        if libc::fstat(probe, info.as_mut_ptr()) == 0 {
+            let info = info.assume_init();
+            expected == json!([info.st_dev, info.st_ino])
+        } else {
+            false
+        }
+    };
+    let close = std::env::var("FAILFORGE_CANCEL_MODE").as_deref() == Ok("close");
+    let report = |stage: &str| {
+        std::fs::write(
+            &marker,
+            json!({"pid":std::process::id(),"inheritedControl":inherited,
+                "privateEnvironmentPresent":std::env::var_os("FAILFORGE_ADAPTER_CANCEL_FD").is_some(),
+                "stage":stage})
+            .to_string(),
+        )
+    };
+    report("started")?;
+    for line in io::stdin().lock().lines() {
+        let request: serde_json::Value = serde_json::from_str(&line?)?;
+        let command = request["command"].as_str().ok_or("missing command")?;
+        let payload = if command == "handshake" {
+            json!({"operators":[]})
+        } else {
+            report("discover")?;
+            if !close {
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+            }
+            json!({"mutants":[],"truncated":false,"totalCandidates":0,"returnedCandidates":0})
+        };
+        println!(
+            "{}",
+            json!({"protocolVersion":1,"requestId":request["requestId"],
+                "kind":command,"payload":payload})
+        );
+        io::stdout().flush()?;
+    }
+    if close {
+        report("close")?;
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(marker) = std::env::var_os("FAILFORGE_CANCEL_MARKER") {
+        return cancellation_fixture(marker.into());
+    }
     let mode = std::env::args().nth(1).ok_or("fixture mode required")?;
     if mode == "hang-ignore-term" {
         // SAFETY: this dedicated fixture process changes only its own SIGTERM
@@ -39,7 +95,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         let mut line = String::new();
         if reader.read_line(&mut line)? == 0 {
-            if mode == "hang-on-close" {
+            if matches!(mode.as_str(), "hang-on-close" | "buffered-valid-response") {
                 std::thread::sleep(std::time::Duration::from_secs(3));
             }
             if mode == "extra-on-close" {
@@ -52,6 +108,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         request.validate()?;
         if let Some(control) = &mut control {
             writeln!(control, "REQUEST {}", request.request_id)?;
+        }
+        if mode == "buffered-valid-response" {
+            let release = std::env::var_os("FAILFORGE_ADAPTER_RESPONSE_RELEASE")
+                .ok_or("response release marker required")?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            while !std::path::Path::new(&release).is_file() {
+                if std::time::Instant::now() >= deadline {
+                    return Err("response release deadline".into());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
         }
         sequence += 1;
         if matches!(
@@ -114,6 +181,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 message: "expected structured error".into(),
                 details: None,
             });
+        }
+        if mode == "buffered-valid-response" {
+            let case = std::env::var("FAILFORGE_ADAPTER_RESPONSE_CASE")
+                .unwrap_or_else(|_| "valid".to_owned());
+            match case.as_str() {
+                "wrong-id" => response.request_id = "other".into(),
+                "wrong-version" => response.protocol_version = 2,
+                "wrong-kind" => response.kind = ResponseKind::Validate,
+                "remote" => {
+                    response.kind = ResponseKind::Error;
+                    response.payload = None;
+                    response.error = Some(AdapterFailure {
+                        code: "test_error".into(),
+                        message: "expected structured error".into(),
+                        details: None,
+                    });
+                }
+                _ => {}
+            }
+            let mut bytes = serde_json::to_vec(&response)?;
+            match case.as_str() {
+                "malformed" => bytes = b"not-json".to_vec(),
+                "duplicate" => {
+                    bytes = format!(
+                        "{{\"protocolVersion\":1,\"requestId\":{},\"kind\":\"handshake\",\"payload\":{{\"valid\":true,\"valid\":false}}}}",
+                        serde_json::to_string(&response.request_id)?
+                    )
+                    .into_bytes();
+                }
+                "oversize" => bytes = vec![b'x'; 513],
+                "partial" => bytes.truncate(bytes.len() / 2),
+                _ => {}
+            }
+            if case != "partial" {
+                bytes.push(b'\n');
+            }
+            if case == "second-response" {
+                bytes.extend(serde_json::to_vec(&response)?);
+                bytes.push(b'\n');
+            } else if case == "extra" {
+                bytes.extend_from_slice(b"unexpected");
+            }
+            stdout.write_all(&bytes)?;
+            stdout.flush()?;
+            writeln!(
+                control.as_mut().ok_or("response control required")?,
+                "RESPONSE"
+            )?;
+            continue;
         }
         serde_json::to_writer(&mut stdout, &response)?;
         stdout.write_all(b"\n")?;

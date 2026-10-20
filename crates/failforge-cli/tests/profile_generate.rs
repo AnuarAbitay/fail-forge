@@ -135,8 +135,7 @@ fn rejected(output: &Output) {
 #[test]
 fn templates_work_without_interpreter_python_sources_or_path_programs() {
     let mut f = Fixture::new();
-    let mut args = f.args();
-    args.extend(["--python".into(), "/missing/python".into()]);
+    let args = f.args();
     success(&f.run(&args));
     let raw = f.raw(&f.profile());
     let switches = raw["mutations"]["classic"]["operators"]
@@ -156,6 +155,15 @@ fn templates_work_without_interpreter_python_sources_or_path_programs() {
     assert_eq!(raw["limits"], json!({"max_mutants":1000}));
     assert_eq!(raw["rules"]["include"], json!(["lib/calculator.dart"]));
     assert!(!f.root.join("package/.dart_tool").exists());
+}
+
+#[test]
+fn removed_interpreter_option_is_rejected_without_creating_a_profile() {
+    let mut f = Fixture::new();
+    let mut args = f.args();
+    args.extend(["--python".into(), "/missing/interpreter".into()]);
+    rejected(&f.run(&args));
+    assert!(!f.profile().exists());
 }
 
 #[test]

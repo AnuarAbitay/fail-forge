@@ -21,6 +21,7 @@ use crate::attempt::{Config, NamespaceCache, OwnedAttempt, Publication, Workspac
 use crate::dart_namespace::{absolute, invalid};
 use crate::family_stream::{FrameWriter, Stream};
 use crate::namespace_planner::{PlanProject, PlanRuntime};
+use crate::retained_replay::LoadedReplay;
 use crate::workspace_inputs::RuntimeInputs;
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -45,6 +46,12 @@ pub(crate) struct Request {
     pub(crate) empty_policy: EmptyPolicy,
     pub(crate) frozen: Value,
     pub(crate) environment: BTreeMap<String, String>,
+    #[serde(default)]
+    pub(crate) retained_expected: Option<Vec<[String; 2]>>,
+    #[serde(default)]
+    pub(crate) framework_root: Option<PathBuf>,
+    #[serde(skip)]
+    pub(crate) replay: Option<Arc<LoadedReplay>>,
 }
 
 fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
@@ -88,6 +95,26 @@ fn validate_request(request: &Request) -> Result<(), NamespaceError> {
     }
     absolute(&request.output)?;
     absolute(&request.runtime.installation)?;
+    if request.retained_expected.is_some() != request.framework_root.is_some() {
+        return Err(invalid(
+            "replay identities and framework must be provided together",
+        ));
+    }
+    if let Some(expected) = &request.retained_expected {
+        if request.family != "classic"
+            || request.empty_policy != EmptyPolicy::Controls
+            || expected.is_empty()
+            || expected
+                .iter()
+                .flatten()
+                .any(|part| part.is_empty() || part.contains('\0'))
+        {
+            return Err(invalid("invalid retained baseline selection"));
+        }
+    }
+    if let Some(framework) = &request.framework_root {
+        absolute(framework)?;
+    }
     if request
         .environment
         .iter()
@@ -145,20 +172,25 @@ fn attempt_request(
     cache: Option<&NamespaceCache>,
 ) -> Result<crate::attempt::Request, NamespaceError> {
     let context = context.unwrap_or_else(|| SelectionContext {
-        alias: if request.project.framework_collision {
+        expected: request.retained_expected.clone(),
+        alias: if request.project.framework_collision || request.framework_root.is_some() {
             "failforge_subject".into()
         } else {
             request.project.name.clone()
         },
         ..Default::default()
     });
-    crate::attempt::decode_value(json!({"operation":"attempt", "project":request.project,
+    let mut attempt = crate::attempt::decode_value(
+        json!({"operation":"attempt", "project":request.project,
         "case":case,"runtime":{"runner":request.runtime.runner,"dartSdk":request.runtime.dart_sdk,
             "flutterSdk":request.runtime.flutter_sdk,"adapterRoot":request.runtime.adapter_root},
         "config":{"commandTimeout":request.config.command_timeout,"testTimeout":request.config.test_timeout},
         "workspace":{"root":request.workspace.root,"campaign":request.workspace.campaign},
-        "context":context,"patchSha256":null,
-        "namespacePlan":cache.map(|cache| json!({"plan":cache.plan,"receipt":cache.receipt}))}))
+        "context":context,"patchSha256":null,"frameworkRoot":request.framework_root,
+        "namespacePlan":cache.map(|cache| json!({"plan":cache.plan,"receipt":cache.receipt}))}),
+    )?;
+    attempt.replay = request.replay.clone();
+    Ok(attempt)
 }
 
 /// Retain pathname identity even when all child receipts are already sealed.
@@ -216,6 +248,9 @@ async fn blocking<T: Send + 'static>(
 
 async fn verify_frozen(request: Arc<Request>) -> Result<(), NamespaceError> {
     blocking(move || {
+        if let Some(replay) = &request.replay {
+            replay.verify()?;
+        }
         let current = crate::workspace_inputs::bind_inputs(
             &request.runtime,
             &request.project,
@@ -263,6 +298,9 @@ async fn prepare(
             adapter_root: request.runtime.adapter_root.clone(),
         };
         let mut protected = crate::namespace_planner::protected_inputs(&project, &runtime)?;
+        if let Some(framework) = &request.framework_root {
+            protected.push(framework.canonicalize()?);
+        }
         protected.push(request.workspace.root.canonicalize()?);
         let output = DirectoryGuard::open(&request.output)?;
         if protected
@@ -307,7 +345,7 @@ fn baseline_evidence(request: &Request, owned: OwnedAttempt) -> Result<Baseline,
     let context = SelectionContext {
         expected: Some(expected),
         baseline: Some(catalogue),
-        alias: if request.project.framework_collision {
+        alias: if request.project.framework_collision || request.framework_root.is_some() {
             "failforge_subject".into()
         } else {
             request.project.name.clone()
@@ -347,14 +385,19 @@ fn mutant_request(
     context["mutant"] = candidate["mutant"].clone();
     context["initialization"] = json!({"role":"initial","candidateValid":candidate["validation"]["valid"],
         "baseline":baseline.initialization});
-    crate::mutant_execution::decode_value(json!({"operation":"mutant","project":request.project,
+    let mut mutant = crate::mutant_execution::decode_value(
+        json!({"operation":"mutant","project":request.project,
         "case":output.join("mutants").join(candidate["mutant"]["id"].as_str().ok_or_else(||invalid("missing mutant id"))?),
         "runtime":{"installation":request.runtime.installation,"runner":request.runtime.runner,
             "dartSdk":request.runtime.dart_sdk,"flutterSdk":request.runtime.flutter_sdk,"adapterRoot":request.runtime.adapter_root},
         "config":{"commandTimeout":request.config.command_timeout,"testTimeout":request.config.test_timeout},
         "workspace":{"root":request.workspace.root,"campaign":request.workspace.campaign},
         "candidate":candidate,"context":context,"frozen":request.frozen,"environment":request.environment,
-        "namespacePlan":baseline.cache.as_ref().map(|cache|json!({"plan":cache.plan,"receipt":cache.receipt}))}))
+        "frameworkRoot":request.framework_root,
+        "namespacePlan":baseline.cache.as_ref().map(|cache|json!({"plan":cache.plan,"receipt":cache.receipt}))}),
+    )?;
+    mutant.replay = request.replay.clone();
+    Ok(mutant)
 }
 
 #[derive(Default)]
@@ -482,6 +525,41 @@ async fn run_family(
         "original baseline did not pass; no mutation score established",
     )?;
     let baseline = Arc::new(baseline_evidence(&request, baseline)?);
+    let _replay_control = if request.retained_expected.is_some() {
+        let control_request = attempt_request(
+            &request,
+            inputs.output.canonical.join("original-before"),
+            Some(baseline.context.clone()),
+            baseline.cache.as_ref(),
+        )?;
+        stage(stream, "original_before", None)?;
+        let begin = Instant::now();
+        let control = crate::attempt::run_owned(
+            control_request,
+            caps.try_clone()?,
+            cancel,
+            Publication::Attempt,
+        )
+        .await;
+        if let Ok(owned) = &control {
+            stream.emit(json!({"kind":"original_before","attempt":owned.attempt}))?;
+        }
+        stage(
+            stream,
+            "original_before",
+            Some(begin.elapsed().as_secs_f64()),
+        )?;
+        let control = control?;
+        require_passing(
+            &control.attempt,
+            cancel,
+            "second original control before replay did not pass",
+        )?;
+        verify_frozen(Arc::clone(&request)).await?;
+        Some(control)
+    } else {
+        None
+    };
     let owner = Arc::new(caps.try_clone()?);
     stage(stream, "mutations", None)?;
     let begin = Instant::now();

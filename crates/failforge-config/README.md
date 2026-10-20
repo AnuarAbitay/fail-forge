@@ -8,9 +8,8 @@ canonical operator ordering, path bases and separate test/command timeout policy
 `Context::new` binds the invocation directory and installation. `resolve_config`
 accepts semantic CLI settings, `load_yaml` loads one explicit profile, and
 `from_mapping` / `from_profile_mapping` support programmatic callers. Effective
-typed models expose fresh JSON projections for manifests. During the engine
-migration, `RunConfig::to_transport_value` also carries each selected campaign to
-the remaining execution controller without parsing YAML a second time.
+typed models expose fresh JSON projections for manifests. `RunConfig::to_transport_value` provides a complete normalized projection with
+selected family configurations, also used by the configuration benchmark.
 
 YAML input is bounded to 1 MiB, 32 collection levels and 65,536 decoded characters
 per scalar. Mapping keys must be strings and unique. Anchors, aliases, explicit

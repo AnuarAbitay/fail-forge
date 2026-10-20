@@ -4,14 +4,15 @@
 //! cancellation check or fallible cleanup follows the commit rename.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
-use std::io::{self, Write};
+use std::io::{self, Read, Seek, Write};
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::fs::MetadataExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use serde::Deserialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::campaign_publish_fs as files;
 use files::invalid;
@@ -20,14 +21,14 @@ const CAPS_ENV: &str = "FAILFORGE_REPORT_FDS";
 const REQUEST_ENV: &str = "FAILFORGE_WORKSPACE_REQUEST_FD";
 const FAMILIES: [&str; 3] = ["classic", "failure_mode", "language_specific"];
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum Kind {
     Directory,
     Symlink,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Binding {
     path: String,
@@ -57,6 +58,223 @@ struct Request {
     bindings: Vec<Binding>,
     files: Vec<Payload>,
     progress: Option<Value>,
+}
+
+/// A retained publication capability for an in-process campaign controller.
+/// All directory and alias identities are captured before executing user code.
+pub(crate) struct Publisher {
+    output: PathBuf,
+    root: File,
+    profile: bool,
+    families: Vec<String>,
+    bindings: Vec<Binding>,
+}
+
+pub(crate) fn token() -> io::Result<String> {
+    let mut bytes = [0u8; 16];
+    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn capture_binding(root: &File, path: &str, target: Option<String>) -> io::Result<Binding> {
+    if path.is_empty() {
+        let metadata = root.metadata()?;
+        return Ok(Binding {
+            path: String::new(),
+            device: metadata.dev(),
+            inode: metadata.ino(),
+            kind: Kind::Directory,
+            target: None,
+        });
+    }
+    let mut parent = root.try_clone()?;
+    let (prefix, name) = split(path);
+    if !prefix.is_empty() {
+        for component in prefix.split('/') {
+            parent = files::directory(&parent, component)?;
+        }
+    }
+    let info = files::stat(&parent, name)?;
+    let kind = if target.is_some() {
+        Kind::Symlink
+    } else {
+        Kind::Directory
+    };
+    let expected_kind = if target.is_some() {
+        libc::S_IFLNK
+    } else {
+        libc::S_IFDIR
+    };
+    if info.st_mode & libc::S_IFMT != expected_kind {
+        return Err(invalid("invalid report layout entry"));
+    }
+    if let Some(target) = &target {
+        if files::read_link(&parent, name)? != *target {
+            return Err(invalid("invalid report layout alias"));
+        }
+    } else {
+        let opened = files::directory(&parent, name)?;
+        if !files::same(&info, &opened, libc::S_IFDIR)? {
+            return Err(invalid("report layout directory changed"));
+        }
+    }
+    Ok(Binding {
+        path: path.into(),
+        device: info.st_dev as u64,
+        inode: info.st_ino,
+        kind,
+        target,
+    })
+}
+
+fn anonymous_payload(root: &File, bytes: &[u8]) -> io::Result<File> {
+    anonymous_payload_with_hook(root, bytes, &mut |_| Ok(()))
+}
+
+fn anonymous_payload_with_hook(
+    root: &File,
+    bytes: &[u8],
+    hook: &mut impl FnMut(&str) -> io::Result<()>,
+) -> io::Result<File> {
+    let name = format!(".report-payload-{}.tmp", token()?);
+    let mut file = files::create_file(root, &name)?;
+    hook("unlink:payload")?;
+    // Do not remove an entry that replaced our private stage, or unlink a
+    // multiply linked file. An uncertain stage stays available for inspection.
+    verify_file(root, &name, &file)?;
+    files::staged(&file, 0)?;
+    let name = std::ffi::CString::new(name).expect("generated report name");
+    // SAFETY: this fresh entry is relative to the retained output directory.
+    if unsafe { libc::unlinkat(root.as_raw_fd(), name.as_ptr(), 0) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    file.write_all(bytes)?;
+    file.flush()?;
+    file.rewind()?;
+    Ok(file)
+}
+
+impl Publisher {
+    pub(crate) fn new(
+        output: &Path,
+        root: File,
+        profile: bool,
+        families: &[String],
+    ) -> io::Result<Self> {
+        if families.is_empty()
+            || families.len() > 3
+            || !profile && families.len() != 1
+            || families
+                .iter()
+                .any(|name| !FAMILIES.contains(&name.as_str()))
+            || families.iter().collect::<BTreeSet<_>>().len() != families.len()
+        {
+            return Err(invalid("invalid publication families"));
+        }
+        let mut selected = families.to_vec();
+        selected.sort_by_key(|name| FAMILIES.iter().position(|family| *family == name));
+        let files = std::iter::once("summary.json".to_owned())
+            .chain(
+                selected
+                    .iter()
+                    .filter(|_| profile)
+                    .map(|family| format!("families/{family}/summary.json")),
+            )
+            .map(|path| Payload {
+                path,
+                bytes: 1,
+                sha256: "0".repeat(64),
+            })
+            .collect();
+        let mut request = Request {
+            operation: "campaign-publish".into(),
+            output: output.into(),
+            token: "0".repeat(32),
+            profile,
+            complete: false,
+            run_id: "0".repeat(32),
+            bindings: vec![],
+            files,
+            progress: None,
+        };
+        request.bindings = expected_bindings(&request)?
+            .into_iter()
+            .map(|(path, target)| capture_binding(&root, &path, target))
+            .collect::<io::Result<_>>()?;
+        Bound::open(&request, root.try_clone()?)?;
+        Ok(Self {
+            output: output.into(),
+            root,
+            profile,
+            families: selected,
+            bindings: request.bindings,
+        })
+    }
+
+    /// Success is the final commit. No fallible filesystem work follows it.
+    pub(crate) fn publish(&self, summary: &Value, progress: Option<&Value>) -> io::Result<()> {
+        self.publish_with_hook(summary, progress, &mut |_| Ok(()))
+    }
+
+    fn publish_with_hook(
+        &self,
+        summary: &Value,
+        progress: Option<&Value>,
+        hook: &mut impl FnMut(&str) -> io::Result<()>,
+    ) -> io::Result<()> {
+        let complete = summary["complete"]
+            .as_bool()
+            .ok_or_else(|| invalid("missing report completion"))?;
+        let run_id = summary["runId"]
+            .as_str()
+            .ok_or_else(|| invalid("missing report identity"))?;
+        if summary["output"] != self.output.to_string_lossy().as_ref()
+            || self.profile && summary["kind"] != "profile"
+            || !self.profile && summary["kind"] == "profile" && complete
+        {
+            return Err(invalid("publication summary identity changed"));
+        }
+        let mut values = vec![("summary.json".to_owned(), summary)];
+        if self.profile {
+            for family in &self.families {
+                let child = &summary["families"][family]["summary"];
+                if !child.is_object() || child["family"] != *family {
+                    return Err(invalid("missing selected family report"));
+                }
+                values.push((format!("families/{family}/summary.json"), child));
+            }
+        }
+        let mut request = Request {
+            operation: "campaign-publish".into(),
+            output: self.output.clone(),
+            token: token()?,
+            profile: self.profile,
+            complete,
+            run_id: run_id.into(),
+            bindings: self.bindings.clone(),
+            files: vec![],
+            progress: progress.cloned(),
+        };
+        // Verify the originally bound root before creating even anonymous stages.
+        let named = files::walk(&self.output)?;
+        let held = self.root.metadata()?;
+        let current = named.metadata()?;
+        if held.dev() != current.dev() || held.ino() != current.ino() {
+            return Err(invalid("publication root binding changed"));
+        }
+        let mut capabilities = vec![self.root.try_clone()?];
+        for (path, value) in values {
+            let mut bytes = serde_json::to_vec_pretty(value)?;
+            bytes.push(b'\n');
+            request.files.push(Payload {
+                path,
+                bytes: bytes.len() as u64,
+                sha256: format!("{:x}", Sha256::digest(&bytes)),
+            });
+            capabilities.push(anonymous_payload(&self.root, &bytes)?);
+        }
+        publish(&request, capabilities, hook)
+    }
 }
 
 fn hex(value: &str, length: usize) -> bool {

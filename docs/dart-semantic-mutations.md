@@ -7,10 +7,11 @@ and one language; this implementation supports the Dart subtype.
 
 ## Integration and compatibility
 
-The Dart adapter resolves ASTs and types using the existing pinned analyzer. The
-Python campaign controller schedules fresh attempts and writes reports; Rust
-continues to own protocol validation, exact byte patching and test processes.
-Adding semantic operators does not move orchestration between languages.
+The Dart adapter resolves ASTs and types using the pinned analyzer. Rust owns
+configuration, discovery orchestration, exact byte patching, fresh attempt
+copies, test processes, evidence classification and report publication. Semantic
+operators use the same native scheduler and reporting path as the other families;
+there is no Python controller or runtime dependency.
 
 The candidate wire format remains protocol version 1: `operatorId`,
 `operatorVersion`, `family`, `file`, `sourceHash`, `edit`, `symbol`, `components`
@@ -244,3 +245,33 @@ Persistent candidate caching is not enabled. A future semantic cache must bind
 source bytes, normalized selection, operator versions, language versions,
 analysis options, dependency configuration/content and SDK/analyzer identity.
 A source-hash-only cache would miss changes that alter types or resolution.
+
+## Verification
+
+The Rust developer tool exercises the complete 19-operator fixture catalogue.
+It checks handshake metadata, discovery transcripts and validated source-bound
+candidates, applies exact patches, then runs independent Dart VM assertions.
+Each operator must have a passing original and at least one observable mutant.
+The fixture labels `UNCHANGED` and `OBSERVED` describe those VM assertions; they
+are separate from production campaign outcomes and mutation scores.
+
+Prepare the adapter dependencies with the supported SDK, then build before
+starting the sequential run:
+
+```sh
+cargo build --workspace --bins --examples --locked
+target/debug/failforge-tools semantic-e2e \
+  --dart-sdk /absolute/flutter/bin/cache/dart-sdk \
+  --output /absolute/new-semantic-evidence
+target/debug/failforge-tools regression --suite smoke \
+  --dart-sdk /absolute/flutter/bin/cache/dart-sdk \
+  --output /absolute/new-campaign-evidence
+```
+
+`semantic-e2e` checks the operator catalogue; `regression --suite smoke` exercises
+the public campaign path, including a language-specific selection. Profile
+generation and multi-family configuration have separate `profiles` and
+`applicability` suites. Use a fresh output directory for each command and keep
+source/toolchain inputs unchanged while it runs. The generated evidence records
+the actual outcome; listing a command here does not establish that it passed on
+another SDK, package or platform.

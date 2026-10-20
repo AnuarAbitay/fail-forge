@@ -5,11 +5,16 @@ on Linux and macOS with bounded output capture, timeout handling, cancellation,
 and explicit Unix process cleanup. It runs tools such as `dart test`, `flutter
 test`, Cargo, or a project-specific executable. The Dart/Flutter development adapter adds AST mutation discovery, in-memory
 static validation and a Rust patch/protocol contract. `failforge mutate` connects
-these components to the Python campaign controller, with explicit YAML or CLI
+these components through a native Rust campaign owner, with explicit YAML or CLI
 configuration, fresh test copies and family-specific reports. See the
 [mutation CLI guide](docs/mutation-cli.md) for installation, commands and current
 standalone-package boundaries, and the [Dart adapter guide](docs/dart-adapter.md)
 for the protocol and operators.
+`failforge replay` executes authenticated archived classic candidates through the
+same engine without rediscovery. Product orchestration and the
+[developer regression tools](crates/failforge-tools/README.md) are Rust;
+the Dart adapter remains Dart. See the [migration map](docs/rust-migration.md)
+for replacement coverage and verification limits.
 The [Dart semantic mutation guide](docs/dart-semantic-mutations.md) describes
 the 19 operators under `language_specific -> dart`, their limits and configuration.
 One YAML file selects a profile with explicit family/operator switches. Omitted
@@ -211,7 +216,7 @@ This is a manual environment smoke test, not part of the portable Rust suite.
 Record its environment and result separately; success cannot be inferred from
 the runner's fixture tests.
 
-The [benchmark driver](scripts/benchmark.py) collects measurements. Record the
+The [benchmark driver](crates/failforge-tools/README.md) collects measurements. Record the
 environment, build, commands, and workload alongside the results. Timings and
 memory results describe the measured machine and workload, not universal
 performance promises.

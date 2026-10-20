@@ -63,6 +63,7 @@ impl<W: FrameWriter> Stream<W> {
                 "stage_started",
                 "stage_finished",
                 "baseline",
+                "original_before",
                 "mutant",
                 "original_after",
             ],

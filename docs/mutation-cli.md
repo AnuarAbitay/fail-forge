@@ -2,159 +2,67 @@
 
 `failforge mutate` runs explicitly selected mutations. A YAML profile can select
 multiple families; direct CLI arguments select one family.
-The Rust CLI reads, validates and normalizes both launch modes through
-`failforge-config`, then replaces itself with the Python execution controller.
-The effective configuration is transferred through an unlinked regular-file
-descriptor and consumed once; the controller does not re-read the YAML or apply
-its Python configuration defaults on this path. Each native test command
-is owned by the existing Rust Runner; the controller does not implement another
-test timeout or kill that cleanup owner.
+The Rust CLI validates both modes through `failforge-config`. A small Rust launcher
+starts one Rust campaign owner and forwards cancellation. That owner runs
+preflight, workspace preparation, discovery, scheduling, reports and cleanup
+in-process. It owns the workspace lease until every active worker has drained.
+If the launcher dies, a private liveness pipe closes and the owner cancels work,
+waits for Runner cleanup and retains an incomplete report.
 
-Primary Dart/Flutter reporter parsing, author-test catalogue comparison and
-outcome classification run in Rust. This includes conservative setup-suppression
-analysis, independent ordinary-failure witnesses and initialization confirmation.
-The native attempt owner authenticates both raw captures against the Runner
-result before accepting its verdict. A private input descriptor transfers the opaque
-baseline catalogue and expected test selection to each native owner before it
-starts the test process. For an eligible loading failure, Rust requests the next
-original/mutant/original control through opaque state and validates its order and
-candidate binding. The native mutant owner executes those controls and checks
-input bindings between them. One native campaign owner schedules discovery,
-profile family ordering and execution input checkpoints. Shared family execution
-runs the baseline, worker queue and final original control. The Python controller
-retains normalized settings/environment transport, cancellation forwarding and aggregate report assembly.
+Preflight checks the prepared package, paths and runtime before creating output.
+The owner recovers recognized abandoned workspaces, allocates a private snapshot,
+and binds source, dependencies, SDK, adapter, environment and the Rust executable.
+Every attempt uses a fresh copy. Namespace isolation, source-bound patch checks,
+capture authentication and final input verification execute in Rust. Source,
+capture and cleanup failures take precedence over cancellation or a test verdict.
 
-Prepared package inspection, source and tool hashes, dependency bindings,
-snapshot copying and fresh attempt copying execute in Rust through
-`failforge-workspace`. One `campaign-run` owner performs preflight, output creation,
-registry recovery, snapshot preparation, binding, discovery and execution, then
-workspace cleanup and final original-source verification. Preflight failure creates
-no report output. Native errors fail the operation without a Python fallback.
-The native owner retains the campaign workspace lease. Read-only source checks still
-execute after cancellation and report changed inputs as infrastructure failure.
-Registry allocation, leases, recovery and removal of owned copies also execute
-in Rust. Dart namespace scanning, copy rewrites, inverse proofs and read-only
-analyzer planning also execute in Rust through `failforge-dart` and the existing
-Runner. The native family owner retains its namespace-plan cache. The controller
-retains aggregate report assembly. Public launches send only a request descriptor;
-workspace descriptors never leave the native session.
+Discovery uses `AdapterClient` directly and retains the complete bounded adapter
+transcript and receipt. The transcript uses 8 MiB records and a 64 MiB total
+limit; raw adapter captures are limited to 128 MiB stdout and 8 MiB stderr.
+Each source file is limited to 4 MiB. Invalid or incomplete evidence cannot
+publish candidates for execution. All selected families finish discovery before
+any baseline; the shared mutant cap is checked before author execution. Families
+run in order `classic`, `failure_mode`, `language_specific`.
 
-The native campaign owner calls the shared discovery implementation. It starts the persistent
-`AdapterClient` directly, validates the handshake, complete discovery and each
-candidate, checks source-bound patches, drains the adapter and Runner, verifies
-unchanged inputs and publishes the transcript and receipt. The controller sends
-one campaign request; the native owner retains the campaign lease. Python neither starts the
-adapter helper nor re-parses its protocol journal on this production path.
-The receipt's `command` remains the reproducible helper recipe. Discovery
-artifacts include `payload.json`, `adapter-session.jsonl`, `adapter.stderr` and
-`result.json`. Transcript records retain the 8 MiB limit, and the complete native
-transcript and private response are each bounded to 64 MiB. Exceeding a bound
-fails discovery without publishing candidates for execution.
-Source verification retains its 4 MiB per-file limit. The native owner also
-authenticates raw adapter captures, accepting at most 128 MiB of stdout and
-8 MiB of stderr; a capture issue or an exceeded bound fails the operation.
-When the output directory remains valid, cancellation or failure also leaves a
-receipt with `freshStaticValidation: false`: `exitCode` is 130 for SIGINT,
-143 for SIGTERM or 125 for an infrastructure failure. A cleanly closed adapter
-session does not override a failed final source or artifact check.
+Each family establishes a passing baseline, runs a bounded queue of one to four
+workers and checks the original again afterward. Cancellation stops admission and
+waits for active workers. An empty direct campaign retains both original controls;
+an empty profile family skips author execution. Static `INVALID` candidates need
+no test copy. Eligible initialization failures require up to three fresh causal
+controls: original-before, mutant-replay and original-after. Opaque baseline
+catalogues, policy continuations and namespace plans stay in the owner; public
+reports retain observations and control proofs without reusable policy state.
 
-One native owner now performs each complete attempt: allocation, fresh copying,
-namespace preparation, source-bound patch application, test execution, capture
-authentication, input verification, temporary-copy cleanup and private report
-publication. The native session retains the workspace capabilities; standalone
-diagnostic bridges can borrow them explicitly. Rust independently reconstructs the
-patch from the bound mutant and rejects a mismatch before starting tests.
-Opaque baseline catalogues, initialization continuations and namespace plans stay
-outside public attempt JSON. The native family owner retains them directly between
-shared attempt calls. The standalone `TestExecutor` bridge also validates private
-responses without parsing raw captures or rewriting the native result.
+The owner creates manifests and the initial reports, journals ordered events,
+updates compact progress and retains completed records, including late results
+after cancellation. A reporting failure requests cancellation but does not discard
+those results. After final source checks and workspace cleanup, Rust calculates
+summaries and terminal tables and publishes final files atomically. Only KILLED
+and SURVIVED enter each family's score denominator; incomplete campaigns have
+no final score. Detailed attempt evidence remains unchanged during aggregation.
 
-A complete mutant is now one native operation as well. Rust checks the candidate
-and source-bound patch before calling the shared attempt implementation directly.
-Statically invalid candidates receive an `INVALID` record without starting author
-tests. Initialization failures follow the existing native causal policy through
-at most three fresh attempts: original-before, mutant-replay and original-after.
-The owner checks the frozen campaign bindings before and after each control and
-publishes the final `result.json` with mutant metadata and the public control
-proof. Python does not repeat the patch checks, schedule those controls or rewrite
-that record. The native session retains ownership until cleanup completes. Private continuation state remains outside public JSON.
+Final publication binds output directories and profile aliases, verifies staged
+contents and commits with one atomic rename. A failure before commit rebuilds an
+incomplete summary and table. Private failed stages remain available for inspection.
+Atomic visibility does not guarantee persistence of the last rename after power
+loss. The final journal event precedes commit; `summary.json` is authoritative.
+Progress updates may be skipped on a saturated terminal queue, but the journal and
+results remain complete. Actual terminal I/O errors and a bounded drain timeout
+are reported as failures.
 
-Both direct and profile launches use one native lifecycle operation. After
-preflight and snapshot preparation, Rust discovers every selected family, checks the profile's aggregate mutant limit,
-then runs families in the fixed order `classic`, `failure_mode`,
-`language_specific`. It verifies the original source and frozen execution inputs
-at phase boundaries; a failed phase stops later families. No Python discovery
-loop or family dispatch remains on this production path.
-
-Within each family Rust checks
-all candidates and frozen inputs, establishes a passing baseline, writes its
-catalogue, executes a bounded queue of one to four workers, and runs the final
-original control. Workers call shared native mutation and attempt functions
-directly. Cancellation stops admission and waits for all active workers and their
-temporary-copy cleanup. An empty direct campaign runs both original controls;
-an empty profile family skips author execution.
-
-The controller receives discovery receipts, progress and completed records as
-bounded LF-framed JSON events, draining stderr concurrently. Each frame is limited
-to 64 MiB; the event count is bounded by the configured mutant cap plus per-family
-stage events and bounded lifecycle phases. The same stream includes prepared
-metadata, snapshot/binding receipts and final cleanup evidence. A terminal event
-commits all preceding raw bytes with SHA-256; nested campaign and family completion
-validate coverage without separate byte commitments. Records arriving
-after cancellation remain in the partial report. If a progress or report callback
-fails, the controller requests cancellation and retains subsequent records without
-calling that failing publication path again. A successful native terminal still
-already includes final source checks and workspace cleanup. After draining the
-owner and final callbacks, Rust constructs the final aggregate JSON and terminal
-table in one pure report operation. It counts each family separately and excludes
-TIMEOUT and other unscored outcomes from the KILLED/SURVIVED denominator. Partial
-campaigns publish no score. A separate Rust publication operation makes the
-final files visible before the campaign can report success.
-
-Report construction does not launch tests or touch project files and still runs
-after cancellation. Only identities, outcomes, reasons and metadata cross its
-private channel; detailed retained attempt evidence is attached unchanged afterward.
-Its request and response each retain the 64 MiB limit without duplicating opaque
-attempt payloads. Final publication streams the complete documents from private
-file descriptors, so that metadata limit does not cap the report files.
-If publication fails before commit, the failed summary and its table are rebuilt
-together. If confirmation is lost, the controller verifies the files after the
-publisher exits. An unresolved commit is preserved and reported as an error,
-never overwritten with a failed summary. If native report construction fails,
-no successful aggregate is published and no Python scoring fallback is used.
-Manifests, the event journal and the initial report layout remain in Python.
-Rust writes live progress inside the campaign owner, and derives final progress
-from the final summary after callbacks have completed.
-
-An attempt becomes terminal after source verification and cleanup. Cancellation
-observed before that point is recorded in its result; a later cancellation stops
-subsequent campaign work without changing an already sealed attempt. Input,
-capture or cleanup failures still take precedence over cancellation. The public
-`command` retains the reproducible `failforge run ... -- dart ...` or Flutter
-recipe. The attempt owner starts the SDK child directly through Runner; it does
-not recursively invoke that recipe. `exitCode` records the native test-execution
-exit policy. Successful private transport can therefore
-return a killed, timed-out or cancelled attempt as a complete result.
-
-Configuration loading itself needs neither Python nor an SDK and never starts
-author tests. Python is still required for campaign execution. Profile generation
-runs through the native `failforge-profile` crate without Python or PyYAML. The native
-configuration library also exposes the direct settings and profile APIs for
-later migration stages. Preflight, snapshot/bootstrap, final workspace cleanup
-and final report calculation/publication run in Rust. The Python controller still
-transports configuration/environment/signals and writes manifests, initial report
-layout and the journal. Standalone diagnostic tools
-retain their Python transcript implementation during migration; a native
-production error never falls back to that implementation.
+Configuration loading needs no SDK. Profile generation is also Rust, and uses the
+Dart adapter for applicability analysis unless `--template` is selected. The
+product, installer, benchmarks and regression harness need no Python interpreter.
+Standalone private diagnostic commands retain their bounded request/event
+protocols; the public campaign calls the same implementations directly.
 
 ## Prepare the installation and target
 
-The first distribution uses this repository's installation layout, Python 3.9+
-and PyYAML. Build both native executables and prepare the adapter separately:
+The first distribution uses this repository's installation layout. Build the
+native executables and prepare the Dart adapter separately:
 
 ```sh
 cargo build --workspace --locked
-python3 -m pip install -r python/requirements.txt
 dart --suppress-analytics pub get --enforce-lockfile --directory adapters/dart
 ```
 
@@ -180,10 +88,10 @@ documented version constraints. A Flutter project can also use the installation'
 Flutter SDK when its Dart SDK has that layout. Runtime paths and effective rules
 are recorded in the manifest.
 
-`--installation PATH` selects a relocated installation containing `python/`,
-`scripts/` and `adapters/`. `--python PROGRAM` selects the interpreter, including
-a virtual environment. `failforge` and `failforge-adapter-campaign` must be in the
-same binary directory. A standalone copied `failforge` binary is insufficient.
+`--installation PATH` selects a relocated installation containing `adapters/`
+and, optionally, the prepared `.toolchain/`. Profile applicability analysis also
+uses `failforge-adapter-campaign` from the same binary directory as `failforge`.
+A standalone copied binary without the prepared adapter is insufficient.
 
 ## Generate a profile
 
@@ -312,13 +220,12 @@ unpublished temporary files. If the filesystem also refuses restoration, the
 recoverable `.failforge-profile-backup-*.tmp` copy is retained for recovery.
 
 Generation uses the existing installation layout selected by `--installation PATH`.
-The legacy `--python PROGRAM` option is accepted for compatibility and has no
-effect on generation. Analysis preserves the source, package metadata, dependencies, SDK and
+Analysis preserves the source, package metadata, dependencies, SDK and
 adapter inputs and cleans its temporary workspaces. It does not execute author
 tests; template mode also skips discovery and static validation.
 After writing the file, the command prints its path and a suggested
 `failforge mutate --config ...` command including the selected installation.
-The campaign still requires its Python controller. Run that command separately after
+Run that command separately after
 preparing the target and adapter as described above.
 
 ## Explicit CLI configuration
@@ -435,7 +342,7 @@ Selection rules:
 
 Duplicate keys, YAML tags/anchors/aliases, multiple documents and files larger
 than 1 MiB are rejected. YAML settings cannot be mixed with semantic CLI settings,
-including `--project` and `--output`; interpreter and installation options remain
+including `--project` and `--output`; installation options remain
 available in either mode. Old YAML formats are not supported.
 
 Defaults are one worker, `test: 30s`, `command: 120s` and 1,000 mutants. Workers
@@ -449,6 +356,46 @@ hard ceiling. Families execute in order: `classic`, `failure_mode`, then
 Both durations use positive integer `ms`, `s` or `m` units. The command budget
 must exceed the test default by at least five seconds. It bounds the entire test
 process; metadata, multiple timeouts and teardown can still reach the outer limit.
+
+## Replay a retained classic transcript
+
+`failforge replay` replaces the former isolated replay script. It reuses the
+production owner, workspace lifecycle, attempt runner, mutant queue and reporting:
+
+```sh
+failforge replay --project /absolute/subject \
+  --framework /absolute/pristine-upstream \
+  --transcript /absolute/evidence/adapter-session.jsonl \
+  --baseline /absolute/evidence/baseline-result.json \
+  --output /absolute/new-replay \
+  --workers 3 --test-timeout 5s --command-timeout 30s
+```
+
+This diagnostic command accepts the retained classic discovery JSONL format and
+the original baseline archive contract. The baseline JSON names its raw capture
+with `outputSource` and includes `runnerExitCode`, `runnerSummary` and
+`completedTestIdentities`. Its directory must also contain `provenance.json`
+with `sourceFileHashes` and `dependency-result.json` with
+`generatedLockSha256` and `generatedPackageConfigSha256`. A bare summary or
+unverified list of mutant IDs is insufficient.
+
+The command validates the complete transcript, each candidate's source and patch
+proof, the passing baseline evidence, source provenance and dependency hashes.
+`--framework` is an unmodified upstream copy of the subject package used by test
+infrastructure; its library must match the original subject. Attempts isolate the
+mutated subject under its alias while preserving this upstream framework.
+Two fresh passing original controls precede the mutant queue, and another
+original control follows it. Their test identities must match the retained
+baseline. Discovery and static validation are reused; source and input integrity
+are checked again during execution.
+
+The output uses the normal campaign report format, with retained input bindings
+in `replay-binding.json`, `manifest.json` and `summary.json`, and the extra
+original control in `originalControls`. A failed control or changed retained
+input prevents a final score. Runtime selection accepts `--installation`,
+`--dart-sdk` or `--flutter-sdk`, and `--adapter-root`; `--timeout` is an alias for
+`--command-timeout`. Replay currently selects the complete retained classic set,
+without operator filters or YAML profiles.
 
 ## Results and correctness
 
@@ -519,7 +466,7 @@ Integrity failures take precedence over cancellation. `result.json` records the
 actual Dart child command, the Runner summary and the bound plan hash;
 `capture/stdout.bin` contains the tool's response. The private protocol uses the
 campaign's workspace lease, so the copy remains protected until its native owner
-finishes. A native namespace error never falls back to the Python implementation.
+finishes. A namespace error stops the operation.
 
 SDK resolver tear-offs, indirect/computed/interpolated URI arguments, escaped or
 encoded URI spellings and unrecognized owning-package references are rejected
@@ -578,7 +525,7 @@ directory and `.profile-reports-current` link when copying the report directory,
 or dereference the public `summary.json` paths when exporting individual files.
 An interruption before the commit leaves the previous incomplete view visible.
 An interruption after the pointer switch can leave the completed report visible;
-the controller verifies this state before reporting an uncertain outcome.
+inspect the authoritative summary after an interrupted command.
 Failed or ambiguous publication can retain private staging files for inspection.
 The atomic switch guarantees consistent visibility, not persistence of the
 rename across power loss.
@@ -690,15 +637,14 @@ private per-user registry, `<system-temporary-directory>/failforge-workspaces-<u
 Snapshots and attempts are created inside a registered campaign directory. The
 registry must be outside the target project, dependencies, SDK and controller
 inputs; a `TMPDIR` inside those trees is rejected before creating the registry.
-The controller and its native Rust cleanup owners hold an operating-system file lock
-on that campaign. A new campaign removes a registered directory only after it can
-acquire the lock, so killing the controller does not make a live Runner's working
-copies eligible for deletion. This also permits recovery after a reboot once all
-owners are gone, if the operating system has retained the temporary directory.
-The native creator transfers already locked descriptors through a private Unix
-socket, so there is no unlocked gap between native creation and controller
-ownership. Cleanup requests still run after campaign cancellation. Closing a
-controller reference never unlocks the references held by surviving owners.
+The Rust campaign owner holds an operating-system lock throughout execution and
+cleanup. A new campaign removes a registered directory only after acquiring that
+lock. Killing the outer launcher closes its liveness channel and cancels the owner;
+it does not release the owner's lease. The owner keeps active working copies
+protected until Runner shutdown. A reboot permits recovery once all owners are
+gone, if the operating system has retained the temporary directory. Cleanup still
+runs after cancellation. Private diagnostic interfaces can transfer retained
+capabilities through a Unix socket; the public path keeps them in one owner.
 
 Recovery validates directory ownership, private permissions, protocol metadata
 and lock files. Deletion stays relative to opened directory descriptors and never
@@ -724,12 +670,10 @@ cleanup owner itself bypasses that owner's cleanup protocol.
 ## Verify
 
 ```sh
-PYTHONPATH=python:scripts python3 -B -m unittest discover -s python/tests -v
-python3 -B -m unittest discover -s scripts -p 'test_*.py'
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked -- --test-threads=1
 # Requires the prepared tooling and Flutter example described above:
-python3 scripts/mutate_cli_e2e.py --output /absolute/new-evidence-directory --flutter-sdk /absolute/flutter
-python3 scripts/workspace_recovery_e2e.py --output /absolute/new-crash-evidence-directory
+cargo run -p failforge-tools -- regression --output /absolute/new-evidence-directory --dart-sdk /absolute/flutter/bin/cache/dart-sdk --flutter-sdk /absolute/flutter
+cargo run -p failforge-tools -- regression --suite recovery --output /absolute/new-crash-evidence-directory
 ```

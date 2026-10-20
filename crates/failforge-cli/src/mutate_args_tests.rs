@@ -1,5 +1,65 @@
 use super::*;
 
+fn replay_arguments() -> Vec<&'static str> {
+    vec![
+        "failforge",
+        "replay",
+        "--project",
+        "subject",
+        "--framework",
+        "upstream",
+        "--transcript",
+        "retained.jsonl",
+        "--baseline",
+        "baseline.json",
+        "--output",
+        "report",
+    ]
+}
+
+#[test]
+fn replay_requires_every_retained_input_and_rejects_campaign_filters() {
+    let all = replay_arguments();
+    assert!(Cli::try_parse_from(&all).is_ok());
+    for index in (2..all.len()).step_by(2) {
+        let mut missing = all.clone();
+        missing.drain(index..index + 2);
+        assert!(Cli::try_parse_from(missing).is_err(), "{}", all[index]);
+    }
+    for (flag, value) in [
+        ("--family", "failure_mode"),
+        ("--operator", "BOOLEAN_LITERAL_FLIP"),
+        ("--config", "profile.yml"),
+        ("--workers", "0"),
+        ("--workers", "5"),
+        ("--timeout", "0s"),
+        ("--test-timeout", "no"),
+        ("--python", "python3"),
+    ] {
+        let mut arguments = all.clone();
+        arguments.extend([flag, value]);
+        assert!(Cli::try_parse_from(arguments).is_err(), "{flag} {value}");
+    }
+}
+
+#[test]
+fn replay_preserves_paths_and_uses_native_classic_campaign_configuration() {
+    let mut arguments = replay_arguments();
+    arguments.extend(["--timeout", "40s", "--test-timeout", "3s", "--workers", "2"]);
+    let Commands::Replay(arguments) = Cli::try_parse_from(arguments).unwrap().command else {
+        panic!("expected replay");
+    };
+    let (campaign, retained) = arguments.into_campaign(Path::new("/invocation"));
+    assert_eq!(retained.transcript, Path::new("/invocation/retained.jsonl"));
+    assert_eq!(retained.baseline, Path::new("/invocation/baseline.json"));
+    assert_eq!(retained.framework, Path::new("/invocation/upstream"));
+    assert_eq!(
+        campaign.configuration_values().unwrap(),
+        serde_json::json!({"family":"classic","project":"subject","output":"report",
+            "workers":2,"max_mutants":10000,"command_timeout":"40s","test_timeout":"3s"})
+    );
+}
+
 fn mutate(values: &[&str]) -> MutateArgs {
     let cli = Cli::try_parse_from(values).unwrap();
     let Commands::Mutate(arguments) = cli.command else {
@@ -13,8 +73,10 @@ fn family_only_uses_the_invocation_project_default() {
     let arguments = mutate(&["failforge", "mutate", "--family", "classic"]);
     assert!(arguments.project.is_none());
     assert_eq!(arguments.family, Some(MutationFamily::Classic));
-    assert_eq!(arguments.python, "python3");
-    assert_eq!(arguments.engine_arguments(), ["--family", "classic"]);
+    assert_eq!(
+        arguments.configuration_values().unwrap(),
+        serde_json::json!({"family":"classic"})
+    );
 }
 
 #[test]
@@ -24,19 +86,16 @@ fn config_accepts_runtime_selection_without_campaign_overrides() {
         "mutate",
         "--config",
         "config with spaces.yaml",
-        "--python",
-        "venv/bin/python",
         "--installation",
         "installed tree",
     ]);
-    assert_eq!(arguments.python, "venv/bin/python");
     assert_eq!(
         arguments.installation,
         Some(PathBuf::from("installed tree"))
     );
     assert_eq!(
-        arguments.engine_arguments(),
-        ["--config", "config with spaces.yaml"]
+        arguments.configuration_values().unwrap(),
+        serde_json::json!({"config":"config with spaces.yaml"})
     );
 }
 
@@ -110,15 +169,10 @@ fn language_specific_dart_and_semantic_id_are_forwarded_literally() {
     ]);
     assert_eq!(arguments.family, Some(MutationFamily::LanguageSpecific));
     assert_eq!(
-        arguments.engine_arguments(),
-        [
-            "--family",
-            "language_specific",
-            "--language",
-            "dart",
-            "--operator",
-            "NSM-001"
-        ]
+        arguments.configuration_values().unwrap(),
+        serde_json::json!({
+            "family":"language_specific", "language":"dart", "operators":["NSM-001"]
+        })
     );
     assert!(
         Cli::try_parse_from([
@@ -158,27 +212,13 @@ fn repeated_filters_and_literal_values_are_forwarded_without_shell_processing() 
         "Service",
     ]);
     assert_eq!(
-        arguments.engine_arguments(),
-        [
-            "--project",
-            "project with spaces",
-            "--family",
-            "classic",
-            "--operator",
-            "BOOLEAN_LITERAL_FLIP",
-            "--operator",
-            "COMPARISON_NEGATION",
-            "--include",
-            "lib/**",
-            "--exclude",
-            "$(touch forbidden)",
-            "--method",
-            "first",
-            "--method",
-            "second",
-            "--class",
-            "Service",
-        ]
+        arguments.configuration_values().unwrap(),
+        serde_json::json!({
+            "project":"project with spaces","family":"classic",
+            "operators":["BOOLEAN_LITERAL_FLIP","COMPARISON_NEGATION"],
+            "include":["lib/**"],"exclude":["$(touch forbidden)"],
+            "methods":["first","second"],"classes":["Service"]
+        })
     );
 }
 
@@ -272,7 +312,7 @@ fn sdk_options_are_mutually_exclusive() {
 }
 
 #[test]
-fn native_project_path_bytes_survive_forwarding() {
+fn native_project_path_bytes_reach_explicit_unicode_validation() {
     let path = OsString::from_vec(b"project-\xff".to_vec());
     let cli = Cli::try_parse_from([
         OsString::from("failforge"),
@@ -286,5 +326,6 @@ fn native_project_path_bytes_survive_forwarding() {
     let Commands::Mutate(arguments) = cli.command else {
         panic!("expected mutate");
     };
-    assert_eq!(arguments.engine_arguments()[1], path);
+    assert_eq!(arguments.project.as_ref().unwrap().as_os_str(), path);
+    assert!(arguments.configuration_values().is_err());
 }
