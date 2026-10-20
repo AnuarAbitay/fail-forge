@@ -48,6 +48,8 @@ pub(crate) struct ExecutedAttempt {
     pub native_ok: bool,
     pub result: Option<CommandResult>,
     pub evidence: Option<AttemptEvidence>,
+    /// Rejection before a process owner or any test evidence exists.
+    pub preflight_rejection: Option<&'static str>,
     pub diagnostics: String,
 }
 
@@ -181,6 +183,7 @@ fn completed(
         native_ok,
         result,
         evidence: None,
+        preflight_rejection: None,
         diagnostics,
     }
 }
@@ -201,6 +204,29 @@ pub(crate) async fn execute(
         .map_err(|_| invalid("invalid test selection context"))?;
     let (spec, command, reporter) = specification(config, project, copied, capture)?;
     cancel.check()?;
+    let configuration = {
+        let copied = copied.to_owned();
+        let alias = context.alias.clone();
+        tokio::task::spawn_blocking(move || {
+            failforge_dart::validate_test_configuration(&copied, &alias)
+        })
+        .await
+        .map_err(|_| invalid("test configuration validation failed"))?
+    };
+    // A cancellation received during the blocking read must win before the
+    // child starts, including when validation reports an invalid configuration.
+    cancel.check()?;
+    if let Err(error) = configuration {
+        return Ok(ExecutedAttempt {
+            command,
+            exit_code: 125,
+            native_ok: false,
+            result: None,
+            evidence: None,
+            preflight_rejection: Some("invalid_package_configuration"),
+            diagnostics: format!("failforge: invalid test package configuration: {error}\n"),
+        });
+    }
     let runner = Runner::new();
     let mut handle = match runner.start(spec) {
         Ok(handle) => handle,

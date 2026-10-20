@@ -4,6 +4,10 @@
 //! validation does not prove compilation or establish KILLED/SURVIVED outcomes.
 //! Original project files are never written by the patch helpers.
 //!
+//! [`validate_test_configuration`] checks the actual working copy's prepared
+//! package roots and subject alias before launching source or kernel test code.
+//! Callers reject configuration failures before collecting test evidence.
+//!
 //! [`classify_dart_result`] validates complete Dart/Flutter reporter captures
 //! against a typed native process result. Its primary verdict still requires
 //! campaign baseline, author-test selection and input-integrity checks before
@@ -27,6 +31,7 @@ pub mod namespace;
 mod patch;
 mod protocol;
 mod test_catalog;
+mod test_configuration;
 mod test_outcome;
 mod test_reporter;
 
@@ -49,6 +54,7 @@ pub use test_catalog::{
     CatalogError, CatalogSnapshot, SelectionContext, analyze_catalogue, apply_selection,
     parse_selection_context, validate_selection_context,
 };
+pub use test_configuration::validate_test_configuration;
 pub use test_outcome::{
     ReporterMode, RunnerSummaryError, classify_dart_capture, classify_dart_result,
     parse_cli_summary,

@@ -261,12 +261,13 @@ fn finalize_cancel(value: &mut Value, cancel: &Cancellation) {
 
 fn finalize_source(
     value: &mut Value,
+    has_owned_attempt: bool,
     verification: Result<(), NamespaceError>,
 ) -> Result<(), NamespaceError> {
     if let Err(error) = verification {
-        // An executed attempt has authenticated diagnostics worth retaining.
-        // A static-invalid candidate has no such receipt to publish on drift.
-        if value["compileChecked"] != true {
+        // An owned attempt can reject preflight without compiling. Its private
+        // capability, not a public report flag, identifies a retained receipt.
+        if !has_owned_attempt {
             return Err(error);
         }
         if value["outcome"] != "INFRA_ERROR" {
@@ -307,7 +308,11 @@ fn finalize_result(
 ) -> Result<Completed, NamespaceError> {
     match result {
         Ok(mut completed) => {
-            finalize_source(&mut completed.record, original)?;
+            finalize_source(
+                &mut completed.record,
+                !completed._attempts.is_empty(),
+                original,
+            )?;
             Ok(completed)
         }
         Err(error) => {
@@ -535,10 +540,7 @@ fn seal_completed(
     retain_transport: bool,
 ) -> Result<OwnedMutant, NamespaceError> {
     completed.directory.verify()?;
-    if !completed.record["compileChecked"]
-        .as_bool()
-        .unwrap_or(false)
-    {
+    if completed._attempts.is_empty() {
         cancel.check()?;
     } else {
         finalize_cancel(&mut completed.record, cancel);

@@ -325,6 +325,16 @@ summary. Profile root/family summaries become visible through one atomic pointer
 change. Publication failures retain incomplete reports without scores whenever
 the bound output directory still permits a safe write.
 
+Before starting an attempt's test process, Rust checks the working copy's
+prepared package configuration after namespace isolation. Different package
+names must resolve to distinct canonical directories, and the subject alias must
+identify the current copy. Invalid metadata or bindings produce `INFRA_ERROR`
+with reason `invalid_package_configuration`, phase `preflight` and
+`compileChecked: false`. No test process or test capture is created. This check
+uses the configuration file itself; author exception text cannot establish a
+configuration failure. Library callers use `validate_test_configuration` before
+either a source or a prepared-kernel entry point.
+
 The Rust evidence path validates the complete raw JSON reporter stream together
 with Runner completion, capture and cleanup evidence. Nonzero exit status alone
 does not establish `KILLED`. A compiler diagnostic during suite loading is `INVALID`.

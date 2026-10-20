@@ -815,15 +815,20 @@ mod tests {
             &[],
             &cancel,
         ));
-        tokio::time::timeout(Duration::from_secs(5),async {
+        let pid = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 tokio::select! {
                     result = &mut operation => panic!("fake owner ended before EOF: {result:?}"),
-                    _ = tokio::time::sleep(Duration::from_millis(5)) => if ready.exists() { break; },
+                    _ = tokio::time::sleep(Duration::from_millis(5)) => {
+                        if let Some(pid) = ready_pid(&ready).unwrap() {
+                            break pid;
+                        }
+                    },
                 }
             }
-        }).await.unwrap();
-        let pid: libc::pid_t = fs::read_to_string(&ready).unwrap().trim().parse().unwrap();
+        })
+        .await
+        .unwrap();
         drop(operation);
         drop(workspace);
         tokio::time::timeout(Duration::from_secs(5), async {
@@ -844,5 +849,45 @@ mod tests {
             io::Error::last_os_error().raw_os_error(),
             Some(libc::ECHILD)
         );
+    }
+
+    // Shell redirection creates the file before printf writes the PID. Require
+    // the terminating newline so neither an empty file nor a partial PID can
+    // announce readiness or identify the wrong child.
+    fn ready_pid(path: &Path) -> io::Result<Option<libc::pid_t>> {
+        let raw = match fs::read_to_string(path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let Some(record) = raw.strip_suffix('\n') else {
+            return Ok(None);
+        };
+        let pid = record
+            .parse::<libc::pid_t>()
+            .ok()
+            .filter(|pid| *pid > 0)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid ready PID"))?;
+        Ok(Some(pid))
+    }
+
+    #[test]
+    fn discovery_readiness_waits_for_the_complete_pid_record() {
+        let fixture = Fixture::new();
+        let ready = fixture.0.join("ready");
+        assert_eq!(ready_pid(&ready).unwrap(), None);
+        for incomplete in ["", "12", "1234"] {
+            fs::write(&ready, incomplete).unwrap();
+            assert_eq!(ready_pid(&ready).unwrap(), None);
+        }
+        fs::write(&ready, "12345\n").unwrap();
+        assert_eq!(ready_pid(&ready).unwrap(), Some(12345));
+        for invalid in ["\n", "0\n", "-1\n", "invalid\n", "12\n34\n"] {
+            fs::write(&ready, invalid).unwrap();
+            assert_eq!(
+                ready_pid(&ready).unwrap_err().kind(),
+                io::ErrorKind::InvalidData
+            );
+        }
     }
 }

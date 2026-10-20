@@ -46,6 +46,56 @@ fn request() -> Value {
     })
 }
 
+#[test]
+fn execution_preflight_receipt_reports_infrastructure_without_compilation_or_private_evidence() {
+    for preflight in [None, Some("invalid_package_configuration")] {
+        let fixture = Fixture::new();
+        let directory = fixture.receipt().directory;
+        let mut executed = ExecutedAttempt {
+            command: vec!["dart".into(), "test".into()],
+            exit_code: 125,
+            native_ok: false,
+            result: None,
+            evidence: None,
+            preflight_rejection: preflight,
+            diagnostics: "configuration rejected".into(),
+        };
+        let receipt = execution_receipt(
+            Arc::clone(&directory),
+            &mut executed,
+            json!({"plan":{"kind":"dart_namespace_plan"},"receipt":{"complete":true}}),
+        )
+        .unwrap();
+        assert_eq!(receipt.attempt["outcome"], "INFRA_ERROR");
+        assert_eq!(
+            receipt.attempt["reason"],
+            preflight.unwrap_or("native_owner_failed")
+        );
+        assert_eq!(receipt.attempt["compileChecked"], preflight.is_none());
+        assert_eq!(receipt.attempt["exitCode"], 125);
+        assert_eq!(receipt.attempt["reporterComplete"], false);
+        assert_eq!(receipt.attempt["runner"], json!({}));
+        assert_eq!(receipt.attempt["loadFailures"], json!([]));
+        assert_eq!(receipt.attempt["tests"]["started"], 0);
+        assert_eq!(receipt.attempt["tests"]["loadingFailed"], 0);
+        assert_eq!(receipt.attempt["command"], json!(["dart", "test"]));
+        assert_eq!(
+            receipt.attempt["stdoutSha256"],
+            failforge_dart::sha256_hex(b"")
+        );
+        assert!(receipt.catalogue.is_null());
+        assert!(receipt.initialization.is_null());
+        if preflight.is_some() {
+            assert_eq!(receipt.attempt["phase"], "preflight");
+            assert!(receipt.namespace_plan.is_null());
+        } else {
+            assert!(receipt.attempt.get("phase").is_none());
+            assert!(!receipt.namespace_plan.is_null());
+        }
+        assert!(!directory.canonical_path().unwrap().join("capture").exists());
+    }
+}
+
 fn decoded(value: &Value) -> Result<Request, NamespaceError> {
     decode(&serde_json::to_vec(value).unwrap())
 }

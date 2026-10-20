@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::signal::unix::{SignalKind, signal};
 
-use crate::attempt_execution::ExecutionConfig;
+use crate::attempt_execution::{ExecutedAttempt, ExecutionConfig};
 use crate::dart_namespace::{absolute, invalid};
 use crate::namespace_planner::{PlanProject, PlanRuntime, ReportDirectory};
 use crate::retained_replay::LoadedReplay;
@@ -231,6 +231,51 @@ fn revoke_private_evidence(receipt: &mut Receipt) {
     receipt.namespace_plan = Value::Null;
 }
 
+fn execution_receipt(
+    directory: Arc<ReportDirectory>,
+    executed: &mut ExecutedAttempt,
+    namespace_plan: Value,
+) -> Result<Receipt, NamespaceError> {
+    let (mut attempt, catalogue, initialization, stdout_hash) = match executed.evidence.take() {
+        Some(evidence) => (
+            evidence.classification,
+            serde_json::to_value(evidence.catalogue)
+                .map_err(|_| invalid("invalid native catalogue"))?,
+            serde_json::to_value(evidence.initialization)
+                .map_err(|_| invalid("invalid native initialization"))?,
+            evidence.stdout_hash,
+        ),
+        None => (
+            infra(
+                executed
+                    .preflight_rejection
+                    .unwrap_or("native_owner_failed"),
+            ),
+            Value::Null,
+            Value::Null,
+            format!("{:x}", Sha256::digest(b"")),
+        ),
+    };
+    attempt["command"] = json!(executed.command);
+    attempt["exitCode"] = executed.exit_code.into();
+    attempt["compileChecked"] = executed.preflight_rejection.is_none().into();
+    attempt["stdoutSha256"] = stdout_hash.into();
+    if executed.preflight_rejection.is_some() {
+        attempt["phase"] = "preflight".into();
+    }
+    let mut receipt = Receipt {
+        directory,
+        attempt,
+        catalogue,
+        initialization,
+        namespace_plan,
+    };
+    if executed.preflight_rejection.is_some() {
+        revoke_private_evidence(&mut receipt);
+    }
+    Ok(receipt)
+}
+
 async fn run_attempt(
     request: &Request,
     workspace: &OwnedWorkspace,
@@ -339,7 +384,7 @@ async fn run_attempt(
         command_timeout: request.config.command_timeout.clone(),
         test_timeout: request.config.test_timeout.clone(),
     };
-    let executed = crate::attempt_execution::execute(
+    let mut executed = crate::attempt_execution::execute(
         &config,
         &request.project,
         &copied,
@@ -349,44 +394,22 @@ async fn run_attempt(
     )
     .await?;
     directory.verify()?;
-    let (attempt, catalogue, initialization, stdout_hash) = match executed.evidence {
-        Some(evidence) => (
-            evidence.classification,
-            serde_json::to_value(evidence.catalogue)
-                .map_err(|_| invalid("invalid native catalogue"))?,
-            serde_json::to_value(evidence.initialization)
-                .map_err(|_| invalid("invalid native initialization"))?,
-            evidence.stdout_hash,
-        ),
-        None => (
-            infra("native_owner_failed"),
-            Value::Null,
-            Value::Null,
-            format!("{:x}", Sha256::digest(b"")),
-        ),
-    };
-    let mut receipt = Receipt {
-        directory: Arc::clone(&directory),
-        attempt,
-        catalogue,
-        initialization,
-        namespace_plan: cache
+    let mut receipt = execution_receipt(
+        Arc::clone(&directory),
+        &mut executed,
+        cache
             .map(|cache| json!({"plan":cache.plan,"receipt":cache.receipt}))
             .unwrap_or(Value::Null),
-    };
+    )?;
     if step(workspace, |workspace| workspace.verify_execution_inputs())
         .await
         .is_err()
     {
         override_infra(&mut receipt, "execution_input_changed");
     }
-    receipt.attempt["command"] = json!(executed.command);
-    receipt.attempt["exitCode"] = executed.exit_code.into();
-    receipt.attempt["compileChecked"] = true.into();
     receipt.attempt["isolatedWorkingDirectory"] = json!(copied);
     receipt.attempt["namespaceIsolation"] = isolation;
     receipt.attempt["executionInputHashes"] = json!(hashes);
-    receipt.attempt["stdoutSha256"] = stdout_hash.into();
     validate_baseline(
         &mut receipt,
         request.context.expected.is_none()

@@ -466,6 +466,101 @@ fn package_configuration_requires_unique_valid_versioned_local_entries() {
 }
 
 #[test]
+fn package_configuration_rejects_different_names_for_one_canonical_root() {
+    let fixture = Fixture::new();
+    let package = fixture.0.join("dependency");
+    fs::create_dir(&package).unwrap();
+    symlink(&package, fixture.0.join("dependency-alias")).unwrap();
+    let config = fixture.0.join("package_config.json");
+    for alias in [
+        "dependency".to_owned(),
+        "./dependency/".to_owned(),
+        "dependency/../dependency".to_owned(),
+        "%64ependency/".to_owned(),
+        "dependency-alias/".to_owned(),
+        file_uri(&package).unwrap(),
+    ] {
+        let value = json!({"configVersion":2,"packages":[
+            {"name":"first","rootUri":"dependency/","packageUri":"lib/"},
+            {"name":"second","rootUri":alias,"packageUri":"other/"}
+        ]});
+        fs::write(&config, serde_json::to_vec(&value).unwrap()).unwrap();
+        for result in [
+            dependency_roots(&config),
+            dependency_roots_from_value(&config, &value),
+        ] {
+            assert!(
+                matches!(result, Err(InputError::Invalid(ref message)) if message == "prepared dependencies must have distinct roots"),
+                "{alias}: {result:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn duplicate_dependency_names_keep_their_existing_diagnostic() {
+    let fixture = Fixture::new();
+    for directory in ["first", "second"] {
+        fs::create_dir(fixture.0.join(directory)).unwrap();
+    }
+    let config = fixture.0.join("package_config.json");
+    for root in ["first/", "second/"] {
+        let value = json!({"configVersion":2,"packages":[
+            {"name":"same","rootUri":"first/"},
+            {"name":"same","rootUri":root}
+        ]});
+        let result = dependency_roots_from_value(&config, &value);
+        assert!(
+            matches!(result, Err(InputError::Invalid(ref message)) if message == "duplicate prepared dependency"),
+            "{root}: {result:?}"
+        );
+    }
+}
+
+#[test]
+fn package_configuration_allows_distinct_roots_including_nested_packages() {
+    let fixture = Fixture::new();
+    for directory in ["outer/lib", "outer/tools/nested/lib", "outer-sibling/lib"] {
+        fs::create_dir_all(fixture.0.join(directory)).unwrap();
+    }
+    let config = fixture.0.join("package_config.json");
+    let value = json!({"configVersion":2,"packages":[
+        {"name":"outer","rootUri":"outer/","packageUri":"lib/"},
+        {"name":"nested","rootUri":"outer/tools/nested/","packageUri":"lib/"},
+        {"name":"sibling","rootUri":"outer-sibling/","packageUri":"lib/"}
+    ]});
+    fs::write(&config, serde_json::to_vec(&value).unwrap()).unwrap();
+    let expected = BTreeMap::from([
+        ("outer".into(), fixture.0.join("outer")),
+        ("nested".into(), fixture.0.join("outer/tools/nested")),
+        ("sibling".into(), fixture.0.join("outer-sibling")),
+    ]);
+    assert_eq!(dependency_roots(&config).unwrap(), expected);
+    assert_eq!(
+        dependency_roots_from_value(&config, &value).unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn project_inspection_rejects_another_name_bound_to_the_subject_root() {
+    let fixture = Fixture::new();
+    let root = prepared_project(&fixture, "test", false);
+    let config = root.join(".dart_tool/package_config.json");
+    let mut value = metadata_json(&config).unwrap();
+    value["packages"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"name":"shadow","rootUri":file_uri(&root).unwrap()}));
+    fs::write(&config, serde_json::to_vec(&value).unwrap()).unwrap();
+    let result = inspect_project(&root, &Cancellation::default());
+    assert!(
+        matches!(result, Err(InputError::Invalid(ref message)) if message == "prepared dependencies must have distinct roots"),
+        "{result:?}"
+    );
+}
+
+#[test]
 fn integer_metadata_is_never_silently_converted_into_a_rounded_float() {
     for integer in [
         "18446744073709551616",

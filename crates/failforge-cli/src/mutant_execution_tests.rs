@@ -220,7 +220,7 @@ fn final_source_drift_preserves_diagnostics_revokes_confirmation_and_beats_cance
         let mut record = json!({"compileChecked":true,"outcome":outcome,
             "reason":"original_reason", "runner":{"receipt":"preserved"},
             "initializationConfirmation":{"confirmed":true,"attempts":[]}});
-        finalize_source(&mut record, Err(invalid("changed"))).unwrap();
+        finalize_source(&mut record, true, Err(invalid("changed"))).unwrap();
         assert_eq!(record["outcome"], "INFRA_ERROR");
         assert_eq!(
             record["reason"],
@@ -238,10 +238,121 @@ fn final_source_drift_preserves_diagnostics_revokes_confirmation_and_beats_cance
         assert_eq!(record["outcome"], "INFRA_ERROR");
     }
     let mut invalid_record = json!({"compileChecked":false,"outcome":"INVALID"});
-    assert!(finalize_source(&mut invalid_record, Err(invalid("changed"))).is_err());
+    assert!(finalize_source(&mut invalid_record, false, Err(invalid("changed"))).is_err());
     let original = invalid_record.clone();
-    finalize_source(&mut invalid_record, Ok(())).unwrap();
+    finalize_source(&mut invalid_record, false, Ok(())).unwrap();
     assert_eq!(invalid_record, original);
+}
+
+#[tokio::test]
+async fn owned_preflight_failure_survives_source_drift_and_late_cancellation_when_sealed() {
+    use failforge_workspace::lifecycle::{close, start};
+
+    for source_changed in [false, true] {
+        let fixture = Fixture::new();
+        fs::create_dir(fixture.base.join("sdk")).unwrap();
+        fs::create_dir(fixture.base.join("adapter")).unwrap();
+        let registry = fixture.base.join("registry");
+        let started = start(&registry, &Cancellation::default()).unwrap();
+        let campaign = started.campaign_name;
+        let mut close_caps = started.caps.try_clone().unwrap();
+        close_caps.lease.take();
+        let mut value = fixture.value(true);
+        value["workspace"]["campaign"] = campaign.clone().into();
+        let request = decode_value(value).unwrap();
+        let candidate = verify_candidate(&request.project.root, &request.candidate).unwrap();
+        // Retain a real attempt's lease and report directory without executing
+        // a child: this fixture deliberately has no Dart executable. Replace
+        // only the public handoff fields to model a preflight rejection, whose
+        // no-spawn classification is exercised in attempt_execution tests.
+        let mut completed = run_valid(
+            &request,
+            &candidate,
+            &started.caps,
+            &Cancellation::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(completed._attempts.len(), 1);
+        assert_eq!(completed.record["outcome"], "INFRA_ERROR");
+        completed.record["compileChecked"] = false.into();
+        completed.record["reason"] = "invalid_package_configuration".into();
+        completed.record["phase"] = "preflight".into();
+        let original = if source_changed {
+            fs::write(
+                fixture.project.root.join(&fixture.mutant.file),
+                b"changed original source",
+            )
+            .unwrap();
+            verify_candidate(&request.project.root, &request.candidate)
+                .map(|_| ())
+                .map_err(|error| invalid(&error.to_string()))
+        } else {
+            Ok(())
+        };
+        assert_eq!(original.is_err(), source_changed);
+        let completed = finalize_result(Ok(completed), original).unwrap();
+        let cancel = Cancellation::default();
+        cancel.request(libc::SIGTERM);
+        let owned = seal_completed(completed, started.caps, &cancel, false).unwrap();
+        assert_eq!(owned.record["outcome"], "INFRA_ERROR");
+        assert_eq!(owned.record["reason"], "invalid_package_configuration");
+        assert_eq!(owned.record["compileChecked"], false);
+        assert_eq!(owned.record["phase"], "preflight");
+        assert!(owned.namespace_plan.is_none());
+        assert!(!owned.namespace_checked);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(request.case.join("result.json")).unwrap())
+                .unwrap(),
+            owned.record
+        );
+        assert!(
+            close(
+                &registry,
+                &campaign,
+                close_caps.try_clone().unwrap(),
+                &Cancellation::default(),
+            )
+            .unwrap()
+            .cleanup_deferred
+        );
+        drop(owned);
+        assert!(
+            !close(&registry, &campaign, close_caps, &Cancellation::default())
+                .unwrap()
+                .cleanup_deferred
+        );
+    }
+}
+
+#[tokio::test]
+async fn static_candidate_cannot_claim_owned_receipt_by_setting_compile_checked() {
+    use failforge_workspace::lifecycle::start;
+
+    for compile_checked in [false, true] {
+        let fixture = Fixture::new();
+        fs::create_dir(fixture.base.join("sdk")).unwrap();
+        fs::create_dir(fixture.base.join("adapter")).unwrap();
+        let started = start(&fixture.base.join("registry"), &Cancellation::default()).unwrap();
+        let mut value = fixture.value(false);
+        value["workspace"]["campaign"] = started.campaign_name.into();
+        let request = decode_value(value).unwrap();
+        let candidate = verify_candidate(&request.project.root, &request.candidate).unwrap();
+        let mut completed = run_invalid(&request, &candidate, &Cancellation::default())
+            .await
+            .unwrap();
+        assert!(completed._attempts.is_empty());
+        completed.record["compileChecked"] = compile_checked.into();
+        let mut drifted = completed.record.clone();
+        assert!(finalize_source(&mut drifted, false, Err(invalid("changed"))).is_err());
+        let cancel = Cancellation::default();
+        cancel.request(libc::SIGTERM);
+        assert!(matches!(
+            seal_completed(completed, started.caps, &cancel, false),
+            Err(NamespaceError::Cancelled(libc::SIGTERM))
+        ));
+        assert!(!request.case.join("result.json").exists());
+    }
 }
 
 #[test]

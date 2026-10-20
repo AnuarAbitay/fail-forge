@@ -31,7 +31,9 @@ impl Fixture {
         ] {
             fs::create_dir_all(root.join(directory)).unwrap();
         }
-        Self(root)
+        let fixture = Self(root);
+        fixture.write_package_config(&fixture.valid_package_config());
+        fixture
     }
 
     fn config(&self) -> ExecutionConfig {
@@ -40,7 +42,9 @@ impl Fixture {
             runner: self.0.join("never-execute-this-cli"),
             dart_sdk: self.0.join("sdk"),
             flutter_sdk: Some(self.0.join("flutter")),
-            command_timeout: "3s".into(),
+            // Functional execution checks share CPU with the parallel CLI
+            // suite. The dedicated timeout case overrides this larger budget.
+            command_timeout: "15s".into(),
             test_timeout: "1s".into(),
         }
     }
@@ -70,6 +74,24 @@ impl Fixture {
 
     fn capture(&self, name: &str) -> PathBuf {
         self.0.join(name)
+    }
+
+    fn valid_package_config(&self) -> Value {
+        json!({
+            "configVersion": 2,
+            "packages": [
+                {"name": "subject", "rootUri": "../", "packageUri": "lib/"},
+                {"name": "test", "rootUri": "../../test-package", "packageUri": "lib/"}
+            ]
+        })
+    }
+
+    fn write_package_config(&self, value: &Value) {
+        fs::write(
+            self.copied().join(".dart_tool/package_config.json"),
+            serde_json::to_vec(value).unwrap(),
+        )
+        .unwrap();
     }
 }
 
@@ -118,7 +140,7 @@ fn specifications_preserve_dart_flutter_argv_limits_and_private_environment() {
         .unwrap();
         assert_eq!(mode == TestReporter::Flutter, flutter);
         assert_eq!(spec.cwd, fixture.copied());
-        assert_eq!(spec.timeout_policy.timeout, Some(Duration::from_secs(3)));
+        assert_eq!(spec.timeout_policy.timeout, Some(Duration::from_secs(15)));
         assert_eq!(spec.timeout_policy.grace_period, Duration::from_secs(2));
         assert_eq!(
             spec.capture_policy.file_quota_bytes_per_stream,
@@ -324,7 +346,17 @@ async fn direct_execution_verifies_pass_failure_timeout_cancellation_and_no_spaw
         .await
         .unwrap();
         assert!(attempt.native_ok, "{}", attempt.diagnostics);
-        assert_eq!(attempt.exit_code, u8::from(failed));
+        assert_eq!(attempt.preflight_rejection, None);
+        assert_eq!(
+            attempt.result.as_ref().unwrap().cause,
+            CompletionCause::ProcessCompleted,
+            "functional case {index}: {attempt:#?}"
+        );
+        assert_eq!(
+            attempt.exit_code,
+            u8::from(failed),
+            "functional case {index}: {attempt:#?}"
+        );
         assert!(attempt.result.as_ref().unwrap().cleanup.is_complete());
         let evidence = attempt.evidence.unwrap();
         assert_eq!(
@@ -356,7 +388,7 @@ async fn direct_execution_verifies_pass_failure_timeout_cancellation_and_no_spaw
     )
     .await
     .unwrap();
-    assert_eq!(timeout.exit_code, 124);
+    assert_eq!(timeout.exit_code, 124, "timeout case: {timeout:#?}");
     assert_eq!(
         timeout.evidence.unwrap().classification["outcome"],
         "TIMEOUT"
@@ -370,7 +402,7 @@ async fn direct_execution_verifies_pass_failure_timeout_cancellation_and_no_spaw
     let requested = cancel.clone();
     let marker = fixture.copied().join("started");
     let signal = tokio::spawn(async move {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while !marker.exists() {
             assert!(Instant::now() < deadline, "test child did not start");
             tokio::time::sleep(Duration::from_millis(2)).await;
@@ -388,7 +420,10 @@ async fn direct_execution_verifies_pass_failure_timeout_cancellation_and_no_spaw
     .await
     .unwrap();
     signal.await.unwrap();
-    assert_eq!(cancelled.exit_code, 143);
+    assert_eq!(
+        cancelled.exit_code, 143,
+        "cancellation case: {cancelled:#?}"
+    );
     assert_eq!(
         cancelled.result.as_ref().unwrap().cause,
         CompletionCause::Cancelled(CancelReason::SigTerm)
@@ -454,4 +489,155 @@ async fn direct_execution_verifies_pass_failure_timeout_cancellation_and_no_spaw
     assert_eq!(failed.exit_code, 125);
     assert!(failed.result.is_none() && failed.evidence.is_none());
     assert!(failed.diagnostics.contains("failed"));
+    assert_eq!(failed.preflight_rejection, None);
+}
+
+#[tokio::test]
+async fn invalid_actual_package_configuration_rejects_before_dart_or_flutter_spawn() {
+    let fixture = Fixture::new();
+    fixture.script("echo started > started; exit 0");
+    let config_path = fixture.copied().join(".dart_tool/package_config.json");
+    let context = SelectionContext {
+        alias: "subject".into(),
+        ..Default::default()
+    };
+    for flutter in [false, true] {
+        for case in [
+            "malformed",
+            "missing",
+            "duplicate-name",
+            "duplicate-root",
+            "missing-alias",
+            "wrong-alias-root",
+            "unsupported-version",
+        ] {
+            let mut config = fixture.valid_package_config();
+            match case {
+                "duplicate-name" => {
+                    config["packages"][1]["name"] = "subject".into();
+                }
+                "duplicate-root" => {
+                    config["packages"][1]["rootUri"] = "../".into();
+                }
+                "missing-alias" => config["packages"][0]["name"] = "other".into(),
+                "wrong-alias-root" => {
+                    config["packages"] = json!([
+                        {"name":"subject", "rootUri":"../../test-package", "packageUri":"lib/"}
+                    ]);
+                }
+                "unsupported-version" => config["configVersion"] = 1.into(),
+                "malformed" | "missing" => (),
+                _ => unreachable!(),
+            }
+            fixture.write_package_config(&config);
+            match case {
+                "malformed" => fs::write(&config_path, b"{").unwrap(),
+                "missing" => fs::remove_file(&config_path).unwrap(),
+                _ => (),
+            }
+            let capture = fixture.capture(&format!("reject-{flutter}-{case}"));
+            let attempt = execute(
+                &fixture.config(),
+                &fixture.project(flutter),
+                &fixture.copied(),
+                &capture,
+                &context,
+                &Cancellation::default(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                attempt.preflight_rejection,
+                Some("invalid_package_configuration"),
+                "{case}: {}",
+                attempt.diagnostics
+            );
+            assert_eq!(attempt.exit_code, 125, "{case}");
+            assert!(!attempt.native_ok, "{case}");
+            assert!(attempt.result.is_none(), "{case}");
+            assert!(attempt.evidence.is_none(), "{case}");
+            assert!(
+                attempt
+                    .diagnostics
+                    .contains("invalid test package configuration"),
+                "{case}"
+            );
+            assert!(!fixture.copied().join("started").exists(), "{case}");
+            assert!(!capture.exists(), "{case}");
+        }
+    }
+
+    let cancel = Cancellation::default();
+    cancel.request(libc::SIGINT);
+    fs::write(&config_path, b"{").unwrap();
+    assert!(matches!(
+        execute(
+            &fixture.config(),
+            &fixture.project(false),
+            &fixture.copied(),
+            &fixture.capture("cancelled-invalid-config"),
+            &context,
+            &cancel,
+        )
+        .await,
+        Err(NamespaceError::Cancelled(libc::SIGINT))
+    ));
+    assert!(!fixture.copied().join("started").exists());
+    assert!(!fixture.capture("cancelled-invalid-config").exists());
+}
+
+#[test]
+fn cancellation_during_configuration_validation_wins_without_spawning() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        for valid in [true, false] {
+            let fixture = Fixture::new();
+            fixture.script("echo started > started; exit 0");
+            if !valid {
+                fs::write(
+                    fixture.copied().join(".dart_tool/package_config.json"),
+                    b"{",
+                )
+                .unwrap();
+            }
+            // Occupy the only blocking thread so validation deterministically
+            // awaits its read while the cancellation request arrives.
+            let (started, ready) = tokio::sync::oneshot::channel();
+            let (release, blocked) = std::sync::mpsc::channel();
+            let blocker = tokio::task::spawn_blocking(move || {
+                started.send(()).unwrap();
+                blocked.recv_timeout(Duration::from_secs(3)).unwrap();
+            });
+            ready.await.unwrap();
+            let config = fixture.config();
+            let project = fixture.project(false);
+            let copied = fixture.copied();
+            let capture = fixture.capture("cancelled-validation");
+            let context = SelectionContext {
+                alias: "subject".into(),
+                ..Default::default()
+            };
+            let cancel = Cancellation::default();
+            let future = execute(&config, &project, &copied, &capture, &context, &cancel);
+            tokio::pin!(future);
+            tokio::select! {
+                biased;
+                result = &mut future => panic!("validation did not wait: {result:?}"),
+                () = tokio::task::yield_now() => (),
+            }
+            cancel.request(libc::SIGTERM);
+            release.send(()).unwrap();
+            assert!(matches!(
+                future.await,
+                Err(NamespaceError::Cancelled(libc::SIGTERM))
+            ));
+            blocker.await.unwrap();
+            assert!(!fixture.copied().join("started").exists());
+            assert!(!capture.exists());
+        }
+    });
 }

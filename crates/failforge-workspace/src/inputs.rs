@@ -297,6 +297,7 @@ pub fn dependency_roots_from_value(
         .and_then(Value::as_array)
         .ok_or_else(|| failure("package configuration must contain a package list"))?;
     let mut result = BTreeMap::new();
+    let mut roots = BTreeSet::new();
     for row in rows {
         let name = row
             .get("name")
@@ -308,8 +309,13 @@ pub fn dependency_roots_from_value(
             .and_then(Value::as_str)
             .ok_or_else(|| failure("invalid dependency entry"))?;
         let path = local_uri(config, uri)?;
-        if result.insert(name.to_owned(), path).is_some() {
+        if result.insert(name.to_owned(), path.clone()).is_some() {
             return Err(failure("duplicate prepared dependency"));
+        }
+        // Different package names cannot share a root. Compare the resolved
+        // directories so URI spelling and filesystem aliases cannot hide it.
+        if !roots.insert(path) {
+            return Err(failure("prepared dependencies must have distinct roots"));
         }
     }
     Ok(result)
