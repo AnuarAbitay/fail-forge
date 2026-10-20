@@ -1,0 +1,3 @@
+# Source: https://github.com/space-wizards/space-station-14/blob/8f1a74dcd1b8973a730ef6aeebe1f9f427886843/Resources/Maps/saltern.yml
+# License: MIT
+# Copyright (c) 2017 Space Wizards Federation

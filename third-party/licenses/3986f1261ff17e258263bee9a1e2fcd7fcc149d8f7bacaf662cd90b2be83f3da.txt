@@ -1,0 +1,8 @@
+This library is a fork of [unsafe-libyaml] translated to safe and idiomatic Rust.
+
+[unsafe-libyaml] is [libyaml] translated from C to unsafe Rust with the
+assistance of [c2rust].
+
+[unsafe-libyaml]: https://github.com/dtolnay/unsafe-libyaml
+[libyaml]: https://github.com/yaml/libyaml/tree/2c891fc7a770e8ba2fec34fc6b545c672beb37e6
+[c2rust]: https://github.com/immunant/c2rust

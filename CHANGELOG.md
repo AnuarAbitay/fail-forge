@@ -25,6 +25,8 @@ unreleased; no published release or release date is implied.
 - User guides for installation, mutation operators and beta limitations, plus a
   security reporting policy.
 - Apache-2.0 licensing for FailForge's original source code.
+- A dependency license inventory with retained third-party notices, archive
+  checksum verification and distribution scope notes.
 
 ### Fixed
 

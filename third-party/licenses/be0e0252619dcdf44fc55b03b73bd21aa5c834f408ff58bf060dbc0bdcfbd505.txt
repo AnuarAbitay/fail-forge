@@ -1,0 +1,3 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
+// https://github.com/taiki-e/pin-project/issues/340#issuecomment-2428002670

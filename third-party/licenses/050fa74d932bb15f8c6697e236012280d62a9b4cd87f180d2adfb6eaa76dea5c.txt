@@ -1,0 +1,13 @@
+/*
+ * SHA-256 hash in AArch64 assembly for macos/M1
+ *
+ * Based on the following C intrinsics implementation:
+ * <https://github.com/noloader/SHA-Intrinsics/blob/master/sha256-arm.c>
+ *
+ * Original C written and placed in public domain by Jeffrey Walton.
+ * Based on code from ARM, and by Johannes Schneiders, Skip Hovsmith and
+ * Barry O'Rourke for the mbedTLS project.
+ */
+
+
+/* void sha256_compress(uint32_t state[8], const uint8_t block[64]) */

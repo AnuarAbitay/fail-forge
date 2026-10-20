@@ -314,4 +314,5 @@ Copyright 2026 AnuarAbitay.
 FailForge's original source code, including its Rust crates and Dart adapter,
 is licensed under the [Apache License, Version 2.0](LICENSE).
 See [NOTICE](NOTICE) for attribution. Third-party dependencies retain their
-respective licenses.
+respective licenses; see [Third-party notices](THIRD_PARTY_NOTICES.md) and the
+[dependency license review](docs/dependency-licenses.md).
