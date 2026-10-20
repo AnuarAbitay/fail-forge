@@ -94,6 +94,94 @@ fn decoded(value: &Value) -> Result<Request, NamespaceError> {
 }
 
 #[test]
+fn in_process_and_wire_request_decoders_share_all_binding_validation() {
+    let fixture = Fixture::new();
+    for valid in [true, false] {
+        let value = fixture.value(valid);
+        let request = decode_value(value.clone()).unwrap();
+        assert_eq!(request.candidate, decoded(&value).unwrap().candidate);
+        let mut invalid = value;
+        invalid["context"]["alias"] = "unbound".into();
+        assert!(decode_value(invalid.clone()).is_err());
+        assert!(decoded(&invalid).is_err());
+    }
+}
+
+#[tokio::test]
+async fn owned_static_invalid_seals_without_wire_and_pins_the_exact_lease_until_drop() {
+    use failforge_workspace::lifecycle::{close, start};
+
+    let fixture = Fixture::new();
+    fs::create_dir(fixture.base.join("sdk")).unwrap();
+    fs::create_dir(fixture.base.join("adapter")).unwrap();
+    let registry = fixture.base.join("registry");
+    let started = start(&registry, &Cancellation::default()).unwrap();
+    let campaign = started.campaign_name;
+    let mut close_caps = started.caps.try_clone().unwrap();
+    close_caps.lease.take();
+    let mut value = fixture.value(false);
+    value["workspace"]["campaign"] = campaign.clone().into();
+    let request = decode_value(value).unwrap();
+    let case = request.case.clone();
+    let owned = run_owned(request, started.caps, &Cancellation::default())
+        .await
+        .unwrap();
+    assert_eq!(owned.record["outcome"], "INVALID");
+    assert_eq!(owned.record["compileChecked"], false);
+    assert!(owned.private_response.is_none());
+    assert!(owned.namespace_plan.is_none());
+    assert!(!owned.namespace_checked);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(case.join("result.json")).unwrap()).unwrap(),
+        owned.record
+    );
+    assert!(
+        close(
+            &registry,
+            &campaign,
+            close_caps.try_clone().unwrap(),
+            &Cancellation::default()
+        )
+        .unwrap()
+        .cleanup_deferred
+    );
+    drop(owned);
+    assert!(
+        !close(&registry, &campaign, close_caps, &Cancellation::default())
+            .unwrap()
+            .cleanup_deferred
+    );
+}
+
+#[tokio::test]
+async fn standalone_mutant_retains_the_original_private_envelope_and_sealed_report() {
+    use failforge_workspace::lifecycle::start;
+
+    let fixture = Fixture::new();
+    fs::create_dir(fixture.base.join("sdk")).unwrap();
+    fs::create_dir(fixture.base.join("adapter")).unwrap();
+    let started = start(&fixture.base.join("registry"), &Cancellation::default()).unwrap();
+    let mut value = fixture.value(false);
+    value["workspace"]["campaign"] = started.campaign_name.into();
+    let request = decode_value(value).unwrap();
+    let case = request.case.clone();
+    let owned = run_owned_inner(request, started.caps, &Cancellation::default(), true)
+        .await
+        .unwrap();
+    let bytes = owned.private_response.as_ref().unwrap();
+    assert_eq!(bytes.last(), Some(&b'\n'));
+    assert_eq!(
+        serde_json::from_slice::<Value>(bytes).unwrap(),
+        json!({"version":1,"result":{"record":owned.record,
+            "namespacePlan":null,"namespaceChecked":false}})
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(case.join("result.json")).unwrap()).unwrap(),
+        owned.record
+    );
+}
+
+#[test]
 fn final_source_drift_preserves_diagnostics_revokes_confirmation_and_beats_cancellation() {
     for outcome in ["KILLED", "SURVIVED", "CANCELLED", "INFRA_ERROR"] {
         let mut record = json!({"compileChecked":true,"outcome":outcome,

@@ -43,6 +43,9 @@ pub(crate) enum Commands {
     /// Internal complete mutant execution and causal controls.
     #[command(hide = true)]
     MutantExecute,
+    /// Internal bounded family execution with streamed completions.
+    #[command(hide = true)]
+    FamilyExecute,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

@@ -26,7 +26,7 @@ use crate::workspace_inputs::RuntimeInputs;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Request {
+pub(crate) struct Request {
     operation: String,
     project: PreparedProject,
     case: PathBuf,
@@ -41,7 +41,10 @@ struct Request {
 }
 
 fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
-    let value = parse_json(raw)?;
+    decode_value(parse_json(raw)?)
+}
+
+pub(crate) fn decode_value(value: Value) -> Result<Request, NamespaceError> {
     if !value.is_object() {
         return Err(invalid("native mutant request must be an object"));
     }
@@ -274,6 +277,18 @@ struct Completed {
     _attempts: Vec<OwnedAttempt>,
 }
 
+/// A terminal mutation receipt whose capabilities remain pinned until its
+/// caller has published the corresponding completion event.
+pub(crate) struct OwnedMutant {
+    pub record: Value,
+    pub namespace_plan: Option<NamespaceCache>,
+    pub namespace_checked: bool,
+    _directory: Arc<ReportDirectory>,
+    _attempts: Vec<OwnedAttempt>,
+    _caps: LifecycleCaps,
+    private_response: Option<Vec<u8>>,
+}
+
 fn finalize_result(
     result: Result<Completed, NamespaceError>,
     original: Result<(), NamespaceError>,
@@ -433,11 +448,21 @@ async fn run_invalid(
     })
 }
 
-async fn perform(
+/// Execute in the caller's runtime without another CLI or retained wire buffer.
+pub(crate) async fn run_owned(
     request: Request,
     caps: LifecycleCaps,
     cancel: &Cancellation,
-) -> Result<(Completed, Vec<u8>, LifecycleCaps), NamespaceError> {
+) -> Result<OwnedMutant, NamespaceError> {
+    run_owned_inner(request, caps, cancel, false).await
+}
+
+async fn run_owned_inner(
+    request: Request,
+    caps: LifecycleCaps,
+    cancel: &Cancellation,
+    retain_transport: bool,
+) -> Result<OwnedMutant, NamespaceError> {
     let preparing = cancel.clone();
     let (request, caps, guard, candidate) = blocking(move || {
         preparing.check()?;
@@ -471,35 +496,54 @@ async fn perform(
             &request.workspace.campaign,
             &Cancellation::default(),
         )?;
-        let mut completed = finalize_result(result, original)?;
-        completed.directory.verify()?;
-        if !completed.record["compileChecked"]
-            .as_bool()
-            .unwrap_or(false)
-        {
-            finalizing.check()?;
-        } else {
-            finalize_cancel(&mut completed.record, &finalizing);
-        }
-        if matches!(
-            completed.record["outcome"].as_str(),
-            Some("INFRA_ERROR" | "CANCELLED")
-        ) {
-            completed.namespace_plan = None;
-            completed.namespace_checked = false;
-        }
-        let cache = completed
-            .namespace_plan
-            .as_ref()
-            .map(|cache| json!({"plan":cache.plan,"receipt":cache.receipt}));
-        let response = crate::private_response::encode(json!({"record":completed.record,
-            "namespacePlan":cache,"namespaceChecked":completed.namespace_checked}))?;
-        completed
-            .directory
-            .write_json("result.json", &completed.record)?;
-        Ok((completed, response, caps))
+        let completed = finalize_result(result, original)?;
+        seal_completed(completed, caps, &finalizing, retain_transport)
     })
     .await
+}
+
+fn seal_completed(
+    mut completed: Completed,
+    caps: LifecycleCaps,
+    cancel: &Cancellation,
+    retain_transport: bool,
+) -> Result<OwnedMutant, NamespaceError> {
+    completed.directory.verify()?;
+    if !completed.record["compileChecked"]
+        .as_bool()
+        .unwrap_or(false)
+    {
+        cancel.check()?;
+    } else {
+        finalize_cancel(&mut completed.record, cancel);
+    }
+    if matches!(
+        completed.record["outcome"].as_str(),
+        Some("INFRA_ERROR" | "CANCELLED")
+    ) {
+        completed.namespace_plan = None;
+        completed.namespace_checked = false;
+    }
+    let mut owned = OwnedMutant {
+        record: completed.record,
+        namespace_plan: completed.namespace_plan,
+        namespace_checked: completed.namespace_checked,
+        _directory: completed.directory,
+        _attempts: completed._attempts,
+        _caps: caps,
+        private_response: None,
+    };
+    // Keep the same per-record preflight before sealing in both modes.
+    // In-process callers publish their own bounded event and retain no encoding.
+    let cache = owned
+        .namespace_plan
+        .as_ref()
+        .map(|cache| json!({"plan":cache.plan,"receipt":cache.receipt}));
+    let response = crate::private_response::encode(json!({"record":owned.record,
+        "namespacePlan":cache,"namespaceChecked":owned.namespace_checked}))?;
+    owned.private_response = retain_transport.then_some(response);
+    owned._directory.write_json("result.json", &owned.record)?;
+    Ok(owned)
 }
 
 async fn process(
@@ -520,11 +564,14 @@ async fn process(
         if let Some(readiness) = readiness {
             readiness.acknowledge()?;
         }
-        let (completed, bytes, caps) = perform(request, caps, &cancel).await?;
+        let mut completed = run_owned_inner(request, caps, &cancel, true).await?;
         blocking(move || {
+            let bytes = completed
+                .private_response
+                .take()
+                .ok_or_else(|| invalid("missing native mutant response"))?;
             let result = crate::private_response::publish(&bytes, &Cancellation::default());
             drop(completed);
-            drop(caps);
             result.map_err(Into::into)
         })
         .await

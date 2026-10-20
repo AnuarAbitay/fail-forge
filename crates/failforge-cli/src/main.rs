@@ -10,6 +10,9 @@ mod attempt_execution;
 mod dart_namespace;
 mod diagnostics;
 mod display;
+mod family_execution;
+mod family_queue;
+mod family_stream;
 mod mutant_confirmation;
 mod mutant_execution;
 mod mutate;
@@ -72,6 +75,7 @@ fn main() -> ExitCode {
         Commands::TestAttempt => return attempt::execute(),
         Commands::AdapterDiscover => return adapter_discovery::execute(),
         Commands::MutantExecute => return mutant_execution::execute(),
+        Commands::FamilyExecute => return family_execution::execute(),
         Commands::Profile(arguments) => match arguments.command {
             ProfileCommands::Generate(arguments) => {
                 return profile::execute(*arguments, &invocation_cwd);

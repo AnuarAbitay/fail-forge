@@ -330,9 +330,10 @@ The adapter's syntax/type analysis and safe-patch contract are described in the
 or CLI settings through `failforge-config`, then transfers the effective
 configuration to `python/failforge_campaign`. Prepared package inspection,
 source/dependency/SDK hashes, immutable snapshots, fresh project copies and
-workspace lifecycle operations run through `failforge-workspace` in Rust. The Python controller schedules these
-operations and isolated test attempts, then publishes family-specific evidence
-and scores. Each native test process keeps
+workspace lifecycle operations run through `failforge-workspace` in Rust. A native
+family owner schedules the baseline, bounded mutant queue and final original
+control. The Python controller prepares campaigns, orders selected families and
+publishes aggregate evidence and scores. Each native test process keeps
 the same Rust Runner ownership. Working copies live in a private per-user
 registry protected by campaign leases. Startup recovery removes only validated
 unlocked campaigns; inherited lease descriptors keep a live Rust cleanup owner
@@ -344,14 +345,14 @@ workspace support remain outside this implementation. See the
 [mutation CLI](mutation-cli.md).
 
 The input bridge uses one context-scoped client per public campaign or profile,
-explicitly propagated to each worker. A private unlinked JSON descriptor carries
+shared by campaign preparation and native family dispatch. A private unlinked JSON descriptor carries
 one bounded workspace request to the existing native owner; a single batched
 binding request hashes all dependencies, SDK inputs, tools and controller files.
 The bridge validates a bounded versioned JSON response and never falls back to
 Python after an error. Copy owners inherit the current campaign lease. Read-only
 source verification uses an independent cancellation token so a cancelled test
-cannot hide input drift. Campaign scheduling, per-project namespace-plan caching
-and report assembly remain in Python in this migration stage. Direct research helpers
+cannot hide input drift. Profile family ordering, campaign input checkpoints and
+aggregate report assembly remain in Python in this migration stage. Direct research helpers
 without a production client retain their legacy
 Python implementations for diagnostics and differential tests.
 
@@ -362,8 +363,8 @@ request protocol and inherits the campaign lease. When resolved SDK calls need
 an analyzer plan, that owner starts the existing Dart planner directly through
 the Rust Runner. It verifies source integrity even after cancellation, validates
 captured bytes against the typed Runner result and publishes a private receipt.
-The receipt's command is the actual Dart child command. Python retains the plan
-cache and dispatches fresh attempts; active production requests cannot fall back
+The receipt's command is the actual Dart child command. The native family owner
+retains the plan cache and dispatches fresh attempts; active production requests cannot fall back
 to the diagnostic Python scanner or planner after a native failure.
 
 Each production test attempt is one native operation. Its owner borrows the
@@ -376,14 +377,13 @@ Cancellation after that terminal publication affects the campaign's remaining
 work; the Python `TestExecutor` bridge never reclassifies or rewrites the sealed
 attempt.
 
-The private response carries the public result separately from reusable baseline
-catalogues, initialization continuations and namespace-plan cache entries. The
-controller validates transport shapes and caches opaque values without reading
-report files as authority or reparsing raw reporter events. Its first namespace
-preparation is serialized per executor; later attempts, including header-only
-isolation, run in parallel. Direct unconfigured diagnostic attempts retain the
-legacy path. Campaign scheduling, baseline and final original controls, global
-input checkpoints and aggregate report publication remain in Python.
+The shared attempt result carries the public result separately from reusable
+baseline catalogues, initialization continuations and namespace-plan cache
+entries. The native family owner retains this policy state without reading report
+files as authority or reparsing raw reporter events. Baseline namespace preparation
+finishes before mutant workers start; subsequent attempts reuse its verified plan
+and execute in parallel. The private standalone attempt bridge remains available;
+direct unconfigured diagnostic attempts retain the legacy path.
 
 Each production mutant also has one native owner. It validates the discovered
 candidate against the current source and reconstructed patch, then calls the
@@ -398,8 +398,28 @@ control proof; reusable policy state remains private. Python only transports the
 request and sealed result, retaining all four workspace capabilities through
 completion. It does not apply patches, schedule causal controls or rewrite the
 record on this path. A completed `CANCELLED` record is returned to the outer
-scheduler so partial reports retain the finished owner's evidence. Families and
-workers still run through the Python campaign scheduler during this migration.
+scheduler so partial reports retain the finished owner's evidence.
+
+The production family owner calls those shared implementations directly, with no
+recursive CLI calls. It verifies all candidates and frozen inputs before the
+baseline, runs at most four workers, drains every admitted worker after failure
+or cancellation, and performs the final original control only after the queue
+finishes. It seals `baseline/catalog.json` itself. A task error stops further
+admission; inconclusive verdicts prevent successful family completion.
+Infrastructure failures take precedence over cancellation.
+An empty direct campaign retains its two original controls, while an empty profile
+family skips author execution.
+
+Its private stdout stream consists of LF-framed JSON events: stage boundaries,
+baseline and original attempts, one record per completed mutant, and a terminal
+commitment. Frames are capped at 64 MiB and their count at selected mutants plus
+nine. The terminal binds the preceding exact bytes, sequence and completed count
+with SHA-256. Python consumes the bounded stream concurrently with stderr,
+retaining records only in aggregate report state. If a report callback fails it
+requests cancellation, continues retaining later completed records without further
+publication, and waits for native cleanup. Missing or invalid terminal evidence
+cannot establish success. Profile ordering, the shared mutant cap, final input
+checks, campaign cleanup and aggregate report publication remain in Python.
 
 Production discovery has its own private native operation. It owns one
 `AdapterClient` session directly through Runner, checks the selected family's
@@ -443,9 +463,10 @@ execution controller remains in Python during the incremental migration.
 Primary Dart/Flutter test classification lives in `failforge-dart`. The native
 test owner parses the complete JSON reporter stream after Runner shutdown and
 uses its typed process result, so diagnostics printed by a child cannot supply
-cleanup or termination evidence. The Python campaign controller passes the
-attempt request through a private anonymous regular-file descriptor. It closes on
-child exec, and its environment variable is removed from the test command.
+cleanup or termination evidence. Standalone attempt requests use a private
+anonymous regular-file descriptor. It closes on child exec, and its environment
+variable is removed from the test command. Production families call the same
+attempt implementation in-process, without a separate attempt request channel.
 The native attempt owner binds the reporter mode, typed execution result, and
 byte lengths and SHA-256 hashes of both raw captures before returning the private
 completion. Inconsistent evidence fails closed before author-failure attribution.
@@ -499,10 +520,11 @@ context remain capped at 64 MiB each. These are data limits, not process RSS
 limits. Temporary workspace paths are normalized while diagnostic text, stack
 coordinates and test identity multiplicities remain part of the comparison.
 
-The controller still schedules baselines, mutant workers and final original
-controls, retains opaque per-run caches, checks campaign bindings and publishes
-aggregate reports. Native mutant owners perform causal controls and publish each
-mutation record; shared native attempts manage fresh working copies,
+The native family owner schedules baselines, mutant workers and final original
+controls, retains opaque per-run caches and checks frozen bindings. The controller
+checks campaign-wide bindings and publishes aggregate reports after cleanup.
+Native mutant owners perform causal controls and publish each mutation record;
+shared native attempts manage fresh working copies,
 authenticated captures and cleanup. Legacy diagnostic scripts retain
 their Python reporter implementation during migration; product test attempts do
 not fall back to it. Native parsing rejects duplicate keys, non-finite numbers,
