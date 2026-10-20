@@ -51,6 +51,8 @@ fn stat(parent: RawFd, value: &OsStr) -> io::Result<libc::stat> {
     Ok(unsafe { info.assume_init() })
 }
 
+// dev_t is signed on macOS and already u64 on supported Linux targets.
+#[allow(clippy::unnecessary_cast)]
 fn same(info: &libc::stat, opened: &Metadata) -> bool {
     info.st_dev as u64 == opened.dev() && info.st_ino == opened.ino()
 }

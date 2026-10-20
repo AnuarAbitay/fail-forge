@@ -6,6 +6,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path};
 use std::time::Duration;
 const VERSION: &str = "3.47.7";
+const DOWNLOAD_BASE: &str = "https://storage.googleapis.com/flutter_infra_release/releases";
 
 fn publish_directory(source: &Path, destination: &Path) -> Result<()> {
     let source = CString::new(source.as_os_str().as_bytes())?;
@@ -48,8 +49,7 @@ fn platform(os: &str, arch: &str) -> Result<(&'static str, &'static str)> {
 }
 fn select<'a>(manifest: &'a Value, arch: &str) -> Result<&'a Value> {
     ensure(
-        manifest["base_url"].as_str()
-            == Some("https://storage.googleapis.com/flutter_infra_release/flutter"),
+        manifest["base_url"].as_str() == Some(DOWNLOAD_BASE),
         "unexpected Flutter download host",
     )?;
     let releases = manifest["releases"].as_array().ok_or("missing releases")?;
@@ -201,7 +201,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     fn manifest() -> Value {
-        json!({"base_url":"https://storage.googleapis.com/flutter_infra_release/flutter","releases":[{"version":VERSION,"channel":"stable","dart_sdk_arch":"arm64","archive":"stable/macos/flutter_macos_arm64.zip","sha256":"a".repeat(64),"dart_sdk_version":"3.13.0"}]})
+        json!({"base_url":"https://storage.googleapis.com/flutter_infra_release/releases","releases":[{"version":VERSION,"channel":"stable","dart_sdk_arch":"arm64","archive":"stable/macos/flutter_macos_arm64.zip","sha256":"a".repeat(64),"dart_sdk_version":"3.13.0"}]})
     }
     #[test]
     fn host_mapping() {
@@ -226,6 +226,28 @@ mod tests {
         let row = m["releases"][0].clone();
         m["releases"].as_array_mut().unwrap().push(row);
         assert!(select(&m, "arm64").is_err());
+    }
+    #[test]
+    fn official_linux_manifest_selects_the_pinned_archive_url() {
+        let m = json!({
+            "base_url":"https://storage.googleapis.com/flutter_infra_release/releases",
+            "releases":[{
+                "version":"3.47.7","channel":"stable","dart_sdk_arch":"x64",
+                "archive":"stable/linux/flutter_linux_3.47.7-stable.tar.xz",
+                "sha256":"af7455f540df951184c7953fbe3cf884766e7541dacf8571f9f582db03dd6230",
+                "dart_sdk_version":"3.13.5"
+            }]
+        });
+        let entry = select(&m, "x64").unwrap();
+        assert_eq!(
+            format!(
+                "{}/{}",
+                m["base_url"].as_str().unwrap(),
+                entry["archive"].as_str().unwrap()
+            ),
+            "https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.47.7-stable.tar.xz"
+        );
+        assert_eq!(entry["dart_sdk_version"], "3.13.5");
     }
     #[test]
     fn remote_paths_and_hash_are_validated() {
