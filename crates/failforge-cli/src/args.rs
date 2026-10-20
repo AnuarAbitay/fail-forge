@@ -46,6 +46,9 @@ pub(crate) enum Commands {
     /// Internal bounded family execution with streamed completions.
     #[command(hide = true)]
     FamilyExecute,
+    /// Private campaign discovery and family scheduling operation.
+    #[command(hide = true)]
+    CampaignExecute,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

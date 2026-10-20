@@ -23,7 +23,7 @@ use crate::namespace_planner::{PlanProject, PlanRuntime, ReportDirectory};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Request {
+pub(crate) struct Request {
     operation: String,
     project: PreparedProject,
     directory: PathBuf,
@@ -42,8 +42,12 @@ struct Runtime {
 }
 
 fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
-    let request: Request = serde_json::from_value(parse_json(raw)?)
-        .map_err(|_| invalid("invalid native discovery request"))?;
+    decode_value(parse_json(raw)?)
+}
+
+pub(crate) fn decode_value(value: Value) -> Result<Request, NamespaceError> {
+    let request: Request =
+        serde_json::from_value(value).map_err(|_| invalid("invalid native discovery request"))?;
     if request.operation != "discover" || !request.payload.is_object() {
         return Err(invalid("invalid native discovery operation or payload"));
     }
@@ -167,6 +171,14 @@ struct Prepared {
     transcript: Transcript,
 }
 
+/// Sealed discovery evidence and the retained artifacts and lease that
+/// authorize its caller's publication. No private wire buffer is retained.
+pub(crate) struct OwnedDiscovery {
+    pub value: Value,
+    _prepared: Prepared,
+    _lease: WorkspaceLease,
+}
+
 fn prepare(request: Request, cancel: &Cancellation) -> Result<Prepared, NamespaceError> {
     let binding = InputBinding::new(&request, cancel)?;
     let config = DiscoveryConfig::new(
@@ -263,7 +275,8 @@ fn finish(
     prepared: Prepared,
     run: DiscoveryRun,
     started: Instant,
-) -> Result<Vec<u8>, NamespaceError> {
+    lease: WorkspaceLease,
+) -> Result<OwnedDiscovery, NamespaceError> {
     // Integrity failures take precedence over an otherwise clean cancellation.
     let verification = verify_artifacts(&prepared, &run);
     let stderr = verification
@@ -287,10 +300,17 @@ fn finish(
         .write_private("adapter.stderr", &stderr)?;
     match outcome {
         Ok(result) => {
-            let bytes = crate::private_response::encode(json!({"steps":result.steps,
-                "candidates":result.candidates,"receipt":receipt}))?;
+            let value = json!({"steps":result.steps,
+                "candidates":result.candidates,"receipt":receipt});
+            // Keep the standalone 64 MiB success preflight before publishing
+            // result.json, including for callers that use no private transport.
+            drop(crate::private_response::encode(value.clone())?);
             prepared.directory.write_json("result.json", &receipt)?;
-            Ok(bytes)
+            Ok(OwnedDiscovery {
+                value,
+                _prepared: prepared,
+                _lease: lease,
+            })
         }
         Err(error) => {
             receipt["exitCode"] = exit_code(&error).into();
@@ -299,6 +319,24 @@ fn finish(
             Err(error)
         }
     }
+}
+
+/// Discover directly under the caller's cancellation token. The adapter is
+/// fully drained and uncancelled integrity checks finish before this returns.
+pub(crate) async fn run_owned(
+    request: Request,
+    lease: WorkspaceLease,
+    cancel: &Cancellation,
+) -> Result<OwnedDiscovery, NamespaceError> {
+    let started = Instant::now();
+    let preparing = cancel.clone();
+    let mut prepared = tokio::task::spawn_blocking(move || prepare(request, &preparing))
+        .await
+        .map_err(|_| invalid("discovery preparation failed"))??;
+    let run = discover(&prepared.config, &mut prepared.transcript, cancel).await;
+    tokio::task::spawn_blocking(move || finish(prepared, run, started, lease))
+        .await
+        .map_err(|_| invalid("discovery publication failed"))?
 }
 
 fn exit_code(error: &NamespaceError) -> u8 {
@@ -326,18 +364,13 @@ async fn process(
         if let Some(readiness) = readiness {
             readiness.acknowledge()?;
         }
-        let started = Instant::now();
-        let preparing = cancel.clone();
-        let mut prepared = tokio::task::spawn_blocking(move || prepare(request, &preparing))
-            .await
-            .map_err(|_| invalid("discovery preparation failed"))??;
-        let run = discover(&prepared.config, &mut prepared.transcript, &cancel).await;
+        let owned = run_owned(request, lease, &cancel).await?;
         // Keep the lease and signal listener until artifacts and private output
         // have been committed. A later signal is handled by the controller.
         tokio::task::spawn_blocking(move || {
-            let bytes = finish(prepared, run, started)?;
+            let bytes = crate::private_response::encode(owned.value.clone())?;
             crate::private_response::publish(&bytes, &Cancellation::default())?;
-            drop(lease);
+            drop(owned);
             Ok::<_, NamespaceError>(())
         })
         .await

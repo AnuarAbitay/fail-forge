@@ -7,6 +7,7 @@ mod args;
 mod attempt;
 mod attempt_artifacts;
 mod attempt_execution;
+mod campaign_execution;
 mod dart_namespace;
 mod diagnostics;
 mod display;
@@ -76,6 +77,7 @@ fn main() -> ExitCode {
         Commands::AdapterDiscover => return adapter_discovery::execute(),
         Commands::MutantExecute => return mutant_execution::execute(),
         Commands::FamilyExecute => return family_execution::execute(),
+        Commands::CampaignExecute => return campaign_execution::execute(),
         Commands::Profile(arguments) => match arguments.command {
             ProfileCommands::Generate(arguments) => {
                 return profile::execute(*arguments, &invocation_cwd);

@@ -19,6 +19,27 @@ fn decode_value(value: &Value) -> Result<Request, NamespaceError> {
 }
 
 #[test]
+fn typed_and_wire_decoders_share_validation() {
+    let mut value = value();
+    assert_eq!(
+        super::decode_value(value.clone()).unwrap().workers,
+        decode_value(&value).unwrap().workers
+    );
+    value["workers"] = 5.into();
+    assert!(super::decode_value(value.clone()).is_err());
+    assert!(decode_value(&value).is_err());
+    value["workers"] = 2.into();
+    let mut typed = super::decode_value(value.clone()).unwrap();
+    typed.frozen = json!([]);
+    assert!(validate_request(&typed).is_err());
+    value["frozen"] = json!([]);
+    assert!(decode_value(&value).is_err());
+    typed.frozen = json!({});
+    typed.project.graph = Value::Null;
+    assert!(validate_request(&typed).is_err());
+}
+
+#[test]
 fn family_decode_preserves_empty_policies_and_bounded_worker_configuration() {
     for policy in ["controls", "skip"] {
         for workers in [1, 4] {
@@ -207,9 +228,11 @@ fn directory_guard_detects_replacements_and_ancestor_alias_retargets() {
     symlink(&original, &alias).unwrap();
     let guard = DirectoryGuard::open(&alias.join("reports")).unwrap();
     guard.verify().unwrap();
+    assert_eq!(guard.canonical_path().unwrap(), original.join("reports"));
     fs::remove_file(&alias).unwrap();
     symlink(&replacement, &alias).unwrap();
     assert!(guard.verify().is_err());
+    assert!(guard.canonical_path().is_err());
     let guard = DirectoryGuard::open(&original.join("reports")).unwrap();
     fs::rename(original.join("reports"), original.join("moved")).unwrap();
     fs::create_dir(original.join("reports")).unwrap();
@@ -217,4 +240,199 @@ fn directory_guard_detects_replacements_and_ancestor_alias_retargets() {
     let symlink_path = temp.0.join("direct-alias");
     symlink(&original, &symlink_path).unwrap();
     assert!(DirectoryGuard::open(&symlink_path).is_err());
+}
+
+fn put(root: &Path, relative: &str, bytes: impl AsRef<[u8]>) {
+    let path = root.join(relative);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, bytes).unwrap();
+}
+
+fn owned_fixture() -> (Temp, Request, LifecycleCaps) {
+    let temp = Temp::new();
+    let root = temp.0.join("subject");
+    let dependency = temp.0.join("test");
+    put(&dependency, "bin/test.dart", "void main() {}\n");
+    put(&root, "pubspec.yaml", "name: subject\n");
+    put(&root, "lib/a.dart", "const value = true;\n");
+    put(&root, "test/a_test.dart", "void main() {}\n");
+    put(&root, ".dart_tool/package_config.json", serde_json::to_vec(&json!({
+        "configVersion":2,"packages":[{"name":"subject","rootUri":"../","packageUri":"lib/"},
+            {"name":"test","rootUri":format!("file://{}/",dependency.display()),"packageUri":"lib/"}]
+    })).unwrap());
+    put(&root, ".dart_tool/package_graph.json", br#"{"roots":["subject"],"packages":[{"name":"subject","dependencies":["test"]},{"name":"test","dependencies":[]}]}"#);
+    for relative in [
+        "sdk/bin/dart",
+        "sdk/lib/core.dart",
+        "tools/failforge",
+        "tools/failforge-adapter-campaign",
+        "tools/python/failforge_campaign/controller.py",
+        "tools/scripts/helper",
+        "adapter/lib/main.dart",
+    ] {
+        put(&temp.0, relative, "fixture\n");
+    }
+    put(&temp.0, "adapter/.dart_tool/package_config.json", br#"{"configVersion":2,"packages":[{"name":"adapter","rootUri":"../","packageUri":"lib/"}]}"#);
+    let project = inspect_project(&root, &Cancellation::default()).unwrap();
+    let started =
+        failforge_workspace::lifecycle::start(&temp.0.join("registry"), &Cancellation::default())
+            .unwrap();
+    fs::create_dir(temp.0.join("reports")).unwrap();
+    let mut value = value();
+    value["project"] = serde_json::to_value(project).unwrap();
+    value["output"] = json!(temp.0.join("reports"));
+    value["runtime"] = json!({"installation":temp.0.join("tools"),
+        "runner":temp.0.join("tools/failforge"),"dartSdk":temp.0.join("sdk"),
+        "flutterSdk":null,"adapterRoot":temp.0.join("adapter")});
+    value["workspace"] = json!({"root":started.root_path,"campaign":started.campaign_name});
+    value["emptyPolicy"] = "skip".into();
+    let mut request = decode_value(&value).unwrap();
+    request.frozen = crate::workspace_inputs::bind_inputs(
+        &request.runtime,
+        &request.project,
+        &request.environment,
+        &Cancellation::default(),
+    )
+    .unwrap();
+    (temp, request, started.caps)
+}
+
+struct OwnedSink {
+    registry: PathBuf,
+    campaign: String,
+    close_caps: LifecycleCaps,
+    events: Vec<Value>,
+    terminal: Option<Value>,
+    fail_emit: bool,
+    fail_finish: bool,
+}
+impl OwnedSink {
+    fn new(request: &Request, caps: &LifecycleCaps) -> Self {
+        let mut close_caps = caps.try_clone().unwrap();
+        close_caps.lease.take();
+        Self {
+            registry: request.workspace.root.clone(),
+            campaign: request.workspace.campaign.clone(),
+            close_caps,
+            events: vec![],
+            terminal: None,
+            fail_emit: false,
+            fail_finish: false,
+        }
+    }
+
+    fn assert_released(&self) {
+        assert!(
+            !failforge_workspace::lifecycle::close(
+                &self.registry,
+                &self.campaign,
+                self.close_caps.try_clone().unwrap(),
+                &Cancellation::default(),
+            )
+            .unwrap()
+            .cleanup_deferred
+        );
+    }
+}
+impl FamilyEvents for OwnedSink {
+    fn emit(&mut self, event: Value) -> io::Result<()> {
+        self.events.push(event);
+        if self.fail_emit {
+            Err(io::Error::other("injected family sink failure"))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn finish(
+        &mut self,
+        status: &str,
+        error: Option<&str>,
+        completed: usize,
+        total: usize,
+    ) -> io::Result<()> {
+        assert!(self.terminal.is_none());
+        assert!(
+            failforge_workspace::lifecycle::close(
+                &self.registry,
+                &self.campaign,
+                self.close_caps.try_clone().unwrap(),
+                &Cancellation::default(),
+            )
+            .unwrap()
+            .cleanup_deferred,
+            "the family lease must stay held during the outer completion callback"
+        );
+        self.terminal = Some(json!({"status":status,"error":error,
+            "completedMutants":completed,"expectedMutants":total}));
+        if self.fail_finish {
+            Err(io::Error::other("injected family finish failure"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[tokio::test]
+async fn shared_sink_receives_empty_completion_while_lease_is_held() {
+    let (_temp, request, caps) = owned_fixture();
+    let mut sink = OwnedSink::new(&request, &caps);
+    run_owned(request, caps, &Cancellation::default(), &mut sink)
+        .await
+        .unwrap();
+    assert!(sink.events.is_empty());
+    assert_eq!(
+        sink.terminal,
+        Some(json!({"status":"no_mutants","error":null,"completedMutants":0,"expectedMutants":0}))
+    );
+    sink.assert_released();
+}
+
+#[tokio::test]
+async fn shared_sink_failures_stop_before_child_execution_and_release_only_after_finish() {
+    let (_temp, mut request, caps) = owned_fixture();
+    request.empty_policy = EmptyPolicy::Controls;
+    let output = request.output.clone();
+    let mut sink = OwnedSink::new(&request, &caps);
+    sink.fail_emit = true;
+    run_owned(request, caps, &Cancellation::default(), &mut sink)
+        .await
+        .unwrap();
+    assert_eq!(
+        sink.events,
+        [json!({"kind":"stage_started","stage":"baseline"})]
+    );
+    assert_eq!(sink.terminal.as_ref().unwrap()["status"], "failed");
+    assert!(
+        sink.terminal.as_ref().unwrap()["error"]
+            .as_str()
+            .unwrap()
+            .contains("injected family sink failure")
+    );
+    assert!(!output.join("baseline").exists());
+    sink.assert_released();
+
+    let (_temp, request, caps) = owned_fixture();
+    let mut sink = OwnedSink::new(&request, &caps);
+    sink.fail_finish = true;
+    let error = run_owned(request, caps, &Cancellation::default(), &mut sink)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("injected family finish failure"));
+    sink.assert_released();
+}
+
+#[tokio::test]
+async fn typed_family_request_is_revalidated_before_effects() {
+    let (_temp, mut request, caps) = owned_fixture();
+    request.workers = 0;
+    let mut sink = OwnedSink::new(&request, &caps);
+    assert!(
+        run_owned(request, caps, &Cancellation::default(), &mut sink)
+            .await
+            .is_err()
+    );
+    assert!(sink.events.is_empty());
+    assert!(sink.terminal.is_none());
+    sink.assert_released();
 }

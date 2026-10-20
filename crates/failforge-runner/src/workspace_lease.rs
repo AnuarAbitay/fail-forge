@@ -8,7 +8,7 @@
 use std::ffi::OsStr;
 use std::fs::{File, Metadata};
 use std::io;
-use std::os::fd::{FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::{FileExt, MetadataExt};
 
 use crate::CommandSpec;
@@ -34,6 +34,15 @@ pub struct WorkspaceLease {
 }
 
 impl WorkspaceLease {
+    /// Retain an already owned campaign capability without reopening its path.
+    ///
+    /// The descriptor is borrowed and duplicated, never consumed or unlocked.
+    /// Both descriptors become close-on-exec; the same metadata and exact marker
+    /// checks used for inherited capabilities apply before returning ownership.
+    pub fn from_borrowed(descriptor: BorrowedFd<'_>) -> io::Result<Self> {
+        Self::from_descriptor(descriptor.as_raw_fd())
+    }
+
     /// Keep the owner's private control variable out of a managed child's env.
     ///
     /// Explicit overrides are removed before adding the removal instruction so
@@ -130,7 +139,7 @@ mod tests {
     use super::*;
     use std::fs::{self, DirBuilder, OpenOptions};
     use std::io::{Read, Seek, SeekFrom, Write};
-    use std::os::fd::AsRawFd;
+    use std::os::fd::AsFd;
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
     use std::os::unix::process::CommandExt;
@@ -244,6 +253,34 @@ mod tests {
                 break;
             }
         }
+    }
+
+    #[test]
+    fn borrowed_capability_retains_lock_after_source_closes_and_rejects_wrong_file() {
+        let mut fixture = Fixture::new();
+        // SAFETY: the private fixture file is live and exclusively owned.
+        assert_eq!(
+            unsafe { libc::flock(fixture.file().as_raw_fd(), libc::LOCK_EX) },
+            0
+        );
+        let lease = WorkspaceLease::from_borrowed(fixture.file().as_fd()).unwrap();
+        drop(fixture.file.take());
+        let peer = File::open(&fixture.path).unwrap();
+        // SAFETY: nonblocking lock probes use only this live fixture descriptor.
+        assert_eq!(
+            unsafe { libc::flock(peer.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            -1
+        );
+        assert_eq!(io::Error::last_os_error().kind(), io::ErrorKind::WouldBlock);
+        drop(lease);
+        // SAFETY: all references to the original open file description are closed.
+        assert_eq!(
+            unsafe { libc::flock(peer.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+            0
+        );
+        let directory = File::open(&fixture.directory).unwrap();
+        assert!(WorkspaceLease::from_borrowed(directory.as_fd()).is_err());
+        assert!(directory.metadata().unwrap().is_dir());
     }
 
     #[test]

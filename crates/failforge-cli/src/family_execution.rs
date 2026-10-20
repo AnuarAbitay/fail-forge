@@ -1,7 +1,7 @@
 //! Baseline, bounded mutant queue and original control under one native owner.
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{self, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -19,36 +19,39 @@ use tokio::signal::unix::{SignalKind, signal};
 
 use crate::attempt::{Config, NamespaceCache, OwnedAttempt, Publication, Workspace};
 use crate::dart_namespace::{absolute, invalid};
-use crate::family_stream::Stream;
+use crate::family_stream::{FrameWriter, Stream};
 use crate::namespace_planner::{PlanProject, PlanRuntime};
 use crate::workspace_inputs::RuntimeInputs;
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-enum EmptyPolicy {
+pub(crate) enum EmptyPolicy {
     Controls,
     Skip,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Request {
-    operation: String,
-    project: PreparedProject,
-    output: PathBuf,
-    runtime: RuntimeInputs,
-    config: Config,
-    workspace: Workspace,
-    candidates: Vec<Value>,
-    family: String,
-    workers: usize,
-    empty_policy: EmptyPolicy,
-    frozen: Value,
-    environment: BTreeMap<String, String>,
+pub(crate) struct Request {
+    pub(crate) operation: String,
+    pub(crate) project: PreparedProject,
+    pub(crate) output: PathBuf,
+    pub(crate) runtime: RuntimeInputs,
+    pub(crate) config: Config,
+    pub(crate) workspace: Workspace,
+    pub(crate) candidates: Vec<Value>,
+    pub(crate) family: String,
+    pub(crate) workers: usize,
+    pub(crate) empty_policy: EmptyPolicy,
+    pub(crate) frozen: Value,
+    pub(crate) environment: BTreeMap<String, String>,
 }
 
 fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
-    let value = parse_json(raw)?;
+    decode_value(parse_json(raw)?)
+}
+
+pub(crate) fn decode_value(value: Value) -> Result<Request, NamespaceError> {
     for pointer in [
         "",
         "/project",
@@ -66,9 +69,16 @@ fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
     }
     let request: Request =
         serde_json::from_value(value).map_err(|_| invalid("invalid native family request"))?;
+    validate_request(&request)?;
+    Ok(request)
+}
+
+fn validate_request(request: &Request) -> Result<(), NamespaceError> {
     if request.operation != "family"
         || !(1..=4).contains(&request.workers)
         || request.candidates.len() > 10000
+        || !request.project.graph.is_object()
+        || !request.frozen.is_object()
         || !matches!(
             request.family.as_str(),
             "classic" | "failure_mode" | "language_specific"
@@ -86,7 +96,7 @@ fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
         return Err(invalid("invalid family binding environment"));
     }
     // Reuse attempt preflight before opening artifacts or starting any child.
-    attempt_request(&request, request.output.join("baseline"), None, None)?;
+    attempt_request(request, request.output.join("baseline"), None, None)?;
     let mut ids = BTreeSet::new();
     for candidate in &request.candidates {
         let id = candidate["mutant"]["id"]
@@ -96,7 +106,36 @@ fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
             return Err(invalid("mixed-family or duplicate mutation candidates"));
         }
     }
-    Ok(request)
+    Ok(())
+}
+
+/// A family may publish directly to its private pipe or into an outer campaign.
+/// `finish` runs while the input guards and campaign capabilities are still held.
+pub(crate) trait FamilyEvents {
+    fn emit(&mut self, event: Value) -> io::Result<()>;
+    fn finish(
+        &mut self,
+        status: &str,
+        error: Option<&str>,
+        completed: usize,
+        total: usize,
+    ) -> io::Result<()>;
+}
+
+impl<W: FrameWriter> FamilyEvents for Stream<W> {
+    fn emit(&mut self, event: Value) -> io::Result<()> {
+        Stream::emit(self, event)
+    }
+
+    fn finish(
+        &mut self,
+        status: &str,
+        error: Option<&str>,
+        completed: usize,
+        total: usize,
+    ) -> io::Result<()> {
+        Stream::finish(self, status, error, completed, total)
+    }
 }
 
 fn attempt_request(
@@ -123,13 +162,13 @@ fn attempt_request(
 }
 
 /// Retain pathname identity even when all child receipts are already sealed.
-struct DirectoryGuard {
+pub(crate) struct DirectoryGuard {
     path: PathBuf,
     canonical: PathBuf,
     file: File,
 }
 impl DirectoryGuard {
-    fn open(path: &Path) -> Result<Self, NamespaceError> {
+    pub(crate) fn open(path: &Path) -> Result<Self, NamespaceError> {
         let canonical = path.canonicalize()?;
         let file = OpenOptions::new()
             .read(true)
@@ -143,7 +182,7 @@ impl DirectoryGuard {
         value.verify()?;
         Ok(value)
     }
-    fn verify(&self) -> Result<(), NamespaceError> {
+    pub(crate) fn verify(&self) -> Result<(), NamespaceError> {
         let held = self.file.metadata()?;
         let named = std::fs::symlink_metadata(&self.path)?;
         if !named.is_dir()
@@ -154,6 +193,11 @@ impl DirectoryGuard {
             return Err(invalid("family directory binding changed"));
         }
         Ok(())
+    }
+
+    pub(crate) fn canonical_path(&self) -> Result<PathBuf, NamespaceError> {
+        self.verify()?;
+        Ok(self.canonical.clone())
     }
 }
 
@@ -364,7 +408,11 @@ impl Ledger {
     }
 }
 
-fn stage(stream: &mut Stream, name: &str, elapsed: Option<f64>) -> Result<(), NamespaceError> {
+fn stage(
+    stream: &mut impl FamilyEvents,
+    name: &str,
+    elapsed: Option<f64>,
+) -> Result<(), NamespaceError> {
     let frame = match elapsed {
         Some(seconds) => json!({"kind":"stage_finished","stage":name,"wallSeconds":seconds}),
         None => json!({"kind":"stage_started","stage":name}),
@@ -394,7 +442,7 @@ async fn run_family(
     inputs: &Inputs,
     caps: &LifecycleCaps,
     cancel: &Cancellation,
-    stream: &mut Stream,
+    stream: &mut impl FamilyEvents,
     ledger: &mut Ledger,
 ) -> Result<(), NamespaceError> {
     cancel.check()?;
@@ -503,11 +551,21 @@ async fn run_family(
     Ok(())
 }
 
+pub(crate) async fn run_owned(
+    request: Request,
+    caps: LifecycleCaps,
+    cancel: &Cancellation,
+    stream: &mut impl FamilyEvents,
+) -> Result<(), NamespaceError> {
+    validate_request(&request)?;
+    execute_owned(Arc::new(request), caps, cancel, stream).await
+}
+
 async fn execute_owned(
     request: Arc<Request>,
     caps: LifecycleCaps,
     cancel: &Cancellation,
-    stream: &mut Stream,
+    stream: &mut impl FamilyEvents,
 ) -> Result<(), NamespaceError> {
     let total = request.candidates.len();
     let mut ledger = Ledger::default();
@@ -556,7 +614,7 @@ async fn execute_owned(
 }
 
 fn terminal(
-    stream: &mut Stream,
+    stream: &mut impl FamilyEvents,
     result: Result<(), NamespaceError>,
     cancel: &Cancellation,
     ledger: &Ledger,
@@ -611,7 +669,7 @@ async fn process(
         if let Some(ready) = ready {
             ready.acknowledge()?;
         }
-        execute_owned(Arc::new(request), caps, &cancel, &mut stream).await
+        run_owned(request, caps, &cancel, &mut stream).await
     }
     .await;
     listener.abort();

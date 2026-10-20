@@ -1,4 +1,4 @@
-//! Framed family events with a bounded pipe write and a sealed prefix digest.
+//! Framed execution events with a bounded pipe write and a sealed prefix digest.
 use std::fs::File;
 use std::io::{self, Write};
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
@@ -56,17 +56,46 @@ impl<W: FrameWriter> Stream<W> {
         }
     }
 
-    pub(crate) fn emit(&mut self, mut event: Value) -> io::Result<()> {
+    pub(crate) fn emit(&mut self, event: Value) -> io::Result<()> {
+        self.emit_known(
+            event,
+            &[
+                "stage_started",
+                "stage_finished",
+                "baseline",
+                "mutant",
+                "original_after",
+            ],
+        )
+    }
+
+    pub(crate) fn emit_campaign(&mut self, event: Value) -> io::Result<()> {
+        self.emit_known(
+            event,
+            &[
+                "stage_started",
+                "stage_finished",
+                "discovery",
+                "discovery_finished",
+                "family_started",
+                "family_event",
+                "family_finished",
+            ],
+        )
+    }
+
+    fn emit_known(&mut self, mut event: Value, kinds: &[&str]) -> io::Result<()> {
         self.ready()?;
         let fields = event
             .as_object_mut()
             .ok_or_else(|| invalid("family event must be an object"))?;
-        if !matches!(
-            fields.get("kind").and_then(Value::as_str),
-            Some("stage_started" | "stage_finished" | "baseline" | "mutant" | "original_after")
-        ) || ["version", "sequence", "eventCount", "eventSha256"]
-            .iter()
-            .any(|key| fields.contains_key(*key))
+        if !fields
+            .get("kind")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| kinds.contains(&kind))
+            || ["version", "sequence", "eventCount", "eventSha256"]
+                .iter()
+                .any(|key| fields.contains_key(*key))
         {
             return Err(invalid("invalid family event envelope"));
         }
@@ -99,20 +128,48 @@ impl<W: FrameWriter> Stream<W> {
         completed: usize,
         total: usize,
     ) -> io::Result<()> {
-        self.ready()?;
         if !matches!(status, "completed" | "no_mutants" | "failed" | "cancelled")
             || completed > total
         {
             return Err(invalid("invalid family terminal"));
         }
+        self.seal(json!({"status":status, "error":error,
+            "completedMutants":completed, "expectedMutants":total}))
+    }
+
+    pub(crate) fn finish_campaign(
+        &mut self,
+        status: &str,
+        error: Option<&str>,
+        completed_families: usize,
+        expected_families: usize,
+        completed_mutants: usize,
+        expected_mutants: Option<usize>,
+    ) -> io::Result<()> {
+        if !matches!(status, "completed" | "no_mutants" | "failed" | "cancelled")
+            || completed_families > expected_families
+            || expected_mutants.is_some_and(|total| completed_mutants > total)
+            || (expected_mutants.is_none()
+                && (completed_mutants != 0 || matches!(status, "completed" | "no_mutants")))
+        {
+            return Err(invalid("invalid campaign terminal"));
+        }
+        self.seal(json!({"status":status, "error":error,
+            "completedFamilies":completed_families, "expectedFamilies":expected_families,
+            "completedMutants":completed_mutants, "expectedMutants":expected_mutants}))
+    }
+
+    fn seal(&mut self, mut event: Value) -> io::Result<()> {
+        self.ready()?;
         let sequence = self
             .count
             .checked_add(1)
             .ok_or_else(|| invalid("family event count overflow"))?;
-        let event = json!({"version":1, "sequence":sequence, "kind":"terminal",
-            "status":status, "error":error, "completedMutants":completed,
-            "expectedMutants":total, "eventCount":self.count,
-            "eventSha256":format!("{:x}", self.hash.clone().finalize())});
+        event["version"] = 1.into();
+        event["sequence"] = sequence.into();
+        event["kind"] = "terminal".into();
+        event["eventCount"] = self.count.into();
+        event["eventSha256"] = format!("{:x}", self.hash.clone().finalize()).into();
         let bytes = encode(&event, self.limit)?;
         // Never append another event to a partially written terminal.
         self.terminal = true;

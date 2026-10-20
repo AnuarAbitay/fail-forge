@@ -1,5 +1,7 @@
 use super::*;
 use std::fs;
+use std::os::fd::AsFd;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -89,6 +91,174 @@ impl Drop for Fixture {
 
 fn decoded(value: &Value) -> Result<Request, NamespaceError> {
     decode(&serde_json::to_vec(value).unwrap())
+}
+
+fn fixture_lease(fixture: &Fixture) -> WorkspaceLease {
+    let started = failforge_workspace::lifecycle::start(
+        &fixture.base.join("registry"),
+        &Cancellation::default(),
+    )
+    .unwrap();
+    WorkspaceLease::from_borrowed(started.caps.lease.as_ref().unwrap().as_fd()).unwrap()
+}
+
+fn protocol_fixture(fixture: &Fixture) {
+    // A finite two-response adapter: shell builtins read one request before
+    // each known reply, then wait for the client's EOF. No SDK is required.
+    put(
+        &fixture.sdk,
+        "bin/dart",
+        br#"#!/bin/sh
+IFS= read -r handshake || exit 1
+printf '%s\n' '{"protocolVersion":1,"requestId":"rust-1","kind":"handshake","payload":{"protocolVersion":1,"operators":[{"id":"BOOLEAN_LITERAL_FLIP","version":1,"family":"classic"}]}}'
+IFS= read -r discovery || exit 1
+printf '%s\n' '{"protocolVersion":1,"requestId":"rust-2","kind":"discover","payload":{"mutants":[],"truncated":false,"totalCandidates":0,"returnedCandidates":0}}'
+while IFS= read -r unexpected; do exit 2; done
+"#,
+    );
+    fs::set_permissions(
+        fixture.sdk.join("bin/dart"),
+        fs::Permissions::from_mode(0o700),
+    )
+    .unwrap();
+}
+
+#[test]
+fn wire_and_shared_request_decoding_apply_the_same_validation() {
+    let fixture = Fixture::new();
+    let value = fixture.value();
+    let direct = decode_value(value.clone()).unwrap();
+    let wire = decoded(&value).unwrap();
+    assert_eq!(direct.project, wire.project);
+    assert_eq!(direct.payload, wire.payload);
+    for pointer in ["/directory", "/runtime/helper", "/project/root"] {
+        let mut bad = value.clone();
+        *bad.pointer_mut(pointer).unwrap() = "relative".into();
+        assert!(decode_value(bad.clone()).is_err(), "{pointer}");
+        assert!(decoded(&bad).is_err(), "{pointer}");
+    }
+    let mut bad = value;
+    bad["extra"] = true.into();
+    assert!(decode_value(bad.clone()).is_err());
+    assert!(decoded(&bad).is_err());
+    assert!(!fixture.base.join("reports").exists());
+}
+
+#[tokio::test]
+async fn shared_discovery_seals_evidence_and_pins_lease_until_caller_publication() {
+    use failforge_workspace::lifecycle::{close, start};
+
+    let fixture = Fixture::new();
+    protocol_fixture(&fixture);
+    let registry = fixture.base.join("registry");
+    let started = start(&registry, &Cancellation::default()).unwrap();
+    let lease =
+        WorkspaceLease::from_borrowed(started.caps.lease.as_ref().unwrap().as_fd()).unwrap();
+    let campaign = started.campaign_name;
+    let mut close_caps = started.caps;
+    close_caps.lease.take();
+    let source_before = source_hashes(&fixture.project.root, &Cancellation::default()).unwrap();
+    let owned = run_owned(fixture.request(), lease, &Cancellation::default())
+        .await
+        .unwrap();
+    let output = fixture.base.join("reports/discovery");
+    assert_eq!(owned.value["candidates"], json!([]));
+    assert_eq!(owned.value["receipt"]["candidates"], 0);
+    assert_eq!(owned.value["receipt"]["freshStaticValidation"], true);
+    assert_eq!(owned.value["steps"]["cleanup"]["runnerShutdown"], true);
+    assert_eq!(
+        owned.value["steps"]["cleanup"],
+        owned.value["receipt"]["cleanup"]
+    );
+    assert_eq!(
+        owned.value["receipt"]["command"],
+        json!([
+            fixture.base.join("helper"),
+            fixture.sdk.join("bin/dart"),
+            fixture.adapter,
+            output.join("payload.json")
+        ])
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(output.join("result.json")).unwrap()).unwrap(),
+        owned.value["receipt"]
+    );
+    let bytes = crate::private_response::encode(owned.value.clone()).unwrap();
+    let mut expected = serde_json::to_vec(&json!({"version":1,"result":owned.value})).unwrap();
+    expected.push(b'\n');
+    assert_eq!(bytes, expected);
+    for name in [
+        "payload.json",
+        "adapter-session.jsonl",
+        "adapter.stderr",
+        "result.json",
+    ] {
+        assert_eq!(
+            fs::metadata(output.join(name))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+    assert_eq!(
+        source_hashes(&fixture.project.root, &Cancellation::default()).unwrap(),
+        source_before
+    );
+    assert!(
+        close(
+            &registry,
+            &campaign,
+            close_caps.try_clone().unwrap(),
+            &Cancellation::default()
+        )
+        .unwrap()
+        .cleanup_deferred
+    );
+    drop(owned);
+    assert!(
+        !close(&registry, &campaign, close_caps, &Cancellation::default())
+            .unwrap()
+            .cleanup_deferred
+    );
+}
+
+#[tokio::test]
+async fn shared_prelaunch_cancel_creates_no_report_and_publishes_no_success() {
+    let fixture = Fixture::new();
+    let lease = fixture_lease(&fixture);
+    let cancel = Cancellation::default();
+    cancel.request(libc::SIGTERM);
+    let error = run_owned(fixture.request(), lease, &cancel)
+        .await
+        .err()
+        .unwrap();
+    assert!(matches!(error, NamespaceError::Cancelled(libc::SIGTERM)));
+    assert!(!fixture.base.join("reports").exists());
+}
+
+#[tokio::test]
+async fn oversized_shared_response_fails_preflight_before_success_receipt_is_sealed() {
+    let fixture = Fixture::new();
+    protocol_fixture(&fixture);
+    let lease = fixture_lease(&fixture);
+    let mut prepared = prepare(fixture.request(), &Cancellation::default()).unwrap();
+    let mut run = discover(
+        &prepared.config,
+        &mut prepared.transcript,
+        &Cancellation::default(),
+    )
+    .await;
+    // Escaping expands these 12 MiB past the existing 64 MiB private limit.
+    // Synthetic post-discovery metadata isolates the publication preflight.
+    run.outcome.as_mut().unwrap().steps.handshake["padding"] = "\0".repeat(12 * 1024 * 1024).into();
+    let error = finish(prepared, run, Instant::now(), lease).err().unwrap();
+    assert!(error.to_string().contains("exceeds limits"));
+    let output = fixture.base.join("reports/discovery");
+    assert!(!output.join("result.json").exists());
+    assert!(output.join("adapter.stderr").is_file());
+    assert!(output.join("adapter-session.jsonl").is_file());
 }
 
 #[test]
@@ -354,7 +524,14 @@ fn discovery_source_integrity_failure_takes_priority_over_cancelled_outcome() {
         b"changed by adapter\n",
     )
     .unwrap();
-    let failure = finish(prepared, cancelled_run(), Instant::now()).unwrap_err();
+    let failure = finish(
+        prepared,
+        cancelled_run(),
+        Instant::now(),
+        fixture_lease(&fixture),
+    )
+    .err()
+    .unwrap();
     assert!(!matches!(failure, NamespaceError::Cancelled(_)));
     assert_eq!(exit_code(&failure), 125);
     let receipt: Value =

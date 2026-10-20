@@ -330,10 +330,11 @@ The adapter's syntax/type analysis and safe-patch contract are described in the
 or CLI settings through `failforge-config`, then transfers the effective
 configuration to `python/failforge_campaign`. Prepared package inspection,
 source/dependency/SDK hashes, immutable snapshots, fresh project copies and
-workspace lifecycle operations run through `failforge-workspace` in Rust. A native
-family owner schedules the baseline, bounded mutant queue and final original
-control. The Python controller prepares campaigns, orders selected families and
-publishes aggregate evidence and scores. Each native test process keeps
+workspace lifecycle operations run through `failforge-workspace` in Rust. One
+native campaign owner schedules discovery and selected families; shared family
+execution owns the baseline, bounded mutant queue and final original control.
+The Python controller prepares campaigns and publishes aggregate evidence and
+scores. Each native test process keeps
 the same Rust Runner ownership. Working copies live in a private per-user
 registry protected by campaign leases. Startup recovery removes only validated
 unlocked campaigns; inherited lease descriptors keep a live Rust cleanup owner
@@ -345,13 +346,13 @@ workspace support remain outside this implementation. See the
 [mutation CLI](mutation-cli.md).
 
 The input bridge uses one context-scoped client per public campaign or profile,
-shared by campaign preparation and native family dispatch. A private unlinked JSON descriptor carries
+shared by campaign preparation and native campaign dispatch. A private unlinked JSON descriptor carries
 one bounded workspace request to the existing native owner; a single batched
 binding request hashes all dependencies, SDK inputs, tools and controller files.
 The bridge validates a bounded versioned JSON response and never falls back to
 Python after an error. Copy owners inherit the current campaign lease. Read-only
 source verification uses an independent cancellation token so a cancelled test
-cannot hide input drift. Profile family ordering, campaign input checkpoints and
+cannot hide input drift. Initial preflight, snapshot/bootstrap lifecycle and
 aggregate report assembly remain in Python in this migration stage. Direct research helpers
 without a production client retain their legacy
 Python implementations for diagnostics and differential tests.
@@ -385,7 +386,7 @@ finishes before mutant workers start; subsequent attempts reuse its verified pla
 and execute in parallel. The private standalone attempt bridge remains available;
 direct unconfigured diagnostic attempts retain the legacy path.
 
-Each production mutant also has one native owner. It validates the discovered
+Each production mutant also has one native implementation. It validates the discovered
 candidate against the current source and reconstructed patch, then calls the
 shared attempt implementation directly. A statically invalid candidate produces
 an `INVALID` record without allocating a test copy. When initialization evidence
@@ -394,9 +395,9 @@ at most three fresh controls: original-before, mutant-replay and original-after.
 It verifies campaign input bindings before and after each control, and source,
 capture or cleanup failures override any policy confirmation or cancellation.
 It writes the final mutation record with candidate metadata and the public
-control proof; reusable policy state remains private. Python only transports the
-request and sealed result, retaining all four workspace capabilities through
-completion. It does not apply patches, schedule causal controls or rewrite the
+control proof; reusable policy state remains private. Python transports the
+campaign request and sealed records, retaining all four workspace capabilities
+through completion. It does not apply patches, schedule causal controls or rewrite the
 record on this path. A completed `CANCELLED` record is returned to the outer
 scheduler so partial reports retain the finished owner's evidence.
 
@@ -410,7 +411,7 @@ Infrastructure failures take precedence over cancellation.
 An empty direct campaign retains its two original controls, while an empty profile
 family skips author execution.
 
-Its private stdout stream consists of LF-framed JSON events: stage boundaries,
+The standalone family operation has an LF-framed JSON stream: stage boundaries,
 baseline and original attempts, one record per completed mutant, and a terminal
 commitment. Frames are capped at 64 MiB and their count at selected mutants plus
 nine. The terminal binds the preceding exact bytes, sequence and completed count
@@ -418,17 +419,38 @@ with SHA-256. Python consumes the bounded stream concurrently with stderr,
 retaining records only in aggregate report state. If a report callback fails it
 requests cancellation, continues retaining later completed records without further
 publication, and waits for native cleanup. Missing or invalid terminal evidence
-cannot establish success. Profile ordering, the shared mutant cap, final input
-checks, campaign cleanup and aggregate report publication remain in Python.
+cannot establish success.
 
-Production discovery has its own private native operation. It owns one
+Both public launch modes now dispatch one `campaign-execute` operation. The native
+owner discovers every selected family before any baseline starts, applies the
+profile's shared mutant cap, and runs families in canonical order: `classic`,
+`failure_mode`, `language_specific`. It calls shared discovery and family
+implementations directly, without recursive CLI calls or Python dispatch between
+families. Frozen execution inputs and the original source hashes are checked at
+the discovery/execution boundaries and before final native completion. A failed
+family or verification phase prevents later families from starting.
+
+The campaign stream adds discovery receipts, aggregate discovery counts and
+family boundaries around unversioned family events. One outer sequence and
+SHA-256 commitment authenticate the exact preceding LF bytes; nested family
+completion validates semantics without inventing a second byte stream. Every
+frame remains capped at 64 MiB, and the event count is bounded by the mutant cap
+plus per-family stage events. Python validates family order, the shared limit,
+unique candidate identities, nested record bindings and terminal coverage before
+accepting success. It still owns initial preflight, snapshot allocation, final
+workspace cleanup and aggregate publication. Partial native records survive
+callback failures, while an infrastructure failure cannot be hidden by callback
+cancellation or a completed inner family.
+
+Discovery has a shared native implementation and a standalone private operation. It owns one
 `AdapterClient` session directly through Runner, checks the selected family's
 operator catalogue and canonical mutant identities, validates every candidate
 and reconstructs its in-memory patch from the source snapshot. The native owner
 writes the bounded transcript and drains the adapter before authenticating
-captures, checking unchanged inputs and publishing its receipt. The controller
-retains the same campaign lease during the entire operation and validates the
-private response without reparsing the public transcript. SIGINT and SIGTERM
+captures, checking unchanged inputs and publishing its receipt. The native
+campaign owner calls it directly; Python validates the emitted receipt without
+reparsing the public transcript. The controller retains the same campaign lease
+during the entire operation. SIGINT and SIGTERM
 are forwarded once after readiness; owned cancellation is returned only after
 cleanup, and infrastructure failures take precedence. The separately installed
 adapter helper remains available to profile generation and diagnostic tools.
@@ -457,8 +479,8 @@ same native configuration rules and calls the Dart adapter through the separate
 Rust discovery owner. A cancellation or controller crash closes the private
 control channel so that owner drains its adapter before releasing the workspace
 lease. Generation verifies complete static evidence and unchanged inputs before
-publishing through directory-bound atomic filesystem operations. The campaign
-execution controller remains in Python during the incremental migration.
+publishing through directory-bound atomic filesystem operations. Campaign
+bootstrap and aggregate publication remain in Python during the incremental migration.
 
 Primary Dart/Flutter test classification lives in `failforge-dart`. The native
 test owner parses the complete JSON reporter stream after Runner shutdown and
@@ -478,11 +500,11 @@ that digest, so a same-length file replacement cannot manufacture a verdict.
 
 Author-test identities and catalogue comparison also live in `failforge-dart`.
 The native owner emits a bounded catalogue snapshot with normalized paths,
-group ancestry, source locations, multiplicities and diagnostics. The controller
-retains the passing baseline snapshot as opaque data. On subsequent attempts it
-passes that snapshot and the expected selection in the private attempt request,
-read before child startup. The request is limited to 64 MiB and rejects malformed
-or duplicate JSON fields.
+group ancestry, source locations, multiplicities and diagnostics. The native
+family owner retains the passing baseline snapshot and passes it with the expected
+selection to subsequent attempts in-process. Standalone attempts use the private
+request channel instead, read before child startup. That request is limited to
+64 MiB and rejects malformed or duplicate JSON fields.
 Baseline comparison therefore does not depend on reopening an already cleaned
 baseline working copy. Retained reporter data, observed identities and the
 structural catalogue view each have a separate 32 MiB accounting budget.
@@ -496,7 +518,7 @@ identities were observed. An incomplete catalogue remains unclassified unless a
 separate, unique ordinary test passed in the baseline and now has a source-bound
 failure outside the suppressed group. The attempt owner overrides classification
 with an infrastructure error when execution inputs change. Campaign-wide binding
-checks in the controller also guard original, dependency and tool inputs.
+checks in the native scheduler also guard original, dependency and tool inputs.
 
 Loader observations, suite selection and causal initialization decisions also
 live in `failforge-dart`. The owner reports the next required control and an

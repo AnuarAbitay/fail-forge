@@ -19,28 +19,29 @@ baseline catalogue and expected test selection to each native owner before it
 starts the test process. For an eligible loading failure, Rust requests the next
 original/mutant/original control through opaque state and validates its order and
 candidate binding. The native mutant owner executes those controls and checks
-input bindings between them. A native family owner runs the baseline, worker queue
-and final original control. The campaign controller retains profile family ordering,
-campaign-wide input checkpoints, cancellation and aggregate report assembly.
+input bindings between them. One native campaign owner schedules discovery,
+profile family ordering and execution input checkpoints. Shared family execution
+runs the baseline, worker queue and final original control. The Python controller
+retains preflight/bootstrap, cancellation forwarding and aggregate report assembly.
 
 Prepared package inspection, source and tool hashes, dependency bindings,
 snapshot copying and fresh attempt copying execute in Rust through
 `failforge-workspace`. Each campaign has its own native input client, including
-native family dispatch; native errors fail the operation without a Python fallback.
+native campaign dispatch; native errors fail the operation without a Python fallback.
 Copy requests retain the campaign workspace lease. Read-only source checks still
 execute after cancellation and report changed inputs as infrastructure failure.
 Registry allocation, leases, recovery and removal of owned copies also execute
 in Rust. Dart namespace scanning, copy rewrites, inverse proofs and read-only
 analyzer planning also execute in Rust through `failforge-dart` and the existing
 Runner. The native family owner retains its namespace-plan cache. The controller
-retains inherited descriptor capabilities, campaign context lifetimes, profile
-family ordering and aggregate report assembly.
+retains inherited descriptor capabilities, campaign context lifetimes and
+aggregate report assembly.
 
-Discovery also runs through one native owner. It starts the persistent
+The native campaign owner calls the shared discovery implementation. It starts the persistent
 `AdapterClient` directly, validates the handshake, complete discovery and each
 candidate, checks source-bound patches, drains the adapter and Runner, verifies
 unchanged inputs and publishes the transcript and receipt. The controller sends
-one private request while retaining the campaign lease; it neither starts the
+one campaign request while retaining the campaign lease; it neither starts the
 adapter helper nor re-parses its protocol journal on this production path.
 The receipt's `command` remains the reproducible helper recipe. Discovery
 artifacts include `payload.json`, `adapter-session.jsonl`, `adapter.stderr` and
@@ -77,7 +78,14 @@ proof. The Python bridge retains the workspace capabilities until completion;
 it does not repeat the patch checks, schedule those controls or rewrite that
 record. Private continuation state remains outside public JSON.
 
-Each selected family runs through one native scheduling operation. Rust checks
+Both direct and profile launches use one native scheduling operation. Rust first
+discovers every selected family, checks the profile's aggregate mutant limit,
+then runs families in the fixed order `classic`, `failure_mode`,
+`language_specific`. It verifies the original source and frozen execution inputs
+at phase boundaries; a failed phase stops later families. No Python discovery
+loop or family dispatch remains on this production path.
+
+Within each family Rust checks
 all candidates and frozen inputs, establishes a passing baseline, writes its
 catalogue, executes a bounded queue of one to four workers, and runs the final
 original control. Workers call shared native mutation and attempt functions
@@ -85,14 +93,16 @@ directly. Cancellation stops admission and waits for all active workers and thei
 temporary-copy cleanup. An empty direct campaign runs both original controls;
 an empty profile family skips author execution.
 
-The controller receives progress and completed records as bounded LF-framed JSON
-events, draining stderr concurrently. Each frame is limited to 64 MiB; the event
-count is limited to selected mutants plus nine. A terminal event commits the
-preceding raw bytes with SHA-256 and validates the completed count. Records arriving
+The controller receives discovery receipts, progress and completed records as
+bounded LF-framed JSON events, draining stderr concurrently. Each frame is limited
+to 64 MiB; the event count is bounded by the configured mutant cap plus per-family
+stage events. A terminal event commits the preceding raw bytes with SHA-256 and
+validates family and mutant coverage. Nested family completion has no separate
+byte commitment. Records arriving
 after cancellation remain in the partial report. If a progress or report callback
 fails, the controller requests cancellation and retains subsequent records without
 calling that failing publication path again. A successful native terminal still
-requires the outer input checks, workspace cleanup and final aggregate publication
+requires final source checks, workspace cleanup and aggregate publication
 before the campaign can report success.
 
 An attempt becomes terminal after source verification and cleanup. Cancellation
@@ -109,8 +119,8 @@ Configuration loading itself needs neither Python nor an SDK and never starts
 author tests. Python is still required for campaign execution. Profile generation
 runs through the native `failforge-profile` crate without Python or PyYAML. The native
 configuration library also exposes the direct settings and profile APIs for
-later migration stages. Profile family ordering, campaign preparation and aggregate
-reports still use the Python controller. Standalone diagnostic tools
+later migration stages. Initial preflight, snapshot/bootstrap lifecycle, final
+workspace cleanup and aggregate reports still use the Python controller. Standalone diagnostic tools
 retain their Python transcript implementation during migration; a native
 production error never falls back to that implementation.
 

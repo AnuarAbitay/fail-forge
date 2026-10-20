@@ -272,3 +272,208 @@ fn real_pipe_retries_after_backpressure_and_preserves_every_frame_byte() {
         format!("{:x}", Sha256::digest(&bytes[..split]))
     );
 }
+
+#[test]
+fn campaign_frames_share_one_sequence_and_digest_across_discovery_and_families() {
+    let mut stream = Stream::new(Vec::new());
+    for kind in [
+        "stage_started",
+        "discovery",
+        "discovery_finished",
+        "stage_finished",
+        "family_started",
+        "family_event",
+        "family_finished",
+    ] {
+        stream
+            .emit_campaign(json!({"kind":kind,"family":"classic","text":"Ж\n😀"}))
+            .unwrap();
+    }
+    let prefix = stream.writer.clone();
+    stream
+        .finish_campaign("completed", None, 2, 2, 3, Some(3))
+        .unwrap();
+    let events = rows(&stream.writer);
+    for (index, event) in events.iter().enumerate() {
+        assert_eq!(event["sequence"], index + 1);
+        assert_eq!(event["version"], 1);
+    }
+    assert_eq!(
+        events.last().unwrap(),
+        &json!({"version":1,"sequence":8,"kind":"terminal",
+            "status":"completed","error":null,"completedFamilies":2,"expectedFamilies":2,
+            "completedMutants":3,"expectedMutants":3,"eventCount":7,
+            "eventSha256":format!("{:x}",Sha256::digest(&prefix))})
+    );
+    assert!(
+        stream
+            .emit_campaign(json!({"kind":"family_started"}))
+            .is_err()
+    );
+    assert!(stream.emit(json!({"kind":"mutant"})).is_err());
+    assert!(stream.finish("completed", None, 3, 3).is_err());
+    assert!(
+        stream
+            .finish_campaign("completed", None, 2, 2, 3, Some(3))
+            .is_err()
+    );
+}
+
+#[test]
+fn campaign_envelopes_reject_foreign_kinds_reserved_fields_and_impossible_counts() {
+    let mut stream = Stream::new(Vec::new());
+    for event in [
+        json!([]),
+        json!(null),
+        json!({}),
+        json!({"kind":"terminal"}),
+        json!({"kind":"mutant"}),
+        json!({"kind":"baseline"}),
+        json!({"kind":"other"}),
+        json!({"kind":"discovery","sequence":1}),
+        json!({"kind":"family_event","version":1}),
+        json!({"kind":"family_finished","eventCount":1}),
+        json!({"kind":"discovery_finished","eventSha256":"forged"}),
+    ] {
+        assert!(stream.emit_campaign(event).is_err());
+    }
+    assert!(stream.emit(json!({"kind":"family_event"})).is_err());
+    for (status, families, expected_families, mutants, expected_mutants) in [
+        ("unknown", 0, 1, 0, None),
+        ("failed", 2, 1, 0, Some(0)),
+        ("failed", 0, 1, 2, Some(1)),
+        ("cancelled", 0, 1, 1, None),
+        ("completed", 0, 0, 0, None),
+        ("no_mutants", 0, 0, 0, None),
+    ] {
+        assert!(
+            stream
+                .finish_campaign(
+                    status,
+                    None,
+                    families,
+                    expected_families,
+                    mutants,
+                    expected_mutants
+                )
+                .is_err()
+        );
+    }
+    assert!(stream.writer.is_empty());
+    assert_eq!(stream.count, 0);
+    stream
+        .finish_campaign("failed", Some("discovery failed"), 0, 3, 0, None)
+        .unwrap();
+    let events = rows(&stream.writer);
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["expectedMutants"], Value::Null);
+    assert_eq!(events[0]["expectedFamilies"], 3);
+    assert_eq!(events[0]["error"], "discovery failed");
+    assert_eq!(
+        events[0]["eventSha256"],
+        format!("{:x}", Sha256::digest([]))
+    );
+}
+
+#[test]
+fn campaign_size_preflight_and_partial_writes_share_the_existing_poison_rules() {
+    let mut stream = Stream::new(Vec::new());
+    stream.limit = 24;
+    assert!(
+        stream
+            .emit_campaign(json!({"kind":"discovery","candidates":[]}))
+            .is_err()
+    );
+    assert!(
+        stream
+            .finish_campaign("cancelled", None, 0, 1, 0, None)
+            .is_err()
+    );
+    assert!(stream.writer.is_empty());
+    assert!(!stream.terminal);
+    stream.limit = MAX_FRAME;
+    stream
+        .finish_campaign("cancelled", None, 0, 1, 0, None)
+        .unwrap();
+
+    let mut broken = Stream::new(Sink {
+        fail_after: Some(5),
+        ..Sink::default()
+    });
+    assert!(
+        broken
+            .emit_campaign(json!({"kind":"family_event","event":{"kind":"mutant"}}))
+            .is_err()
+    );
+    assert_eq!(broken.count, 0);
+    assert_eq!(broken.writer.bytes.len(), 5);
+    assert!(
+        broken
+            .finish_campaign("failed", Some("write failed"), 0, 1, 0, Some(1))
+            .is_err()
+    );
+    assert!(broken.emit(json!({"kind":"mutant"})).is_err());
+    assert_eq!(broken.writer.bytes.len(), 5);
+
+    let mut terminal = Stream::new(Sink {
+        fail_after: Some(5),
+        ..Sink::default()
+    });
+    assert!(
+        terminal
+            .finish_campaign("completed", None, 1, 1, 1, Some(1))
+            .is_err()
+    );
+    assert!(
+        terminal
+            .finish_campaign("failed", None, 0, 1, 0, Some(1))
+            .is_err()
+    );
+    assert_eq!(terminal.writer.bytes.len(), 5);
+}
+
+#[test]
+fn oversized_discovery_can_close_its_stage_and_seal_the_unchanged_prefix() {
+    let mut stream = Stream::new(Vec::new());
+    stream.limit = 512;
+    stream
+        .emit_campaign(
+            json!({"kind":"stage_started","stage":"discovery_validation",
+            "family":"classic"}),
+        )
+        .unwrap();
+    let started = stream.writer.clone();
+    let error = stream
+        .emit_campaign(json!({"kind":"discovery","family":"classic",
+            "value":{"candidates":[],"padding":"x".repeat(512)}}))
+        .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert_eq!(stream.writer, started);
+    assert_eq!(stream.count, 1);
+    assert!(!stream.failed);
+
+    stream
+        .emit_campaign(
+            json!({"kind":"stage_finished","stage":"discovery_validation",
+            "family":"classic","wallSeconds":0.1}),
+        )
+        .unwrap();
+    let prefix = stream.writer.clone();
+    stream
+        .finish_campaign("failed", Some(&error.to_string()), 0, 1, 0, None)
+        .unwrap();
+
+    let events = rows(&stream.writer);
+    assert_eq!(events.len(), 3);
+    assert_eq!(events[0]["kind"], "stage_started");
+    assert_eq!(events[1]["kind"], "stage_finished");
+    assert_eq!(events[0]["stage"], events[1]["stage"]);
+    assert_eq!(events[0]["family"], events[1]["family"]);
+    assert_eq!(
+        events[2],
+        json!({"kind":"terminal","version":1,"sequence":3,"status":"failed",
+            "error":error.to_string(),"completedFamilies":0,"expectedFamilies":1,
+            "completedMutants":0,"expectedMutants":null,"eventCount":2,
+            "eventSha256":format!("{:x}",Sha256::digest(&prefix))})
+    );
+}
