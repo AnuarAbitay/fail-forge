@@ -89,7 +89,7 @@ const LOOP_TEST: &str = "import 'package:campaign_sample/value.dart';\nimport 'p
 fn profile() -> Value {
     json!({"mutations":{"classic":{"enabled":true,"operators":{"BOOLEAN_LITERAL_FLIP":true}},"failure_mode":{"enabled":true,"operators":{"EXCEPTION_AT_ENTRY":true}},"language_specific":{"enabled":true,"language":"dart","operators":{"NSM-001":true}}},"rules":{"include":["lib/value.dart"],"methods":["enabled","value","semantic"]},"workers":1,"timeouts":{"test":"2s","command":"30s"}})
 }
-fn summary_contract(summary: &Value, stdout: &[u8]) -> Result<()> {
+pub(crate) fn summary_contract(summary: &Value, stdout: &[u8]) -> Result<()> {
     ensure(
         summary["version"] == if summary["kind"] == "profile" { 2 } else { 1 },
         "unexpected report schema",

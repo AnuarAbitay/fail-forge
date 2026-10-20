@@ -135,6 +135,16 @@ observations of the original group, not an atomic proof about every descendant.
 The final `CleanupReport` records child reap, the group observation, signal
 attempts, errors, and output completion separately.
 
+On macOS, a failed group signal can report `EPERM` during `exit()`, before
+`waitid(WNOWAIT)` exposes the leader's terminal status. Retry is restricted to
+an initial complete census containing no ordinary live signal recipients
+(zombies, no members, or members carrying `INEXIT`). It yields the runtime and
+uses the current grace or forced-wait deadline; it does not restart either
+budget. A terminal owned leader and a fresh safe census are required before
+treating the signal as unnecessary. Ordinary live members, unknown membership,
+lost child ownership and probe errors retain the original signal error.
+`INEXIT` alone never establishes successful cleanup.
+
 `CleanupReport::is_complete()` requires all of the following:
 
 - The direct child was actually reaped.
@@ -428,6 +438,17 @@ rules. Applicability analysis calls the separate native discovery helper. A clos
 control channel cancels that owner and drains its adapter before releasing the
 lease. Generation verifies static evidence and unchanged inputs before atomic
 publication. Template mode skips the SDK entirely.
+
+Profile snapshot cleanup gives registry coordination and the campaign lease a
+shared one-second lock-acquisition budget. This covers descriptors inherited by
+an unrelated child between `fork` and `exec`; `CLOEXEC` does not close them before
+`exec`. Cleanup closes its own lease instead of unlocking the inherited open
+description. A real owner retains protection after the deadline. Directory and
+control-file identities are retained across waits and checked before deletion.
+An explicit failed close does not receive a second waiting budget in `Drop`;
+later explicit cleanup or recovery can retry. Startup recovery skips active
+campaign leases without waiting on each one. These limits bound lock waiting,
+not traversal or filesystem deletion.
 
 Primary Dart/Flutter test classification lives in `failforge-dart`. The native
 test owner parses the complete JSON reporter stream after Runner shutdown and

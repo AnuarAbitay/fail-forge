@@ -2,6 +2,7 @@
 mod benchmark;
 mod common;
 mod installer;
+mod public_regression;
 mod regression;
 mod semantic;
 
@@ -28,6 +29,8 @@ enum Commands {
     SemanticE2e(semantic::Options),
     /// Run sequential public CLI/profile, classification and cancellation fixtures.
     Regression(regression::Options),
+    /// Repeat explicitly selected archived public-project scopes.
+    PublicRegression(public_regression::Options),
 }
 
 fn main() -> std::process::ExitCode {
@@ -43,6 +46,7 @@ fn main() -> std::process::ExitCode {
         Commands::InstallTestFlutter { destination } => installer::install(&destination),
         Commands::SemanticE2e(options) => semantic::run(options),
         Commands::Regression(options) => regression::run(options),
+        Commands::PublicRegression(options) => public_regression::run(options),
     };
     match outcome {
         Ok(()) => std::process::ExitCode::SUCCESS,

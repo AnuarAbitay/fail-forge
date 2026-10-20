@@ -1,0 +1,1695 @@
+{
+  "complete": true,
+  "completedMutants": 5,
+  "error": null,
+  "expectedMutants": 5,
+  "failureModeScore": null,
+  "families": {
+    "classic": {
+      "complete": true,
+      "enabled": true,
+      "expectedMutants": 1,
+      "status": "completed",
+      "summary": {
+        "allDiscoveredMutantsProcessed": true,
+        "baseline": {
+          "command": [
+            "/fixture/install/target/release/failforge",
+            "run",
+            "--timeout",
+            "30000ms",
+            "--cwd",
+            "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-e12dddbfc02b40b09c70680cb2845524/package",
+            "--capture-dir",
+            "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/classic/baseline/capture",
+            "--test-reporter",
+            "dart",
+            "--",
+            "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+            "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-e12dddbfc02b40b09c70680cb2845524/package/.dart_tool/package_config.json",
+            "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+            "--reporter",
+            "json",
+            "--platform",
+            "vm",
+            "--concurrency",
+            "1",
+            "--timeout",
+            "2000ms"
+          ],
+          "compileChecked": true,
+          "executionInputHashes": {
+            ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+            ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+            "lib/value.dart": "ca737a1a494d381bfb90e1a02d1915b9662f4858ca138558f4a5c9dfd3a4e212",
+            "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+            "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+            "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+            "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+            "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+          },
+          "exitCode": 0,
+          "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-e12dddbfc02b40b09c70680cb2845524/package",
+          "loadFailures": [],
+          "namespaceIsolation": null,
+          "outcome": "SURVIVED",
+          "reason": "user_tests_passed",
+          "reporterComplete": true,
+          "runner": {
+            "cause": "ProcessCompleted",
+            "cleanup": "complete",
+            "status": "exit:0"
+          },
+          "stdoutSha256": "b3b285e06b300651e20e4dad5b4a2ceb629cff3458669322fdbd67d668689064",
+          "temporaryCopyCleaned": true,
+          "testIdentities": [
+            [
+              "test/value_test.dart",
+              "async value"
+            ],
+            [
+              "test/value_test.dart",
+              "enabled"
+            ],
+            [
+              "test/value_test.dart",
+              "semantic fallback"
+            ]
+          ],
+          "tests": {
+            "failed": 0,
+            "hidden": 0,
+            "loadingFailed": 0,
+            "loadingPassed": 1,
+            "passed": 3,
+            "skipped": 0,
+            "started": 3
+          },
+          "wallSeconds": 3.939452583
+        },
+        "complete": true,
+        "completedMutants": 1,
+        "error": null,
+        "expectedMutants": 1,
+        "failureModeScore": null,
+        "family": "classic",
+        "mutationScore": {
+          "denominator": 1,
+          "excluded": {},
+          "family": "classic",
+          "killed": 1,
+          "percent": 100.0,
+          "survived": 0
+        },
+        "notApplicableOperators": [
+          "ARGUMENT_PERMUTATION",
+          "ARGUMENT_REPLACEMENT",
+          "ARITHMETIC_OPERAND_REMOVAL",
+          "ARITHMETIC_OPERATOR_REPLACEMENT",
+          "BITWISE_NEGATION",
+          "BITWISE_OPERATOR_REPLACEMENT",
+          "BOOLEAN_NEGATION",
+          "BRANCH_BODY_REMOVAL",
+          "BREAK_CONTINUE_MUTATION",
+          "COLLECTION_LITERAL_MUTATION",
+          "COMPARISON_NEGATION",
+          "COMPARISON_OPERATOR_REPLACEMENT",
+          "COMPOUND_ASSIGNMENT_REPLACEMENT",
+          "CONDITIONAL_EXPRESSION_MUTATION",
+          "CONDITIONAL_NEGATION",
+          "CONDITION_FORCING",
+          "EXCEPTION_REPLACEMENT",
+          "FUNCTION_CALL_REMOVAL",
+          "INCREMENT_DECREMENT_REPLACEMENT",
+          "LOGICAL_CONNECTOR_SWAP",
+          "LOGICAL_OPERAND_REMOVAL",
+          "NUMERIC_LITERAL_REPLACEMENT",
+          "NUMERIC_NEGATION",
+          "RELATIONAL_BOUNDARY",
+          "RETURN_VALUE_REPLACEMENT",
+          "SHIFT_OPERATOR_REPLACEMENT",
+          "STATEMENT_DELETION",
+          "STRING_LITERAL_REPLACEMENT",
+          "SWITCH_CASE_MUTATION",
+          "THROW_REMOVAL",
+          "VARIABLE_REPLACEMENT"
+        ],
+        "originalControls": [
+          {
+            "command": [
+              "/fixture/install/target/release/failforge",
+              "run",
+              "--timeout",
+              "30000ms",
+              "--cwd",
+              "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-cad320cc3d1049f39d8c2086270e8b32/package",
+              "--capture-dir",
+              "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/classic/original-after/capture",
+              "--test-reporter",
+              "dart",
+              "--",
+              "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+              "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-cad320cc3d1049f39d8c2086270e8b32/package/.dart_tool/package_config.json",
+              "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+              "--reporter",
+              "json",
+              "--platform",
+              "vm",
+              "--concurrency",
+              "1",
+              "--timeout",
+              "2000ms"
+            ],
+            "compileChecked": true,
+            "executionInputHashes": {
+              ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+              ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+              "lib/value.dart": "ca737a1a494d381bfb90e1a02d1915b9662f4858ca138558f4a5c9dfd3a4e212",
+              "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+              "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+              "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+              "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+              "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+            },
+            "exitCode": 0,
+            "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-cad320cc3d1049f39d8c2086270e8b32/package",
+            "loadFailures": [],
+            "namespaceIsolation": null,
+            "outcome": "SURVIVED",
+            "reason": "user_tests_passed",
+            "reporterComplete": true,
+            "runner": {
+              "cause": "ProcessCompleted",
+              "cleanup": "complete",
+              "status": "exit:0"
+            },
+            "stdoutSha256": "807759344012940430ce76c8d5553e0284a749770e45ec85d5098441dd862e57",
+            "temporaryCopyCleaned": true,
+            "testIdentities": [
+              [
+                "test/value_test.dart",
+                "async value"
+              ],
+              [
+                "test/value_test.dart",
+                "enabled"
+              ],
+              [
+                "test/value_test.dart",
+                "semantic fallback"
+              ]
+            ],
+            "tests": {
+              "failed": 0,
+              "hidden": 0,
+              "loadingFailed": 0,
+              "loadingPassed": 1,
+              "passed": 3,
+              "skipped": 0,
+              "started": 3
+            },
+            "wallSeconds": 3.86907375
+          }
+        ],
+        "originalProjectFilesUnchanged": true,
+        "outcomeCounts": {
+          "KILLED": 1
+        },
+        "outcomeReasonCounts": {
+          "KILLED": {
+            "user_test_failure": 1
+          }
+        },
+        "output": "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/classic",
+        "profileComplete": true,
+        "reasonCounts": {
+          "user_test_failure": 1
+        },
+        "records": [
+          {
+            "category": "boolean",
+            "command": [
+              "/fixture/install/target/release/failforge",
+              "run",
+              "--timeout",
+              "30000ms",
+              "--cwd",
+              "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-311718a2b7ad46f6bcc399d13144c07e/package",
+              "--capture-dir",
+              "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/classic/mutants/00b430bab2d5cd820c6962e985abe5a8643a654abd2dfbe8f835c9c39934c6cd/capture",
+              "--test-reporter",
+              "dart",
+              "--",
+              "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+              "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-311718a2b7ad46f6bcc399d13144c07e/package/.dart_tool/package_config.json",
+              "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+              "--reporter",
+              "json",
+              "--platform",
+              "vm",
+              "--concurrency",
+              "1",
+              "--timeout",
+              "2000ms"
+            ],
+            "compileChecked": true,
+            "edit": {
+              "expected": "true",
+              "lengthBytes": 4,
+              "offsetBytes": 18,
+              "replacement": "false"
+            },
+            "executionInputHashes": {
+              ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+              ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+              "lib/value.dart": "6b668d087d471aadd8ae0bd1bed9cbd26a47d89e1b6826eb5f23e336a6a64ddf",
+              "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+              "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+              "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+              "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+              "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+            },
+            "exitCode": 1,
+            "family": "classic",
+            "file": "lib/value.dart",
+            "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-311718a2b7ad46f6bcc399d13144c07e/package",
+            "loadFailures": [],
+            "mutantId": "00b430bab2d5cd820c6962e985abe5a8643a654abd2dfbe8f835c9c39934c6cd",
+            "namespaceIsolation": null,
+            "operatorId": "BOOLEAN_LITERAL_FLIP",
+            "outcome": "KILLED",
+            "reason": "user_test_failure",
+            "recordKind": "mutation",
+            "reporterComplete": true,
+            "runner": {
+              "cause": "ProcessCompleted",
+              "cleanup": "complete",
+              "status": "exit:1"
+            },
+            "stdoutSha256": "6008a6d27109598cdb227ee37c6dcaa1305ef99ce406fd9ef195b76791cb6154",
+            "temporaryCopyCleaned": true,
+            "testIdentities": [
+              [
+                "test/value_test.dart",
+                "async value"
+              ],
+              [
+                "test/value_test.dart",
+                "enabled"
+              ],
+              [
+                "test/value_test.dart",
+                "semantic fallback"
+              ]
+            ],
+            "tests": {
+              "failed": 1,
+              "hidden": 0,
+              "loadingFailed": 0,
+              "loadingPassed": 1,
+              "passed": 2,
+              "skipped": 0,
+              "started": 3
+            },
+            "validation": {
+              "applicable": true,
+              "baselineDiagnostics": [],
+              "compileChecked": false,
+              "diagnostics": [],
+              "durationMicros": 15047,
+              "mutantId": "00b430bab2d5cd820c6962e985abe5a8643a654abd2dfbe8f835c9c39934c6cd",
+              "semanticValid": true,
+              "syntaxValid": true,
+              "valid": true,
+              "validation": "valid"
+            },
+            "wallSeconds": 3.89702
+          }
+        ],
+        "resultsByClassicalCategory": {
+          "boolean": {
+            "KILLED": 1
+          }
+        },
+        "resultsByOperator": {
+          "BOOLEAN_LITERAL_FLIP": {
+            "KILLED": 1
+          }
+        },
+        "runId": "d66cde3ac804df89026ed1f156c48aad",
+        "status": "completed",
+        "temporarySnapshotCleaned": true,
+        "timeoutKindCounts": {},
+        "timings": {
+          "baseline": 3.9507477079999997,
+          "discovery_validation": 4.5158745,
+          "mutations": 3.916201416,
+          "original_after": 3.873011541,
+          "verify_discovery_inputs": 0.371917542,
+          "verify_execution_inputs": 0.370973667,
+          "verify_inputs": 0.371951375
+        },
+        "version": 1,
+        "wallSeconds": 12.521738208,
+        "workspaceCleanupDeferred": false,
+        "workspaceDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5",
+        "workspaceRecovery": {
+          "recovered": [],
+          "skipped": []
+        }
+      }
+    },
+    "failure_mode": {
+      "complete": true,
+      "enabled": true,
+      "expectedMutants": 3,
+      "status": "completed",
+      "summary": {
+        "baseline": {
+          "command": [
+            "/fixture/install/target/release/failforge",
+            "run",
+            "--timeout",
+            "30000ms",
+            "--cwd",
+            "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-036419ff1f6b4669a97522f5d4c2a5f8/package",
+            "--capture-dir",
+            "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/failure_mode/baseline/capture",
+            "--test-reporter",
+            "dart",
+            "--",
+            "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+            "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-036419ff1f6b4669a97522f5d4c2a5f8/package/.dart_tool/package_config.json",
+            "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+            "--reporter",
+            "json",
+            "--platform",
+            "vm",
+            "--concurrency",
+            "1",
+            "--timeout",
+            "2000ms"
+          ],
+          "compileChecked": true,
+          "executionInputHashes": {
+            ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+            ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+            "lib/value.dart": "ca737a1a494d381bfb90e1a02d1915b9662f4858ca138558f4a5c9dfd3a4e212",
+            "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+            "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+            "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+            "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+            "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+          },
+          "exitCode": 0,
+          "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-036419ff1f6b4669a97522f5d4c2a5f8/package",
+          "loadFailures": [],
+          "namespaceIsolation": null,
+          "outcome": "SURVIVED",
+          "reason": "user_tests_passed",
+          "reporterComplete": true,
+          "runner": {
+            "cause": "ProcessCompleted",
+            "cleanup": "complete",
+            "status": "exit:0"
+          },
+          "stdoutSha256": "f559c8ab4ee308cd79c05805228ee13f7dc71c1bc6b192a8e3a4386c4a810495",
+          "temporaryCopyCleaned": true,
+          "testIdentities": [
+            [
+              "test/value_test.dart",
+              "async value"
+            ],
+            [
+              "test/value_test.dart",
+              "enabled"
+            ],
+            [
+              "test/value_test.dart",
+              "semantic fallback"
+            ]
+          ],
+          "tests": {
+            "failed": 0,
+            "hidden": 0,
+            "loadingFailed": 0,
+            "loadingPassed": 1,
+            "passed": 3,
+            "skipped": 0,
+            "started": 3
+          },
+          "wallSeconds": 3.878027833
+        },
+        "complete": true,
+        "completedMutants": 3,
+        "error": null,
+        "expectedMutants": 3,
+        "failureModeScore": {
+          "denominator": 3,
+          "excluded": {},
+          "family": "failure_mode",
+          "killed": 3,
+          "percent": 100.0,
+          "survived": 0
+        },
+        "family": "failure_mode",
+        "mutationScore": null,
+        "originalControls": [
+          {
+            "command": [
+              "/fixture/install/target/release/failforge",
+              "run",
+              "--timeout",
+              "30000ms",
+              "--cwd",
+              "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-b28a46f67ec64e4ea13ee24b5d174881/package",
+              "--capture-dir",
+              "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/failure_mode/original-after/capture",
+              "--test-reporter",
+              "dart",
+              "--",
+              "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+              "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-b28a46f67ec64e4ea13ee24b5d174881/package/.dart_tool/package_config.json",
+              "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+              "--reporter",
+              "json",
+              "--platform",
+              "vm",
+              "--concurrency",
+              "1",
+              "--timeout",
+              "2000ms"
+            ],
+            "compileChecked": true,
+            "executionInputHashes": {
+              ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+              ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+              "lib/value.dart": "ca737a1a494d381bfb90e1a02d1915b9662f4858ca138558f4a5c9dfd3a4e212",
+              "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+              "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+              "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+              "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+              "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+            },
+            "exitCode": 0,
+            "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-b28a46f67ec64e4ea13ee24b5d174881/package",
+            "loadFailures": [],
+            "namespaceIsolation": null,
+            "outcome": "SURVIVED",
+            "reason": "user_tests_passed",
+            "reporterComplete": true,
+            "runner": {
+              "cause": "ProcessCompleted",
+              "cleanup": "complete",
+              "status": "exit:0"
+            },
+            "stdoutSha256": "d2d2c6ee3b90c64a3369742c505a4ef58066a40dac867cc9c1addcbbe4da884c",
+            "temporaryCopyCleaned": true,
+            "testIdentities": [
+              [
+                "test/value_test.dart",
+                "async value"
+              ],
+              [
+                "test/value_test.dart",
+                "enabled"
+              ],
+              [
+                "test/value_test.dart",
+                "semantic fallback"
+              ]
+            ],
+            "tests": {
+              "failed": 0,
+              "hidden": 0,
+              "loadingFailed": 0,
+              "loadingPassed": 1,
+              "passed": 3,
+              "skipped": 0,
+              "started": 3
+            },
+            "wallSeconds": 3.877471708
+          }
+        ],
+        "originalProjectFilesUnchanged": true,
+        "outcomeCounts": {
+          "KILLED": 3
+        },
+        "output": "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/failure_mode",
+        "profileComplete": true,
+        "reasonCounts": {
+          "user_test_failure": 3
+        },
+        "records": [
+          {
+            "command": [
+              "/fixture/install/target/release/failforge",
+              "run",
+              "--timeout",
+              "30000ms",
+              "--cwd",
+              "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-2506bb1f4f294294a75c5e4a2fc15136/package",
+              "--capture-dir",
+              "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/failure_mode/mutants/02c392deee412b1e04806077edf58fd958459367951ede84e04848517ce64911/capture",
+              "--test-reporter",
+              "dart",
+              "--",
+              "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+              "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-2506bb1f4f294294a75c5e4a2fc15136/package/.dart_tool/package_config.json",
+              "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+              "--reporter",
+              "json",
+              "--platform",
+              "vm",
+              "--concurrency",
+              "1",
+              "--timeout",
+              "2000ms"
+            ],
+            "compileChecked": true,
+            "edit": {
+              "expected": "=> value ?? 'fallback';",
+              "lengthBytes": 23,
+              "offsetBytes": 88,
+              "replacement": "{ throw StateError('FAILFORGE_EXCEPTION_AT_ENTRY'); }"
+            },
+            "executionInputHashes": {
+              ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+              ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+              "lib/value.dart": "088a5d79457a81ac2ec8f1330921c5fe7dab0ba7284ce0ded535bf154c319fb3",
+              "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+              "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+              "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+              "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+              "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+            },
+            "exitCode": 1,
+            "family": "failure_mode",
+            "file": "lib/value.dart",
+            "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-2506bb1f4f294294a75c5e4a2fc15136/package",
+            "loadFailures": [],
+            "mutantId": "02c392deee412b1e04806077edf58fd958459367951ede84e04848517ce64911",
+            "namespaceIsolation": null,
+            "operatorId": "EXCEPTION_AT_ENTRY",
+            "outcome": "KILLED",
+            "reason": "user_test_failure",
+            "recordKind": "mutation",
+            "reporterComplete": true,
+            "runner": {
+              "cause": "ProcessCompleted",
+              "cleanup": "complete",
+              "status": "exit:1"
+            },
+            "stdoutSha256": "a425bb79d5c5f9eb4606a53c25db67ab1aa00913e38b617e49f5d6c7b899e439",
+            "temporaryCopyCleaned": true,
+            "testIdentities": [
+              [
+                "test/value_test.dart",
+                "async value"
+              ],
+              [
+                "test/value_test.dart",
+                "enabled"
+              ],
+              [
+                "test/value_test.dart",
+                "semantic fallback"
+              ]
+            ],
+            "tests": {
+              "failed": 1,
+              "hidden": 0,
+              "loadingFailed": 0,
+              "loadingPassed": 1,
+              "passed": 2,
+              "skipped": 0,
+              "started": 3
+            },
+            "validation": {
+              "applicable": true,
+              "baselineDiagnostics": [],
+              "compileChecked": false,
+              "diagnostics": [],
+              "durationMicros": 1749,
+              "mutantId": "02c392deee412b1e04806077edf58fd958459367951ede84e04848517ce64911",
+              "semanticValid": true,
+              "syntaxValid": true,
+              "valid": true,
+              "validation": "valid"
+            },
+            "wallSeconds": 3.909376208
+          },
+          {
+            "command": [
+              "/fixture/install/target/release/failforge",
+              "run",
+              "--timeout",
+              "30000ms",
+              "--cwd",
+              "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-0db3d85a77574a9e9b1f37c83ea0e16f/package",
+              "--capture-dir",
+              "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/failure_mode/mutants/2e2cd31f6e24ba2a31226ed8f16285f2689f26cbfb5feb9e75655f0c816283ec/capture",
+              "--test-reporter",
+              "dart",
+              "--",
+              "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+              "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-0db3d85a77574a9e9b1f37c83ea0e16f/package/.dart_tool/package_config.json",
+              "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+              "--reporter",
+              "json",
+              "--platform",
+              "vm",
+              "--concurrency",
+              "1",
+              "--timeout",
+              "2000ms"
+            ],
+            "compileChecked": true,
+            "edit": {
+              "expected": "async => 7;",
+              "lengthBytes": 11,
+              "offsetBytes": 44,
+              "replacement": "async { throw StateError('FAILFORGE_EXCEPTION_AT_ENTRY'); }"
+            },
+            "executionInputHashes": {
+              ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+              ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+              "lib/value.dart": "b8586297f99e0b773c97fde16aac0dfe0718678416534c9a7481ccc81f2b455d",
+              "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+              "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+              "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+              "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+              "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+            },
+            "exitCode": 1,
+            "family": "failure_mode",
+            "file": "lib/value.dart",
+            "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-0db3d85a77574a9e9b1f37c83ea0e16f/package",
+            "loadFailures": [],
+            "mutantId": "2e2cd31f6e24ba2a31226ed8f16285f2689f26cbfb5feb9e75655f0c816283ec",
+            "namespaceIsolation": null,
+            "operatorId": "EXCEPTION_AT_ENTRY",
+            "outcome": "KILLED",
+            "reason": "user_test_failure",
+            "recordKind": "mutation",
+            "reporterComplete": true,
+            "runner": {
+              "cause": "ProcessCompleted",
+              "cleanup": "complete",
+              "status": "exit:1"
+            },
+            "stdoutSha256": "a039c49eef53b395501bc6de165c52b89580d5135c42f5be2557bf0823f4a9a2",
+            "temporaryCopyCleaned": true,
+            "testIdentities": [
+              [
+                "test/value_test.dart",
+                "async value"
+              ],
+              [
+                "test/value_test.dart",
+                "enabled"
+              ],
+              [
+                "test/value_test.dart",
+                "semantic fallback"
+              ]
+            ],
+            "tests": {
+              "failed": 1,
+              "hidden": 0,
+              "loadingFailed": 0,
+              "loadingPassed": 1,
+              "passed": 2,
+              "skipped": 0,
+              "started": 3
+            },
+            "validation": {
+              "applicable": true,
+              "baselineDiagnostics": [],
+              "compileChecked": false,
+              "diagnostics": [],
+              "durationMicros": 1876,
+              "mutantId": "2e2cd31f6e24ba2a31226ed8f16285f2689f26cbfb5feb9e75655f0c816283ec",
+              "semanticValid": true,
+              "syntaxValid": true,
+              "valid": true,
+              "validation": "valid"
+            },
+            "wallSeconds": 3.873934375
+          },
+          {
+            "command": [
+              "/fixture/install/target/release/failforge",
+              "run",
+              "--timeout",
+              "30000ms",
+              "--cwd",
+              "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-1fe90a5e89c84f8091a4da035c7c598f/package",
+              "--capture-dir",
+              "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/failure_mode/mutants/82f98fa029eac9233f13469d6f8de6a2928e96899b45ea7dfec4ab0387daeaa7/capture",
+              "--test-reporter",
+              "dart",
+              "--",
+              "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+              "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-1fe90a5e89c84f8091a4da035c7c598f/package/.dart_tool/package_config.json",
+              "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+              "--reporter",
+              "json",
+              "--platform",
+              "vm",
+              "--concurrency",
+              "1",
+              "--timeout",
+              "2000ms"
+            ],
+            "compileChecked": true,
+            "edit": {
+              "expected": "=> true;",
+              "lengthBytes": 8,
+              "offsetBytes": 15,
+              "replacement": "{ throw StateError('FAILFORGE_EXCEPTION_AT_ENTRY'); }"
+            },
+            "executionInputHashes": {
+              ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+              ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+              "lib/value.dart": "03967c291faac6643e9618aa446989c399e252e03879b82e5dc9c512815a82f1",
+              "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+              "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+              "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+              "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+              "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+            },
+            "exitCode": 1,
+            "family": "failure_mode",
+            "file": "lib/value.dart",
+            "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-1fe90a5e89c84f8091a4da035c7c598f/package",
+            "loadFailures": [],
+            "mutantId": "82f98fa029eac9233f13469d6f8de6a2928e96899b45ea7dfec4ab0387daeaa7",
+            "namespaceIsolation": null,
+            "operatorId": "EXCEPTION_AT_ENTRY",
+            "outcome": "KILLED",
+            "reason": "user_test_failure",
+            "recordKind": "mutation",
+            "reporterComplete": true,
+            "runner": {
+              "cause": "ProcessCompleted",
+              "cleanup": "complete",
+              "status": "exit:1"
+            },
+            "stdoutSha256": "552f40d178a98f6214756a6bd51f87b567d291e311363a5ba634f99461df951b",
+            "temporaryCopyCleaned": true,
+            "testIdentities": [
+              [
+                "test/value_test.dart",
+                "async value"
+              ],
+              [
+                "test/value_test.dart",
+                "enabled"
+              ],
+              [
+                "test/value_test.dart",
+                "semantic fallback"
+              ]
+            ],
+            "tests": {
+              "failed": 1,
+              "hidden": 0,
+              "loadingFailed": 0,
+              "loadingPassed": 1,
+              "passed": 2,
+              "skipped": 0,
+              "started": 3
+            },
+            "validation": {
+              "applicable": true,
+              "baselineDiagnostics": [],
+              "compileChecked": false,
+              "diagnostics": [],
+              "durationMicros": 20679,
+              "mutantId": "82f98fa029eac9233f13469d6f8de6a2928e96899b45ea7dfec4ab0387daeaa7",
+              "semanticValid": true,
+              "syntaxValid": true,
+              "valid": true,
+              "validation": "valid"
+            },
+            "wallSeconds": 3.911541708
+          }
+        ],
+        "runId": "d66cde3ac804df89026ed1f156c48aad",
+        "status": "completed",
+        "temporarySnapshotCleaned": true,
+        "timings": {
+          "baseline": 3.889492875,
+          "discovery_validation": 5.069191416,
+          "mutations": 11.756568792,
+          "original_after": 3.880890584,
+          "verify_discovery_inputs": 0.373275667,
+          "verify_execution_inputs": 0.371548125,
+          "verify_inputs": 0.371727833
+        },
+        "version": 1,
+        "wallSeconds": 20.306940625,
+        "workspaceCleanupDeferred": false,
+        "workspaceDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5",
+        "workspaceRecovery": {
+          "recovered": [],
+          "skipped": []
+        }
+      }
+    },
+    "language_specific": {
+      "complete": true,
+      "enabled": true,
+      "expectedMutants": 1,
+      "language": "dart",
+      "status": "completed",
+      "summary": {
+        "baseline": {
+          "command": [
+            "/fixture/install/target/release/failforge",
+            "run",
+            "--timeout",
+            "30000ms",
+            "--cwd",
+            "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-b1387e96deae4a4f9bee7ce64cb185c1/package",
+            "--capture-dir",
+            "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/language_specific/baseline/capture",
+            "--test-reporter",
+            "dart",
+            "--",
+            "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+            "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-b1387e96deae4a4f9bee7ce64cb185c1/package/.dart_tool/package_config.json",
+            "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+            "--reporter",
+            "json",
+            "--platform",
+            "vm",
+            "--concurrency",
+            "1",
+            "--timeout",
+            "2000ms"
+          ],
+          "compileChecked": true,
+          "executionInputHashes": {
+            ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+            ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+            "lib/value.dart": "ca737a1a494d381bfb90e1a02d1915b9662f4858ca138558f4a5c9dfd3a4e212",
+            "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+            "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+            "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+            "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+            "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+          },
+          "exitCode": 0,
+          "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-b1387e96deae4a4f9bee7ce64cb185c1/package",
+          "loadFailures": [],
+          "namespaceIsolation": null,
+          "outcome": "SURVIVED",
+          "reason": "user_tests_passed",
+          "reporterComplete": true,
+          "runner": {
+            "cause": "ProcessCompleted",
+            "cleanup": "complete",
+            "status": "exit:0"
+          },
+          "stdoutSha256": "a9422b19dfbc2dc3e59a8a983c04534b34feca2fe0de27f56891abc5d81ad50b",
+          "temporaryCopyCleaned": true,
+          "testIdentities": [
+            [
+              "test/value_test.dart",
+              "async value"
+            ],
+            [
+              "test/value_test.dart",
+              "enabled"
+            ],
+            [
+              "test/value_test.dart",
+              "semantic fallback"
+            ]
+          ],
+          "tests": {
+            "failed": 0,
+            "hidden": 0,
+            "loadingFailed": 0,
+            "loadingPassed": 1,
+            "passed": 3,
+            "skipped": 0,
+            "started": 3
+          },
+          "wallSeconds": 3.9023705
+        },
+        "complete": true,
+        "completedMutants": 1,
+        "error": null,
+        "expectedMutants": 1,
+        "failureModeScore": null,
+        "family": "language_specific",
+        "language": "dart",
+        "languageSpecificScore": {
+          "denominator": 1,
+          "excluded": {},
+          "family": "language_specific",
+          "killed": 1,
+          "percent": 100.0,
+          "survived": 0
+        },
+        "mutationScore": null,
+        "originalControls": [
+          {
+            "command": [
+              "/fixture/install/target/release/failforge",
+              "run",
+              "--timeout",
+              "30000ms",
+              "--cwd",
+              "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-64f66590ee5f42eba08c3cf32e93c9f1/package",
+              "--capture-dir",
+              "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/language_specific/original-after/capture",
+              "--test-reporter",
+              "dart",
+              "--",
+              "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+              "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-64f66590ee5f42eba08c3cf32e93c9f1/package/.dart_tool/package_config.json",
+              "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+              "--reporter",
+              "json",
+              "--platform",
+              "vm",
+              "--concurrency",
+              "1",
+              "--timeout",
+              "2000ms"
+            ],
+            "compileChecked": true,
+            "executionInputHashes": {
+              ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+              ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+              "lib/value.dart": "ca737a1a494d381bfb90e1a02d1915b9662f4858ca138558f4a5c9dfd3a4e212",
+              "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+              "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+              "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+              "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+              "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+            },
+            "exitCode": 0,
+            "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-64f66590ee5f42eba08c3cf32e93c9f1/package",
+            "loadFailures": [],
+            "namespaceIsolation": null,
+            "outcome": "SURVIVED",
+            "reason": "user_tests_passed",
+            "reporterComplete": true,
+            "runner": {
+              "cause": "ProcessCompleted",
+              "cleanup": "complete",
+              "status": "exit:0"
+            },
+            "stdoutSha256": "f5c8179b7ceb40e3b5f631dfeb996603fa84f7dc91ab955afc5ddf5ed2409f3b",
+            "temporaryCopyCleaned": true,
+            "testIdentities": [
+              [
+                "test/value_test.dart",
+                "async value"
+              ],
+              [
+                "test/value_test.dart",
+                "enabled"
+              ],
+              [
+                "test/value_test.dart",
+                "semantic fallback"
+              ]
+            ],
+            "tests": {
+              "failed": 0,
+              "hidden": 0,
+              "loadingFailed": 0,
+              "loadingPassed": 1,
+              "passed": 3,
+              "skipped": 0,
+              "started": 3
+            },
+            "wallSeconds": 3.91926275
+          }
+        ],
+        "originalProjectFilesUnchanged": true,
+        "outcomeCounts": {
+          "KILLED": 1
+        },
+        "output": "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/language_specific",
+        "profileComplete": true,
+        "reasonCounts": {
+          "user_test_failure": 1
+        },
+        "records": [
+          {
+            "category": "null_safety",
+            "command": [
+              "/fixture/install/target/release/failforge",
+              "run",
+              "--timeout",
+              "30000ms",
+              "--cwd",
+              "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-c518ebb499154402a65f5adebea19ddf/package",
+              "--capture-dir",
+              "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/language_specific/mutants/3ad208bcbe0cbd13c9a75f22403bf7b0cea502869c7fa450c108477f0f109279/capture",
+              "--test-reporter",
+              "dart",
+              "--",
+              "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+              "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-c518ebb499154402a65f5adebea19ddf/package/.dart_tool/package_config.json",
+              "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+              "--reporter",
+              "json",
+              "--platform",
+              "vm",
+              "--concurrency",
+              "1",
+              "--timeout",
+              "2000ms"
+            ],
+            "compileChecked": true,
+            "edit": {
+              "expected": " ?? 'fallback'",
+              "lengthBytes": 14,
+              "offsetBytes": 96,
+              "replacement": ""
+            },
+            "executionInputHashes": {
+              ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+              ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+              "lib/value.dart": "ac95a2b28577861552142718252c07b10ce229afeabf726183a919ace47c8301",
+              "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+              "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+              "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+              "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+              "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+            },
+            "exitCode": 1,
+            "family": "language_specific",
+            "file": "lib/value.dart",
+            "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-c518ebb499154402a65f5adebea19ddf/package",
+            "language": "dart",
+            "loadFailures": [],
+            "mutantId": "3ad208bcbe0cbd13c9a75f22403bf7b0cea502869c7fa450c108477f0f109279",
+            "namespaceIsolation": null,
+            "operatorId": "NSM-001",
+            "outcome": "KILLED",
+            "reason": "user_test_failure",
+            "recordKind": "mutation",
+            "reporterComplete": true,
+            "runner": {
+              "cause": "ProcessCompleted",
+              "cleanup": "complete",
+              "status": "exit:1"
+            },
+            "stdoutSha256": "8395232443ff4e8f3135cbad940f5283e43cbb82ec0bce9e50d6f592194c6e2a",
+            "temporaryCopyCleaned": true,
+            "testIdentities": [
+              [
+                "test/value_test.dart",
+                "async value"
+              ],
+              [
+                "test/value_test.dart",
+                "enabled"
+              ],
+              [
+                "test/value_test.dart",
+                "semantic fallback"
+              ]
+            ],
+            "tests": {
+              "failed": 1,
+              "hidden": 0,
+              "loadingFailed": 0,
+              "loadingPassed": 1,
+              "passed": 2,
+              "skipped": 0,
+              "started": 3
+            },
+            "validation": {
+              "applicable": true,
+              "baselineDiagnostics": [],
+              "compileChecked": false,
+              "diagnostics": [],
+              "durationMicros": 2805,
+              "mutantId": "3ad208bcbe0cbd13c9a75f22403bf7b0cea502869c7fa450c108477f0f109279",
+              "semanticValid": true,
+              "syntaxValid": true,
+              "valid": true,
+              "validation": "valid"
+            },
+            "wallSeconds": 3.8947364159999998
+          }
+        ],
+        "runId": "d66cde3ac804df89026ed1f156c48aad",
+        "status": "completed",
+        "temporarySnapshotCleaned": true,
+        "timings": {
+          "baseline": 3.914395375,
+          "discovery_validation": 4.530091792,
+          "mutations": 3.915431458,
+          "original_after": 3.9225489590000002,
+          "verify_discovery_inputs": 0.399618666,
+          "verify_execution_inputs": 0.371984209,
+          "verify_inputs": 0.373409334
+        },
+        "version": 1,
+        "wallSeconds": 12.536979958,
+        "workspaceCleanupDeferred": false,
+        "workspaceDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5",
+        "workspaceRecovery": {
+          "recovered": [],
+          "skipped": []
+        }
+      }
+    }
+  },
+  "kind": "profile",
+  "languageSpecificScore": null,
+  "mutationScore": null,
+  "originalProjectFilesUnchanged": true,
+  "outcomeCounts": {
+    "KILLED": 5
+  },
+  "output": "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families",
+  "reasonCounts": {
+    "user_test_failure": 5
+  },
+  "records": [
+    {
+      "category": "boolean",
+      "command": [
+        "/fixture/install/target/release/failforge",
+        "run",
+        "--timeout",
+        "30000ms",
+        "--cwd",
+        "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-311718a2b7ad46f6bcc399d13144c07e/package",
+        "--capture-dir",
+        "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/classic/mutants/00b430bab2d5cd820c6962e985abe5a8643a654abd2dfbe8f835c9c39934c6cd/capture",
+        "--test-reporter",
+        "dart",
+        "--",
+        "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+        "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-311718a2b7ad46f6bcc399d13144c07e/package/.dart_tool/package_config.json",
+        "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+        "--reporter",
+        "json",
+        "--platform",
+        "vm",
+        "--concurrency",
+        "1",
+        "--timeout",
+        "2000ms"
+      ],
+      "compileChecked": true,
+      "edit": {
+        "expected": "true",
+        "lengthBytes": 4,
+        "offsetBytes": 18,
+        "replacement": "false"
+      },
+      "executionInputHashes": {
+        ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+        ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+        "lib/value.dart": "6b668d087d471aadd8ae0bd1bed9cbd26a47d89e1b6826eb5f23e336a6a64ddf",
+        "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+        "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+        "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+        "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+        "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+      },
+      "exitCode": 1,
+      "family": "classic",
+      "file": "lib/value.dart",
+      "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-311718a2b7ad46f6bcc399d13144c07e/package",
+      "loadFailures": [],
+      "mutantId": "00b430bab2d5cd820c6962e985abe5a8643a654abd2dfbe8f835c9c39934c6cd",
+      "namespaceIsolation": null,
+      "operatorId": "BOOLEAN_LITERAL_FLIP",
+      "outcome": "KILLED",
+      "reason": "user_test_failure",
+      "recordKind": "mutation",
+      "reporterComplete": true,
+      "runner": {
+        "cause": "ProcessCompleted",
+        "cleanup": "complete",
+        "status": "exit:1"
+      },
+      "stdoutSha256": "6008a6d27109598cdb227ee37c6dcaa1305ef99ce406fd9ef195b76791cb6154",
+      "temporaryCopyCleaned": true,
+      "testIdentities": [
+        [
+          "test/value_test.dart",
+          "async value"
+        ],
+        [
+          "test/value_test.dart",
+          "enabled"
+        ],
+        [
+          "test/value_test.dart",
+          "semantic fallback"
+        ]
+      ],
+      "tests": {
+        "failed": 1,
+        "hidden": 0,
+        "loadingFailed": 0,
+        "loadingPassed": 1,
+        "passed": 2,
+        "skipped": 0,
+        "started": 3
+      },
+      "validation": {
+        "applicable": true,
+        "baselineDiagnostics": [],
+        "compileChecked": false,
+        "diagnostics": [],
+        "durationMicros": 15047,
+        "mutantId": "00b430bab2d5cd820c6962e985abe5a8643a654abd2dfbe8f835c9c39934c6cd",
+        "semanticValid": true,
+        "syntaxValid": true,
+        "valid": true,
+        "validation": "valid"
+      },
+      "wallSeconds": 3.89702
+    },
+    {
+      "command": [
+        "/fixture/install/target/release/failforge",
+        "run",
+        "--timeout",
+        "30000ms",
+        "--cwd",
+        "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-2506bb1f4f294294a75c5e4a2fc15136/package",
+        "--capture-dir",
+        "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/failure_mode/mutants/02c392deee412b1e04806077edf58fd958459367951ede84e04848517ce64911/capture",
+        "--test-reporter",
+        "dart",
+        "--",
+        "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+        "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-2506bb1f4f294294a75c5e4a2fc15136/package/.dart_tool/package_config.json",
+        "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+        "--reporter",
+        "json",
+        "--platform",
+        "vm",
+        "--concurrency",
+        "1",
+        "--timeout",
+        "2000ms"
+      ],
+      "compileChecked": true,
+      "edit": {
+        "expected": "=> value ?? 'fallback';",
+        "lengthBytes": 23,
+        "offsetBytes": 88,
+        "replacement": "{ throw StateError('FAILFORGE_EXCEPTION_AT_ENTRY'); }"
+      },
+      "executionInputHashes": {
+        ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+        ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+        "lib/value.dart": "088a5d79457a81ac2ec8f1330921c5fe7dab0ba7284ce0ded535bf154c319fb3",
+        "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+        "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+        "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+        "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+        "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+      },
+      "exitCode": 1,
+      "family": "failure_mode",
+      "file": "lib/value.dart",
+      "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-2506bb1f4f294294a75c5e4a2fc15136/package",
+      "loadFailures": [],
+      "mutantId": "02c392deee412b1e04806077edf58fd958459367951ede84e04848517ce64911",
+      "namespaceIsolation": null,
+      "operatorId": "EXCEPTION_AT_ENTRY",
+      "outcome": "KILLED",
+      "reason": "user_test_failure",
+      "recordKind": "mutation",
+      "reporterComplete": true,
+      "runner": {
+        "cause": "ProcessCompleted",
+        "cleanup": "complete",
+        "status": "exit:1"
+      },
+      "stdoutSha256": "a425bb79d5c5f9eb4606a53c25db67ab1aa00913e38b617e49f5d6c7b899e439",
+      "temporaryCopyCleaned": true,
+      "testIdentities": [
+        [
+          "test/value_test.dart",
+          "async value"
+        ],
+        [
+          "test/value_test.dart",
+          "enabled"
+        ],
+        [
+          "test/value_test.dart",
+          "semantic fallback"
+        ]
+      ],
+      "tests": {
+        "failed": 1,
+        "hidden": 0,
+        "loadingFailed": 0,
+        "loadingPassed": 1,
+        "passed": 2,
+        "skipped": 0,
+        "started": 3
+      },
+      "validation": {
+        "applicable": true,
+        "baselineDiagnostics": [],
+        "compileChecked": false,
+        "diagnostics": [],
+        "durationMicros": 1749,
+        "mutantId": "02c392deee412b1e04806077edf58fd958459367951ede84e04848517ce64911",
+        "semanticValid": true,
+        "syntaxValid": true,
+        "valid": true,
+        "validation": "valid"
+      },
+      "wallSeconds": 3.909376208
+    },
+    {
+      "command": [
+        "/fixture/install/target/release/failforge",
+        "run",
+        "--timeout",
+        "30000ms",
+        "--cwd",
+        "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-0db3d85a77574a9e9b1f37c83ea0e16f/package",
+        "--capture-dir",
+        "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/failure_mode/mutants/2e2cd31f6e24ba2a31226ed8f16285f2689f26cbfb5feb9e75655f0c816283ec/capture",
+        "--test-reporter",
+        "dart",
+        "--",
+        "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+        "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-0db3d85a77574a9e9b1f37c83ea0e16f/package/.dart_tool/package_config.json",
+        "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+        "--reporter",
+        "json",
+        "--platform",
+        "vm",
+        "--concurrency",
+        "1",
+        "--timeout",
+        "2000ms"
+      ],
+      "compileChecked": true,
+      "edit": {
+        "expected": "async => 7;",
+        "lengthBytes": 11,
+        "offsetBytes": 44,
+        "replacement": "async { throw StateError('FAILFORGE_EXCEPTION_AT_ENTRY'); }"
+      },
+      "executionInputHashes": {
+        ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+        ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+        "lib/value.dart": "b8586297f99e0b773c97fde16aac0dfe0718678416534c9a7481ccc81f2b455d",
+        "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+        "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+        "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+        "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+        "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+      },
+      "exitCode": 1,
+      "family": "failure_mode",
+      "file": "lib/value.dart",
+      "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-0db3d85a77574a9e9b1f37c83ea0e16f/package",
+      "loadFailures": [],
+      "mutantId": "2e2cd31f6e24ba2a31226ed8f16285f2689f26cbfb5feb9e75655f0c816283ec",
+      "namespaceIsolation": null,
+      "operatorId": "EXCEPTION_AT_ENTRY",
+      "outcome": "KILLED",
+      "reason": "user_test_failure",
+      "recordKind": "mutation",
+      "reporterComplete": true,
+      "runner": {
+        "cause": "ProcessCompleted",
+        "cleanup": "complete",
+        "status": "exit:1"
+      },
+      "stdoutSha256": "a039c49eef53b395501bc6de165c52b89580d5135c42f5be2557bf0823f4a9a2",
+      "temporaryCopyCleaned": true,
+      "testIdentities": [
+        [
+          "test/value_test.dart",
+          "async value"
+        ],
+        [
+          "test/value_test.dart",
+          "enabled"
+        ],
+        [
+          "test/value_test.dart",
+          "semantic fallback"
+        ]
+      ],
+      "tests": {
+        "failed": 1,
+        "hidden": 0,
+        "loadingFailed": 0,
+        "loadingPassed": 1,
+        "passed": 2,
+        "skipped": 0,
+        "started": 3
+      },
+      "validation": {
+        "applicable": true,
+        "baselineDiagnostics": [],
+        "compileChecked": false,
+        "diagnostics": [],
+        "durationMicros": 1876,
+        "mutantId": "2e2cd31f6e24ba2a31226ed8f16285f2689f26cbfb5feb9e75655f0c816283ec",
+        "semanticValid": true,
+        "syntaxValid": true,
+        "valid": true,
+        "validation": "valid"
+      },
+      "wallSeconds": 3.873934375
+    },
+    {
+      "command": [
+        "/fixture/install/target/release/failforge",
+        "run",
+        "--timeout",
+        "30000ms",
+        "--cwd",
+        "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-1fe90a5e89c84f8091a4da035c7c598f/package",
+        "--capture-dir",
+        "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/failure_mode/mutants/82f98fa029eac9233f13469d6f8de6a2928e96899b45ea7dfec4ab0387daeaa7/capture",
+        "--test-reporter",
+        "dart",
+        "--",
+        "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+        "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-1fe90a5e89c84f8091a4da035c7c598f/package/.dart_tool/package_config.json",
+        "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+        "--reporter",
+        "json",
+        "--platform",
+        "vm",
+        "--concurrency",
+        "1",
+        "--timeout",
+        "2000ms"
+      ],
+      "compileChecked": true,
+      "edit": {
+        "expected": "=> true;",
+        "lengthBytes": 8,
+        "offsetBytes": 15,
+        "replacement": "{ throw StateError('FAILFORGE_EXCEPTION_AT_ENTRY'); }"
+      },
+      "executionInputHashes": {
+        ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+        ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+        "lib/value.dart": "03967c291faac6643e9618aa446989c399e252e03879b82e5dc9c512815a82f1",
+        "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+        "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+        "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+        "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+        "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+      },
+      "exitCode": 1,
+      "family": "failure_mode",
+      "file": "lib/value.dart",
+      "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-1fe90a5e89c84f8091a4da035c7c598f/package",
+      "loadFailures": [],
+      "mutantId": "82f98fa029eac9233f13469d6f8de6a2928e96899b45ea7dfec4ab0387daeaa7",
+      "namespaceIsolation": null,
+      "operatorId": "EXCEPTION_AT_ENTRY",
+      "outcome": "KILLED",
+      "reason": "user_test_failure",
+      "recordKind": "mutation",
+      "reporterComplete": true,
+      "runner": {
+        "cause": "ProcessCompleted",
+        "cleanup": "complete",
+        "status": "exit:1"
+      },
+      "stdoutSha256": "552f40d178a98f6214756a6bd51f87b567d291e311363a5ba634f99461df951b",
+      "temporaryCopyCleaned": true,
+      "testIdentities": [
+        [
+          "test/value_test.dart",
+          "async value"
+        ],
+        [
+          "test/value_test.dart",
+          "enabled"
+        ],
+        [
+          "test/value_test.dart",
+          "semantic fallback"
+        ]
+      ],
+      "tests": {
+        "failed": 1,
+        "hidden": 0,
+        "loadingFailed": 0,
+        "loadingPassed": 1,
+        "passed": 2,
+        "skipped": 0,
+        "started": 3
+      },
+      "validation": {
+        "applicable": true,
+        "baselineDiagnostics": [],
+        "compileChecked": false,
+        "diagnostics": [],
+        "durationMicros": 20679,
+        "mutantId": "82f98fa029eac9233f13469d6f8de6a2928e96899b45ea7dfec4ab0387daeaa7",
+        "semanticValid": true,
+        "syntaxValid": true,
+        "valid": true,
+        "validation": "valid"
+      },
+      "wallSeconds": 3.911541708
+    },
+    {
+      "category": "null_safety",
+      "command": [
+        "/fixture/install/target/release/failforge",
+        "run",
+        "--timeout",
+        "30000ms",
+        "--cwd",
+        "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-c518ebb499154402a65f5adebea19ddf/package",
+        "--capture-dir",
+        "/fixture/install/artifacts/bugfix-regression/2026-10-20/sdk-all/all-families/families/language_specific/mutants/3ad208bcbe0cbd13c9a75f22403bf7b0cea502869c7fa450c108477f0f109279/capture",
+        "--test-reporter",
+        "dart",
+        "--",
+        "/fixture/install/.toolchain/flutter/bin/cache/dart-sdk/bin/dart",
+        "--packages=/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-c518ebb499154402a65f5adebea19ddf/package/.dart_tool/package_config.json",
+        "/fixture/install/.toolchain/pub-cache/hosted/pub.dev/test-1.33.0/bin/test.dart",
+        "--reporter",
+        "json",
+        "--platform",
+        "vm",
+        "--concurrency",
+        "1",
+        "--timeout",
+        "2000ms"
+      ],
+      "compileChecked": true,
+      "edit": {
+        "expected": " ?? 'fallback'",
+        "lengthBytes": 14,
+        "offsetBytes": 96,
+        "replacement": ""
+      },
+      "executionInputHashes": {
+        ".dart_tool/package_config.json": "94330983de992d726c4cd7ebefc4c2cce5c2f202b1e631f1b96b12279432855e",
+        ".dart_tool/package_graph.json": "27c122f1f74423a7cfeeff5e8acbe806afb21690e0ad45b9a955169f3227638d",
+        "lib/value.dart": "ac95a2b28577861552142718252c07b10ce229afeabf726183a919ace47c8301",
+        "profiles with spaces/all-families.yml": "2d2780a7fa8df0779a64762c7ba0506b11c490690e2f87472a48497ff19a793c",
+        "profiles with spaces/yaml.yml": "998c0670e1c3d080e90b0ac17e2ea957a933668a4c483ae2f169a8b925d402d9",
+        "pubspec.lock": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701",
+        "pubspec.yaml": "ebe83736fafcc7d6e17a2ed5903947d8e8a40045c1d24835d1ae0adece07f87c",
+        "test/value_test.dart": "5d188897e977752ddd98628c11d76bc68147991a484479629ee82135a12883f3"
+      },
+      "exitCode": 1,
+      "family": "language_specific",
+      "file": "lib/value.dart",
+      "isolatedWorkingDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5/work/attempt-c518ebb499154402a65f5adebea19ddf/package",
+      "language": "dart",
+      "loadFailures": [],
+      "mutantId": "3ad208bcbe0cbd13c9a75f22403bf7b0cea502869c7fa450c108477f0f109279",
+      "namespaceIsolation": null,
+      "operatorId": "NSM-001",
+      "outcome": "KILLED",
+      "reason": "user_test_failure",
+      "recordKind": "mutation",
+      "reporterComplete": true,
+      "runner": {
+        "cause": "ProcessCompleted",
+        "cleanup": "complete",
+        "status": "exit:1"
+      },
+      "stdoutSha256": "8395232443ff4e8f3135cbad940f5283e43cbb82ec0bce9e50d6f592194c6e2a",
+      "temporaryCopyCleaned": true,
+      "testIdentities": [
+        [
+          "test/value_test.dart",
+          "async value"
+        ],
+        [
+          "test/value_test.dart",
+          "enabled"
+        ],
+        [
+          "test/value_test.dart",
+          "semantic fallback"
+        ]
+      ],
+      "tests": {
+        "failed": 1,
+        "hidden": 0,
+        "loadingFailed": 0,
+        "loadingPassed": 1,
+        "passed": 2,
+        "skipped": 0,
+        "started": 3
+      },
+      "validation": {
+        "applicable": true,
+        "baselineDiagnostics": [],
+        "compileChecked": false,
+        "diagnostics": [],
+        "durationMicros": 2805,
+        "mutantId": "3ad208bcbe0cbd13c9a75f22403bf7b0cea502869c7fa450c108477f0f109279",
+        "semanticValid": true,
+        "syntaxValid": true,
+        "valid": true,
+        "validation": "valid"
+      },
+      "wallSeconds": 3.8947364159999998
+    }
+  ],
+  "runId": "d66cde3ac804df89026ed1f156c48aad",
+  "status": "completed",
+  "temporarySnapshotCleaned": true,
+  "timings": {
+    "bind_inputs": 0.417551041,
+    "snapshot": 0.006825417,
+    "verify_original": 0.000307042,
+    "verify_profile_inputs": 0.371177,
+    "workspace_cleanup": 0.014711958,
+    "workspace_recovery": 0.015233833
+  },
+  "version": 2,
+  "wallSeconds": 64.603035666,
+  "workspaceCleanupDeferred": false,
+  "workspaceDirectory": "/fixture/tmp/failforge-workspaces-503/campaign-ba293a12a5ef4d7eb4134f6bc4643dc5",
+  "workspaceRecovery": {
+    "recovered": [],
+    "skipped": []
+  }
+}

@@ -106,6 +106,180 @@ fn group_permission_error_requires_both_terminal_ownership_and_quiescent_census(
 }
 
 #[cfg(target_os = "macos")]
+#[tokio::test]
+async fn permission_error_during_owned_exit_waits_for_terminal_delivery_proof() {
+    for targets in [
+        GroupSignalTargets::ExitingMembers,
+        GroupSignalTargets::NoLiveMembers,
+    ] {
+        let mut first = Some(targets);
+        let mut probes = 0;
+        let result = group_signal_failure_until(
+            io::Error::from_raw_os_error(libc::EPERM),
+            Instant::now() + Duration::from_secs(1),
+            || {
+                probes += 1;
+                Ok(match first.take() {
+                    Some(targets) => (false, targets),
+                    None => (true, GroupSignalTargets::NoLiveMembers),
+                })
+            },
+        )
+        .await;
+        assert!(!result.unwrap());
+        assert_eq!(probes, 2);
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn permission_error_exit_proof_has_a_fixed_deadline_and_yields_the_runtime() {
+    let started = Instant::now();
+    let deadline = started + Duration::from_millis(30);
+    let heartbeat = std::cell::Cell::new(false);
+    let mut probes = 0;
+    let proving = async {
+        let result =
+            group_signal_failure_until(io::Error::from_raw_os_error(libc::EPERM), deadline, || {
+                probes += 1;
+                Ok((false, GroupSignalTargets::ExitingMembers))
+            })
+            .await;
+        assert!(
+            heartbeat.get(),
+            "exit proof must yield a single-thread runtime"
+        );
+        result
+    };
+    let (result, ()) = tokio::join!(proving, async {
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        heartbeat.set(true);
+    });
+    assert_eq!(result.unwrap_err().raw_os_error(), Some(libc::EPERM));
+    assert!(Instant::now() >= deadline);
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!((2..=16).contains(&probes), "bounded probes: {probes}");
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn force_request_interrupts_stalled_exit_proof_before_grace_deadline() {
+    let forced = std::cell::Cell::new(false);
+    let started = Instant::now();
+    let mut probes = 0;
+    let proving = resolve_group_signal_failure(
+        io::Error::from_raw_os_error(libc::EPERM),
+        GroupSignalDecision::AwaitExit,
+        started + Duration::from_secs(10),
+        || {
+            probes += 1;
+            Ok((false, GroupSignalTargets::ExitingMembers))
+        },
+        || forced.get(),
+    );
+    let (result, ()) = tokio::join!(proving, async {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        forced.set(true);
+    });
+    assert_eq!(result.unwrap_err().raw_os_error(), Some(libc::EPERM));
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert!(
+        probes <= 4,
+        "force must stop delivery proof promptly: {probes}"
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn delayed_group_resolution_does_not_discard_a_direct_leader_permission_error() {
+    let group = resolve_group_signal_failure(
+        io::Error::from_raw_os_error(libc::EPERM),
+        GroupSignalDecision::AwaitExit,
+        Instant::now() + Duration::from_secs(1),
+        || Ok((true, GroupSignalTargets::NoLiveMembers)),
+        || false,
+    )
+    .await;
+    assert!(group.is_ok());
+    // An escaped leader can have different permissions from the original
+    // group's remaining members. Group proof does not authenticate its error.
+    let combined = combine_signal_delivery(group, Err(io::Error::from_raw_os_error(libc::EPERM)));
+    assert_eq!(combined.unwrap_err().raw_os_error(), Some(libc::EPERM));
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn permission_error_retry_aborts_on_live_unknown_or_failed_evidence() {
+    for evidence in [
+        Ok((true, GroupSignalTargets::LiveMembers)),
+        Ok((false, GroupSignalTargets::LiveMembers)),
+        Ok((true, GroupSignalTargets::Unknown)),
+        Err(io::Error::from_raw_os_error(libc::ECHILD)),
+        Err(io::Error::from_raw_os_error(libc::EACCES)),
+        Err(io::Error::from_raw_os_error(libc::EINTR)),
+    ] {
+        let mut evidence = Some(evidence);
+        let mut probes = 0;
+        let result = group_signal_failure_until(
+            io::Error::from_raw_os_error(libc::EPERM),
+            Instant::now() + Duration::from_secs(1),
+            || {
+                probes += 1;
+                if probes == 1 {
+                    Ok((false, GroupSignalTargets::ExitingMembers))
+                } else {
+                    evidence.take().expect("unsafe evidence must stop retries")
+                }
+            },
+        )
+        .await;
+        assert_eq!(result.unwrap_err().raw_os_error(), Some(libc::EPERM));
+        assert_eq!(probes, 2);
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn permission_error_does_not_retry_ordinary_live_targets_or_expired_budget() {
+    for targets in [GroupSignalTargets::LiveMembers, GroupSignalTargets::Unknown] {
+        let mut targets = Some(targets);
+        let result = group_signal_failure_until(
+            io::Error::from_raw_os_error(libc::EPERM),
+            Instant::now() + Duration::from_secs(1),
+            || {
+                Ok((
+                    false,
+                    targets.take().expect("initial unsafe proof must not retry"),
+                ))
+            },
+        )
+        .await;
+        assert_eq!(result.unwrap_err().raw_os_error(), Some(libc::EPERM));
+    }
+    let mut probes = 0;
+    let result = group_signal_failure_until(
+        io::Error::from_raw_os_error(libc::EPERM),
+        Instant::now(),
+        || {
+            probes += 1;
+            Ok((false, GroupSignalTargets::ExitingMembers))
+        },
+    )
+    .await;
+    assert_eq!(result.unwrap_err().raw_os_error(), Some(libc::EPERM));
+    assert_eq!(probes, 1);
+    for errno in [libc::EINVAL, libc::EACCES, libc::EIO, libc::EINTR] {
+        let result = group_signal_failure_until(
+            io::Error::from_raw_os_error(errno),
+            Instant::now() + Duration::from_secs(1),
+            || panic!("unrelated errors must never request delivery proof"),
+        )
+        .await;
+        assert_eq!(result.unwrap_err().raw_os_error(), Some(errno));
+    }
+}
+
+#[cfg(target_os = "macos")]
 #[test]
 fn terminal_owned_group_with_only_inexit_recipients_does_not_fabricate_signal_failure() {
     // Native evidence in native-group-race-flags.log proves this exact state:
@@ -188,6 +362,106 @@ fn group_missing_and_nonpermission_errors_do_not_request_a_quiescence_probe() {
         });
         assert_eq!(failed.unwrap_err().raw_os_error(), Some(errno));
     }
+}
+
+#[cfg(target_os = "macos")]
+fn ready_leader() -> ManagedChild {
+    let mut command = Command::new("/bin/sh");
+    command
+        .args(["-c", "printf R; IFS= read -r -t 5 release; exit 0"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = ManagedChild::spawn(&mut command).unwrap();
+    let mut ready = std::fs::File::from(child.take_stdout().unwrap());
+    let mut marker = [0];
+    ready.read_exact(&mut marker).unwrap();
+    assert_eq!(marker, [b'R']);
+    assert!(!child.observe().unwrap());
+    child
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn repeated_native_term_then_kill_preserves_complete_cleanup_evidence() {
+    use std::os::unix::process::ExitStatusExt;
+    for _ in 0..32 {
+        let mut child = ready_leader();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        child.signal_until(libc::SIGTERM, deadline).await.unwrap();
+        child.signal_until(libc::SIGKILL, deadline).await.unwrap();
+        while !child.observe().unwrap() {
+            assert!(Instant::now() < deadline);
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        assert!(matches!(
+            child.group_state().unwrap(),
+            GroupState::NoLiveMembers { zombies: 1 }
+        ));
+        assert!(matches!(
+            child.reap().unwrap().signal(),
+            Some(libc::SIGTERM | libc::SIGKILL)
+        ));
+        assert!(child.is_retired());
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "finite macOS TERM/KILL transition census; run explicitly for native evidence"]
+fn native_leader_term_kill_transition_census() {
+    let mut denied = 0;
+    let mut unresolved = 0;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    for _ in 0..500 {
+        let mut child = ready_leader();
+        // The ready child has finished exec and is waiting in a finite shell
+        // builtin. WNOWAIT preserves its exact PID through every native call.
+        assert!(!child.observe().unwrap());
+        // SAFETY: WNOWAIT verified the sole owned unreaped group's leader.
+        assert_eq!(unsafe { libc::kill(-child.pid, libc::SIGTERM) }, 0);
+        for _ in 0..32 {
+            // SAFETY: no reap or ownership transfer occurred after that check.
+            if unsafe { libc::kill(-child.pid, libc::SIGKILL) } == 0 {
+                continue;
+            }
+            let error = io::Error::last_os_error();
+            assert_eq!(error.raw_os_error(), Some(libc::EPERM));
+            denied += 1;
+            let mut proof = None;
+            let result = group_signal_failure(error, || {
+                let terminal = child.observe()?;
+                let targets = child.group_signal_targets()?;
+                proof = Some((terminal, format!("{targets:?}")));
+                Ok((terminal, targets))
+            });
+            if result.is_err() {
+                unresolved += 1;
+                let later = child.observe().unwrap();
+                let census = child.group_state().unwrap();
+                if unresolved <= 8 {
+                    println!(
+                        "unresolved_term_kill proof={proof:?} later_terminal={later} later_census={census:?}"
+                    );
+                }
+            }
+            let resolved = runtime.block_on(group_signal_failure_until(
+                io::Error::from_raw_os_error(libc::EPERM),
+                Instant::now() + Duration::from_secs(1),
+                || Ok((child.observe()?, child.group_signal_targets()?)),
+            ));
+            assert!(!resolved.unwrap(), "terminal proof must resolve EPERM");
+            break;
+        }
+        wait_for_observation(&mut child);
+        let group = child.group_state().unwrap();
+        assert!(matches!(group, GroupState::NoLiveMembers { zombies: 1 }));
+        child.reap().unwrap();
+    }
+    println!("leader_transition cases=500 eperm={denied} unresolved={unresolved}");
 }
 
 #[cfg(target_os = "macos")]

@@ -7,6 +7,7 @@ use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::{DirBuilderExt, FileExt, MetadataExt};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use failforge_runner::WORKSPACE_LEASE_MAGIC;
 
@@ -15,6 +16,8 @@ use crate::ProfileError;
 
 const DIRECTORY_FLAGS: i32 =
     libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+const CLEANUP_LOCK_BUDGET: Duration = Duration::from_secs(1);
+const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(5);
 
 fn name(value: &OsStr) -> io::Result<CString> {
     CString::new(value.as_bytes())
@@ -87,23 +90,52 @@ fn write_marker(mut file: &File, bytes: &[u8]) -> Result<(), ProfileError> {
     Ok(())
 }
 
-fn lock(file: &File, nonblocking: bool) -> io::Result<bool> {
+fn try_lock(file: &File) -> io::Result<bool> {
     // SAFETY: flock borrows a live file descriptor and takes integer flags.
-    if unsafe {
-        libc::flock(
-            file.as_raw_fd(),
-            libc::LOCK_EX | if nonblocking { libc::LOCK_NB } else { 0 },
-        )
-    } == 0
-    {
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
         return Ok(true);
     }
     let error = io::Error::last_os_error();
-    if nonblocking && error.kind() == io::ErrorKind::WouldBlock {
+    if error.kind() == io::ErrorKind::WouldBlock {
         Ok(false)
     } else {
         Err(error)
     }
+}
+
+fn wait_for_lock(
+    mut attempt: impl FnMut() -> io::Result<bool>,
+    deadline: Instant,
+) -> io::Result<bool> {
+    loop {
+        match attempt() {
+            Ok(true) => return Ok(true),
+            Ok(false) => (),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => (),
+            Err(error) => return Err(error),
+        }
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            return Ok(false);
+        };
+        std::thread::sleep(remaining.min(LOCK_RETRY_INTERVAL));
+    }
+}
+
+fn lock_until(file: &File, deadline: Instant) -> io::Result<bool> {
+    wait_for_lock(|| try_lock(file), deadline)
+}
+
+fn global_lock(root: &File, deadline: Instant) -> Result<File, ProfileError> {
+    let global = regular(root.as_raw_fd(), OsStr::new(".global.lock"), false)?;
+    marker(&global, b"", false)?;
+    if !lock_until(&global, deadline)? {
+        return Err(failure(
+            "workspace registry still has an active cleanup owner",
+        ));
+    }
+    same_entry(root, OsStr::new(".global.lock"), &global)?;
+    marker(&global, b"", false)?;
+    Ok(global)
 }
 
 fn names(directory: &File) -> io::Result<Vec<OsString>> {
@@ -221,6 +253,18 @@ fn same_registry(path: &Path, root: &File) -> Result<(), ProfileError> {
     Ok(())
 }
 
+fn verify_coordination(
+    root: &File,
+    registry: &Path,
+    (global, owner): (&File, &File),
+) -> Result<(), ProfileError> {
+    same_registry(registry, root)?;
+    same_entry(root, OsStr::new(".global.lock"), global)?;
+    same_entry(root, OsStr::new(".owner"), owner)?;
+    marker(global, b"", false)?;
+    marker(owner, &owner_marker(), false)
+}
+
 fn tree(directory_file: &File, remove: bool, depth: usize) -> Result<(), ProfileError> {
     if depth > 128 {
         return Err(failure("workspace tree exceeds supported depth"));
@@ -292,8 +336,51 @@ pub(super) struct Workspace {
     root: File,
     campaign_name: String,
     lease: Option<File>,
+    lease_identity: (u64, u64),
     pub path: PathBuf,
     closed: bool,
+    cleanup_attempted: bool,
+}
+
+/// Identity-only handles do not hold a flock. They keep substituted objects
+/// distinguishable while registry coordination is unavailable.
+struct CleanupIdentity {
+    campaign: File,
+    owner: File,
+    entries: Vec<(&'static str, File)>,
+}
+
+impl CleanupIdentity {
+    fn capture(
+        root: &File,
+        campaign_name: &str,
+        lease_identity: (u64, u64),
+    ) -> Result<Self, ProfileError> {
+        let campaign = directory(root.as_raw_fd(), OsStr::new(campaign_name), true)?;
+        let lease = regular(campaign.as_raw_fd(), OsStr::new("lease"), false)?;
+        let info = lease.metadata()?;
+        if (info.dev(), info.ino()) != lease_identity {
+            return Err(failure("workspace lease changed before cleanup"));
+        }
+        let owner = regular(root.as_raw_fd(), OsStr::new(".owner"), false)?;
+        let metadata = regular(campaign.as_raw_fd(), OsStr::new("metadata"), false)?;
+        let work = directory(campaign.as_raw_fd(), OsStr::new("work"), true)?;
+        Ok(Self {
+            campaign,
+            owner,
+            entries: vec![("lease", lease), ("metadata", metadata), ("work", work)],
+        })
+    }
+
+    fn verify(&self, root: &File, campaign_name: &str) -> Result<(), ProfileError> {
+        same_entry(root, OsStr::new(campaign_name), &self.campaign)?;
+        same_entry(root, OsStr::new(".owner"), &self.owner)?;
+        marker(&self.owner, &owner_marker(), false)?;
+        for (name, file) in &self.entries {
+            same_entry(&self.campaign, OsStr::new(name), file)?;
+        }
+        Ok(())
+    }
 }
 
 /// A cleanup capability retained by a detached native owner after its calling
@@ -302,23 +389,39 @@ pub(super) struct Recovery {
     registry: PathBuf,
     root: File,
     campaign_name: String,
+    lease_identity: (u64, u64),
 }
 
 impl Recovery {
     pub fn recover(self) -> Result<(), ProfileError> {
-        let global = regular(self.root.as_raw_fd(), OsStr::new(".global.lock"), false)?;
-        marker(&global, b"", false)?;
-        lock(&global, false)?;
+        let deadline = Instant::now() + CLEANUP_LOCK_BUDGET;
+        let identity =
+            match CleanupIdentity::capture(&self.root, &self.campaign_name, self.lease_identity) {
+                Ok(identity) => Some(identity),
+                Err(ProfileError::Io(error)) if error.kind() == io::ErrorKind::NotFound => None,
+                Err(error) => return Err(error),
+            };
+        let global = global_lock(&self.root, deadline)?;
         same_registry(&self.registry, &self.root)?;
-        marker(
-            &regular(self.root.as_raw_fd(), OsStr::new(".owner"), false)?,
-            &owner_marker(),
-            false,
-        )?;
-        match reap(&self.root, &self.campaign_name) {
-            Err(ProfileError::Io(error)) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            result => result,
+        let owner = regular(self.root.as_raw_fd(), OsStr::new(".owner"), false)?;
+        marker(&owner, &owner_marker(), false)?;
+        // Another legitimate reaper may have finished while we waited. Only a
+        // missing campaign is idempotent; missing/replaced controls are errors.
+        match stat(&self.root, OsStr::new(&self.campaign_name)) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+            Ok(_) => (),
         }
+        identity
+            .ok_or_else(|| failure("workspace changed before recovery"))?
+            .verify(&self.root, &self.campaign_name)?;
+        reap(
+            &self.root,
+            &self.registry,
+            &self.campaign_name,
+            Some(deadline),
+            (&global, &owner),
+        )
     }
 }
 
@@ -331,6 +434,7 @@ impl Workspace {
     }
 
     fn at(registry: PathBuf, protected: &[PathBuf]) -> Result<Self, ProfileError> {
+        let deadline = Instant::now() + CLEANUP_LOCK_BUDGET;
         if protected
             .iter()
             .any(|path| registry.starts_with(path) || path.starts_with(&registry))
@@ -359,7 +463,13 @@ impl Workspace {
             Err(error) => return Err(error),
         };
         marker(&global, b"", false)?;
-        lock(&global, false)?;
+        if !lock_until(&global, deadline)? {
+            return Err(failure(
+                "workspace registry still has an active cleanup owner",
+            ));
+        }
+        same_entry(&root, OsStr::new(".global.lock"), &global)?;
+        marker(&global, b"", false)?;
         same_registry(&registry, &root)?;
         let owner = owner_marker();
         match regular(root.as_raw_fd(), OsStr::new(".owner"), false) {
@@ -388,18 +498,23 @@ impl Workspace {
             }
             Err(error) => return Err(error),
         }
+        let owner = regular(root.as_raw_fd(), OsStr::new(".owner"), false)?;
+        marker(&owner, &owner_marker(), false)?;
         for entry in names(&root)? {
             if let Some(text) = entry.to_str() {
-                let _ = reap(&root, text);
+                let _ = reap(&root, &registry, text, None, (&global, &owner));
             }
         }
+        verify_coordination(&root, &registry, (&global, &owner))?;
         let token = random_token()?;
         let pending = format!("pending-{token}");
         let campaign_name = format!("campaign-{token}");
         mkdir(&root, &pending)?;
         let campaign = directory(root.as_raw_fd(), OsStr::new(&pending), true)?;
         let lease = regular(campaign.as_raw_fd(), OsStr::new("lease"), true)?;
-        lock(&lease, true)?;
+        if !try_lock(&lease)? {
+            return Err(failure("new workspace lease is already locked"));
+        }
         write_marker(&lease, WORKSPACE_LEASE_MAGIC)?;
         write_marker(
             &regular(campaign.as_raw_fd(), OsStr::new("metadata"), true)?,
@@ -410,14 +525,17 @@ impl Workspace {
         rename(&root, &pending, &campaign_name)?;
         same_registry(&registry, &root)?;
         let path = registry.join(&campaign_name).join("work");
+        let lease_info = lease.metadata()?;
         drop(global);
         Ok(Self {
             registry,
             root,
             campaign_name,
             lease: Some(lease),
+            lease_identity: (lease_info.dev(), lease_info.ino()),
             path,
             closed: false,
+            cleanup_attempted: false,
         })
     }
 
@@ -433,24 +551,37 @@ impl Workspace {
             registry: self.registry.clone(),
             root: self.root.try_clone()?,
             campaign_name: self.campaign_name.clone(),
+            lease_identity: self.lease_identity,
         })
     }
 
     pub fn close(&mut self) -> Result<(), ProfileError> {
+        self.cleanup_attempted = true;
+        self.close_until(Instant::now() + CLEANUP_LOCK_BUDGET)
+    }
+
+    fn close_until(&mut self, deadline: Instant) -> Result<(), ProfileError> {
         if self.closed {
             return Ok(());
         }
-        let global = regular(self.root.as_raw_fd(), OsStr::new(".global.lock"), false)?;
-        marker(&global, b"", false)?;
-        lock(&global, false)?;
-        marker(
-            &regular(self.root.as_raw_fd(), OsStr::new(".owner"), false)?,
-            &owner_marker(),
-            false,
-        )?;
+        let identity =
+            CleanupIdentity::capture(&self.root, &self.campaign_name, self.lease_identity)?;
+        let global = global_lock(&self.root, deadline)?;
+        let owner = regular(self.root.as_raw_fd(), OsStr::new(".owner"), false)?;
+        marker(&owner, &owner_marker(), false)?;
         same_registry(&self.registry, &self.root)?;
+        identity.verify(&self.root, &self.campaign_name)?;
         self.lease.take(); // Never LOCK_UN the helper's inherited open description.
-        reap(&self.root, &self.campaign_name)?;
+        // A concurrent fork can retain CLOEXEC descriptors until exec. Retry
+        // only within the shared cleanup budget; a real owner remains protected.
+        // This bounds lock waiting, not the filesystem work needed for deletion.
+        reap(
+            &self.root,
+            &self.registry,
+            &self.campaign_name,
+            Some(deadline),
+            (&global, &owner),
+        )?;
         if self.registry.join(&self.campaign_name).try_exists()? {
             return Err(failure("applicability workspace cleanup did not complete"));
         }
@@ -461,7 +592,15 @@ impl Workspace {
 
 impl Drop for Workspace {
     fn drop(&mut self) {
-        let _ = self.close();
+        // A failed explicit close has already spent its waiting budget. Drop
+        // still attempts immediate cleanup, but cannot silently wait again.
+        let deadline = Instant::now()
+            + if self.cleanup_attempted {
+                Duration::ZERO
+            } else {
+                CLEANUP_LOCK_BUDGET
+            };
+        let _ = self.close_until(deadline);
     }
 }
 
@@ -472,7 +611,13 @@ fn valid_token(token: &str) -> bool {
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
 
-fn reap(root: &File, name: &str) -> Result<(), ProfileError> {
+fn reap(
+    root: &File,
+    registry: &Path,
+    name: &str,
+    deadline: Option<Instant>,
+    coordination: (&File, &File),
+) -> Result<(), ProfileError> {
     let (pending, token) = if let Some(token) = name.strip_prefix("pending-") {
         (true, token)
     } else if let Some(token) = name.strip_prefix("campaign-") {
@@ -498,21 +643,40 @@ fn reap(root: &File, name: &str) -> Result<(), ProfileError> {
         }
         Err(error) => return Err(error),
     };
-    if !lock(&lease, true)? {
+    // Retain all directory/control identities before any waiting, so replacing
+    // a workspace while its old lease drains cannot authorize deleting the new
+    // object. None of the payload is inspected or changed while the lease is held.
+    let metadata = entries
+        .iter()
+        .any(|entry| entry == "metadata")
+        .then(|| regular(campaign.as_raw_fd(), OsStr::new("metadata"), false))
+        .transpose()?;
+    let work = entries
+        .iter()
+        .any(|entry| entry == "work")
+        .then(|| directory(campaign.as_raw_fd(), OsStr::new("work"), true))
+        .transpose()?;
+    let acquired = match deadline {
+        Some(deadline) => lock_until(&lease, deadline)?,
+        None => try_lock(&lease)?,
+    };
+    if !acquired {
         return Err(failure("workspace still has an active cleanup owner"));
     }
+    // Waiting on the campaign lease must not outlive our authorization: both
+    // coordination files must still name the exact retained control objects.
+    verify_coordination(root, registry, coordination)?;
+    same_entry(root, OsStr::new(name), &campaign)?;
+    same_entry(&campaign, OsStr::new("lease"), &lease)?;
     marker(&lease, WORKSPACE_LEASE_MAGIC, pending)?;
-    if entries.iter().any(|entry| entry == "metadata") {
-        marker(
-            &regular(campaign.as_raw_fd(), OsStr::new("metadata"), false)?,
-            &campaign_marker(token),
-            pending,
-        )?;
+    if let Some(metadata) = metadata {
+        same_entry(&campaign, OsStr::new("metadata"), &metadata)?;
+        marker(&metadata, &campaign_marker(token), pending)?;
     } else if !pending {
         return Err(failure("workspace metadata is missing"));
     }
-    if entries.iter().any(|entry| entry == "work") {
-        let work = directory(campaign.as_raw_fd(), OsStr::new("work"), true)?;
+    if let Some(work) = work {
+        same_entry(&campaign, OsStr::new("work"), &work)?;
         if pending && !names(&work)?.is_empty() {
             return Err(failure("uncommitted workspace is not empty"));
         }
@@ -589,9 +753,16 @@ mod tests {
         assert!(first_path.exists());
         second.close().unwrap();
         // Simulate controller death without running Drop cleanup.
+        let recovery = first.recovery().unwrap();
         first.lease.take();
         first.closed = true;
         let mut third = Workspace::at(root.clone(), &[]).unwrap();
+        // Startup skips leased campaigns, including a transient descriptor
+        // inherited by another test's pre-exec child. Deferred recovery waits.
+        if first_path.exists() {
+            assert_eq!(fs::read(first_path.join("source")).unwrap(), b"data");
+        }
+        recovery.recover().unwrap();
         assert!(!first_path.exists());
         third.close().unwrap();
         fs::remove_dir_all(root).unwrap();
@@ -674,3 +845,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "workspaces_fork_tests.rs"]
+mod fork_tests;

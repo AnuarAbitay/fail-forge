@@ -523,12 +523,20 @@ async fn supervise(
     let mut group = cleanup_group(&child, &mut guard.cleanup);
     let mut observed = cleanup_observe(&mut child, &mut guard.cleanup);
     let needs_signal = !observed || !matches!(group, GroupState::NoLiveMembers { .. });
-    if needs_signal {
-        send_signal(&mut child, initial_signal, spawned, &mut guard.cleanup);
-    }
     let grace_deadline = Instant::now()
         .checked_add(spec.timeout_policy.grace_period)
         .unwrap_or_else(Instant::now);
+    if needs_signal {
+        send_signal(
+            &mut child,
+            initial_signal,
+            grace_deadline,
+            spawned,
+            &mut guard.cleanup,
+            || lock(&guard.record.control).force,
+        )
+        .await;
+    }
     while needs_signal && Instant::now() < grace_deadline && !lock(&guard.record.control).force {
         observed = cleanup_observe(&mut child, &mut guard.cleanup);
         group = cleanup_group(&child, &mut guard.cleanup);
@@ -540,10 +548,18 @@ async fn supervise(
     observed = cleanup_observe(&mut child, &mut guard.cleanup);
     group = cleanup_group(&child, &mut guard.cleanup);
     if !observed || !matches!(group, GroupState::NoLiveMembers { .. }) {
-        send_signal(&mut child, libc::SIGKILL, spawned, &mut guard.cleanup);
         let forced_deadline = Instant::now()
             .checked_add(spec.timeout_policy.forced_wait)
             .unwrap_or_else(Instant::now);
+        send_signal(
+            &mut child,
+            libc::SIGKILL,
+            forced_deadline,
+            spawned,
+            &mut guard.cleanup,
+            || false,
+        )
+        .await;
         loop {
             observed = cleanup_observe(&mut child, &mut guard.cleanup);
             group = cleanup_group(&child, &mut guard.cleanup);
@@ -643,13 +659,19 @@ fn cleanup_group(child: &ManagedChild, cleanup: &mut CleanupReport) -> GroupStat
     }
 }
 
-fn send_signal(
+async fn send_signal(
     child: &mut ManagedChild,
     signal: i32,
+    deadline: Instant,
     spawned: Instant,
     cleanup: &mut CleanupReport,
+    stop_waiting: impl Fn() -> bool,
 ) {
-    let outcome = match child.signal(signal) {
+    let after_spawn = spawned.elapsed();
+    let outcome = match child
+        .signal_until_or_cancelled(signal, deadline, stop_waiting)
+        .await
+    {
         Ok(true) => SignalOutcome::Sent,
         Ok(false) => SignalOutcome::AlreadyGone,
         Err(error) => {
@@ -661,7 +683,7 @@ fn send_signal(
     };
     cleanup.signals.push(SignalRecord {
         signal,
-        after_spawn: spawned.elapsed(),
+        after_spawn,
         outcome,
     });
 }

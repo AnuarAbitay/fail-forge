@@ -131,5 +131,7 @@ and ignored evidence are unchanged.
 - Full byte-for-byte legacy parity, line/branch coverage percentages and a new
   end-to-end performance/resource improvement are not claimed. Optional frozen
   comparisons and historical performance results have distinct provenance.
-- Deferred issues FF-001 and FF-002 remain tracked in
-  [known issues](known-issues.md). Rust tests run serially while FF-001 is open.
+- The independently reproduced cleanup races FF-001 and FF-002, their fixes
+  and regression evidence are tracked in [known issues](known-issues.md).
+  Full Rust suites run serially to bound process resources; dedicated tests
+  separately exercise concurrent creation, cancellation and cleanup.

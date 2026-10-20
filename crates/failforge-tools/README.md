@@ -121,5 +121,32 @@ executed without rediscovery through `failforge replay --project ... --framework
 campaign owner and reports. Diagnostic capture classification and retained
 transcript/candidate verification are also public Rust APIs. The
 frozen JSON evidence corpora remain test data, with no Python interpreter needed.
-FF-001 and FF-002 remain separately tracked; this migration does not claim to
-resolve those deferred issues.
+Current FF-001 and FF-002 status and evidence are tracked in
+[known issues](../../docs/known-issues.md).
+
+## Archived public projects
+
+`public-regression` runs an explicitly selected manifest group through the fixed
+`failforge` executable. There is no shell-command field or default subset:
+
+```sh
+target/release/failforge-tools public-regression --manifest /absolute/manifest.json \
+  --group canonical --binary-dir /absolute/release --output /absolute/new-results
+```
+
+Add `--check-only` to validate retained paths and configuration without starting
+an SDK. A version1 manifest lists named cases with a prepared project, optional
+profile generation, the exact normalized direct configuration, historical
+profile and per-ID verdict oracle, `direct`/`profile` variants, and a bounded
+`budgetSeconds`. Source files, historical profiles and prior results are read
+only. Generation and each variant use separate fresh production workspace copies.
+Generated applicability is checked against the old profile; profile execution
+uses its newly generated selection with the retained manual scope and timeouts.
+
+Each variant compares complete discovery proofs, IDs, edits and outcomes,
+aggregate/family consistency, scores, baseline/final controls and actual cleanup.
+The original input hashes and all command captures remain in the new output.
+Independent failures are retained while the remaining cases continue. Unconfirmed
+process cleanup or a nonempty private workspace registry stops new commands.
+An explicit `cancelAfterRecords` case is labeled partial and cannot establish a
+complete mutation score. No archived scope is silently reduced to a smoke test.

@@ -95,7 +95,12 @@ impl ManagedChild {
     /// Success means at least one delivery was attempted, not group quiescence.
     /// No delivery target also includes Darwin exit-in-progress recipients;
     /// group_state must still prove their eventual cleanup independently.
-    pub(crate) fn signal(&mut self, signal: i32) -> io::Result<bool> {
+    pub(crate) async fn signal_until_or_cancelled(
+        &mut self,
+        signal: i32,
+        deadline: Instant,
+        stop_waiting: impl Fn() -> bool,
+    ) -> io::Result<bool> {
         self.observe()?;
         // SAFETY: pid is positive, belongs to the sole owned unreaped Child, and
         // WNOWAIT just verified association. Negation addresses only that group.
@@ -104,18 +109,19 @@ impl ManagedChild {
             Ok(true)
         } else {
             let error = io::Error::last_os_error();
-            group_signal_failure(error, || {
+            let decision = group_signal_decision(&error, || {
                 // Darwin's group kill can report EPERM when only zombies or
                 // exiting processes remain. Signal-recipient proof is separate
                 // from cleanup liveness: INEXIT is still live for cleanup.
                 let terminal = self.observe()?;
                 Ok((terminal, self.group_signal_targets()?))
-            })
+            });
+            Err((error, decision))
         };
         if self.is_retired() {
             // A failed verification may have detected ECHILD and retired the
             // numerical PID. Even forced termination must not use it again.
-            return group;
+            return group.map_err(|(error, _)| error);
         }
         // Even a failed/missing group must not prevent forced termination of
         // the direct process we still own. WNOWAIT pins its PID until reap.
@@ -140,12 +146,37 @@ impl ManagedChild {
         } else {
             Ok(false)
         };
+        let group = match group {
+            Ok(sent) => Ok(sent),
+            Err((error, decision)) => {
+                resolve_group_signal_failure(
+                    error,
+                    decision,
+                    deadline,
+                    || Ok((self.observe()?, self.group_signal_targets()?)),
+                    stop_waiting,
+                )
+                .await
+            }
+        };
         // Preserve the original group failure even when the leader route
         // succeeded. One successful kill never proves cleanup of the group.
-        match (group, leader) {
-            (Err(error), _) | (_, Err(error)) => Err(error),
-            (Ok(group_sent), Ok(leader_sent)) => Ok(group_sent || leader_sent),
-        }
+        combine_signal_delivery(group, leader)
+    }
+
+    #[cfg(test)]
+    async fn signal_until(&mut self, signal: i32, deadline: Instant) -> io::Result<bool> {
+        self.signal_until_or_cancelled(signal, deadline, || false)
+            .await
+    }
+
+    #[cfg(test)]
+    fn signal(&mut self, signal: i32) -> io::Result<bool> {
+        // Existing zero-budget probes still expose unresolved delivery errors.
+        tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()?
+            .block_on(self.signal_until(signal, Instant::now()))
     }
 
     pub(crate) fn group_state(&self) -> io::Result<GroupState> {
@@ -220,32 +251,108 @@ impl ManagedChild {
     }
 }
 
+fn combine_signal_delivery(group: io::Result<bool>, leader: io::Result<bool>) -> io::Result<bool> {
+    match (group, leader) {
+        (Err(error), _) | (_, Err(error)) => Err(error),
+        (Ok(group_sent), Ok(leader_sent)) => Ok(group_sent || leader_sent),
+    }
+}
+
+fn group_signal_decision(
+    error: &io::Error,
+    delivery_proof: impl FnOnce() -> io::Result<(bool, GroupSignalTargets)>,
+) -> GroupSignalDecision {
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        return GroupSignalDecision::Gone;
+    }
+    #[cfg(target_os = "macos")]
+    if error.raw_os_error() == Some(libc::EPERM) {
+        return match delivery_proof() {
+            Ok((true, GroupSignalTargets::NoLiveMembers | GroupSignalTargets::ExitingMembers)) => {
+                GroupSignalDecision::Gone
+            }
+            Ok((false, GroupSignalTargets::NoLiveMembers | GroupSignalTargets::ExitingMembers)) => {
+                GroupSignalDecision::AwaitExit
+            }
+            _ => GroupSignalDecision::Failed,
+        };
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = delivery_proof;
+    // Ordinary live/unknown targets and failed ownership or
+    // census probes never turn a permission failure into cleanup evidence.
+    GroupSignalDecision::Failed
+}
+
+enum GroupSignalDecision {
+    Gone,
+    #[cfg(target_os = "macos")]
+    AwaitExit,
+    Failed,
+}
+
+#[cfg(test)]
 fn group_signal_failure(
     error: io::Error,
     delivery_proof: impl FnOnce() -> io::Result<(bool, GroupSignalTargets)>,
 ) -> io::Result<bool> {
-    if error.raw_os_error() == Some(libc::ESRCH) {
-        return Ok(false);
+    match group_signal_decision(&error, delivery_proof) {
+        GroupSignalDecision::Gone => Ok(false),
+        _ => Err(error),
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+async fn group_signal_failure_until(
+    error: io::Error,
+    deadline: Instant,
+    mut delivery_proof: impl FnMut() -> io::Result<(bool, GroupSignalTargets)>,
+) -> io::Result<bool> {
+    let decision = group_signal_decision(&error, &mut delivery_proof);
+    resolve_group_signal_failure(error, decision, deadline, delivery_proof, || false).await
+}
+
+async fn resolve_group_signal_failure(
+    error: io::Error,
+    decision: GroupSignalDecision,
+    deadline: Instant,
+    mut delivery_proof: impl FnMut() -> io::Result<(bool, GroupSignalTargets)>,
+    stop_waiting: impl Fn() -> bool,
+) -> io::Result<bool> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (deadline, stop_waiting);
+        let _ = &mut delivery_proof;
+        match decision {
+            GroupSignalDecision::Gone => Ok(false),
+            GroupSignalDecision::Failed => Err(error),
+        }
     }
     #[cfg(target_os = "macos")]
-    if error.raw_os_error() == Some(libc::EPERM)
-        && matches!(
-            delivery_proof(),
-            Ok((
-                true,
-                GroupSignalTargets::NoLiveMembers | GroupSignalTargets::ExitingMembers
-            ))
-        )
-    {
-        // AlreadyGone means no deliverable signal recipient. Exiting members
-        // still count as live to group_state and must finish before cleanup.
-        return Ok(false);
+    let mut decision = decision;
+    #[cfg(target_os = "macos")]
+    loop {
+        match decision {
+            GroupSignalDecision::Gone => return Ok(false),
+            GroupSignalDecision::Failed => return Err(error),
+            GroupSignalDecision::AwaitExit => {
+                // Darwin can stop accepting group signals during exit(), before
+                // waitid exposes WEXITED. Preserve EPERM until terminal ownership
+                // and a fresh complete census prove there is no ordinary target.
+                // Waiting yields the runtime and consumes the existing cleanup
+                // budget; it never restarts that budget or marks INEXIT cleaned.
+                let now = Instant::now();
+                if now >= deadline || stop_waiting() {
+                    return Err(error);
+                }
+                tokio::time::sleep((deadline - now).min(Duration::from_millis(2))).await;
+                if Instant::now() >= deadline || stop_waiting() {
+                    return Err(error);
+                }
+                decision = group_signal_decision(&error, &mut delivery_proof);
+            }
+        }
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = delivery_proof;
-    // Ordinary live/unknown targets, an unobserved leader, and failed ownership or
-    // census probes never turn a permission failure into cleanup evidence.
-    Err(error)
 }
 
 #[derive(Debug, PartialEq, Eq)]
