@@ -623,9 +623,12 @@ A/B/A confirmation; a nonzero exit alone cannot kill a mutant. Classical results
 use `mutationScore`; failure-mode results use `failureModeScore`. They are never
 combined. Failed or cancelled campaigns have no final score.
 
-Exit codes: `0` for a completed campaign (including survivors or bounded mutant
-timeouts), `2` for invalid configuration, `125` for failed or inconclusive
-execution, `130` for Ctrl+C and `143` for SIGTERM. Cancellation requests the active
+Exit codes: `0` for a completed campaign without infrastructure or inconclusive
+results (survivors and bounded mutant timeouts alone do not cause failure),
+`2` for invalid configuration, `125` for failed or inconclusive execution,
+`130` for Ctrl+C and `143` for SIGTERM. `INFRA_ERROR`, `UNCLASSIFIED` and
+`NO_TESTS` return `125` even when all candidates were processed and the report
+status is `completed`. Cancellation requests the active
 Rust CLI owners to stop and waits for their cleanup; it does not kill them. The
 adapter helper drains its own Runner after a closed consumer pipe. The retained
 report is marked incomplete, with no final score.

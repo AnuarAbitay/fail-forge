@@ -13,7 +13,9 @@ cargo build --workspace --locked
 ./target/debug/failforge run --timeout 30s -- dart test
 ```
 
-During development:
+The default build uses release compiler settings and retains Cargo's
+`target/debug` output path. Running through Cargo uses the same optimized
+settings without an additional flag:
 
 ```sh
 cargo run -p failforge-cli --bin failforge -- run --timeout 30s -- dart test
