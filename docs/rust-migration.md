@@ -114,8 +114,9 @@ replay scenarios, four recovery scenarios and all 19 semantic operator fixtures
 two scenarios respectively. These are separate runs with retained binary
 provenance, not one final-build run of every SDK scenario. Local evidence and
 commands are under `artifacts/native-completion/2026-10-20/validation/README.md`.
-No maintained `.py` files or Python requirements remain; historical Git commits
-and ignored evidence are unchanged.
+No maintained `.py` files or Python requirements remain. Python source files and
+their dependency manifest have also been removed from Git history. Local ignored
+evidence is retained.
 
 - The Python import/callback API is retired. The supported product interface is
   the CLI and YAML profiles; this migration does not introduce a drop-in Rust
