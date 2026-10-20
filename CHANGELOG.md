@@ -27,6 +27,12 @@ unreleased; no published release or release date is implied.
 - Apache-2.0 licensing for FailForge's original source code.
 - A dependency license inventory with retained third-party notices, archive
   checksum verification and distribution scope notes.
+- Local native beta packaging with `failforge-tools package`: a `.tar.gz` archive
+  containing the CLI, analysis helper, adapter source, user documentation and
+  license material, plus checksums and an inventory of packaged files. SDKs and
+  prepared Pub dependencies remain separate installation requirements.
+- An installed-archive smoke check for fresh dependency preparation, relocation,
+  profile generation, direct/YAML identity parity, source preservation and cleanup.
 
 ### Fixed
 

@@ -1,8 +1,8 @@
 # Installation and first run
 
-This guide installs FailForge from source. You can run it from the checkout or
-arrange a [separate installation](#relocate-an-installation) after building.
-The guide does not assume that a prebuilt release archive is available.
+You can use a prepared native archive or build FailForge from source. A local
+archive can be produced with the [packaging command](packaging.md); this guide
+does not claim that a public GitHub release has been published.
 Read the [beta limitations](beta-limitations.md) before running a campaign.
 
 ## Requirements
@@ -10,7 +10,7 @@ Read the [beta limitations](beta-limitations.md) before running a campaign.
 | Requirement | Current support |
 | --- | --- |
 | Operating system | Linux or macOS. Windows is unsupported. Platform support does not imply that every distribution or architecture has been tested. |
-| Rust | Rust and Cargo 1.85.1 or newer, with the platform's C linker. |
+| Rust for source builds | Rust and Cargo 1.85.1 or newer, with the platform's C linker. Not required when using a prepared native archive. |
 | Dart adapter SDK | Dart `>=3.13.0 <3.14.0`. A Flutter installation may supply this Dart SDK. |
 | Target package | One standalone Dart or Flutter package with a passing `test` or `flutter_test` suite and prepared dependencies. |
 | Disk space | Space for the original package, temporary working copies and retained reports. Larger packages and more workers require more space. |
@@ -22,7 +22,46 @@ installation. Python is not required.
 Use projects and tests you trust. FailForge runs their code with your account's
 permissions; working-copy isolation is not a security sandbox.
 
-## 1. Build FailForge
+## 1. Choose an installation
+
+### Install from an archive
+
+Use an archive matching your operating system and architecture, together with
+its `SHA256SUMS` and `package-manifest.json`. The following example is for a
+locally prepared **macOS arm64** archive of `0.1.0-beta.1`; it does not imply
+that another platform has been built or tested.
+
+Verify the checksum in the directory containing those files, then extract into
+a new parent directory:
+
+```sh
+cd /absolute/path/to/archive-directory
+shasum -a 256 -c SHA256SUMS
+```
+
+Continue only when every checksum reports `OK`:
+
+```sh
+mkdir /absolute/path/to/new-install-parent
+tar -xzf failforge-0.1.0-beta.1-aarch64-apple-darwin.tar.gz \
+  -C /absolute/path/to/new-install-parent
+export FAILFORGE_HOME="/absolute/path/to/new-install-parent/failforge-0.1.0-beta.1-aarch64-apple-darwin"
+export PATH="$FAILFORGE_HOME/bin:$PATH"
+failforge --version
+failforge --help
+```
+
+On Linux, `sha256sum -c SHA256SUMS`
+can be used instead of `shasum`. Obtain the archive and its checksums from the
+same trusted source; a checksum is not a digital signature.
+
+The archive contains both native executables, the adapter sources and required
+project documentation/notices. Keep that installation together. The SDK and
+prepared Pub dependencies are separate: continue with
+[Prepare the adapter](#2-prepare-the-adapter). Rust and Cargo are not needed for
+this installation path.
+
+### Build from source
 
 Obtain a checkout or source download from the
 [FailForge repository](https://github.com/AnuarAbitay/fail-forge).
@@ -256,11 +295,11 @@ installation/
       NOTICE
 ```
 
-Copy the executables built for the destination operating system and architecture
-and the adapter files into their new locations. This is the runtime layout,
-not a ready-made release archive. When distributing it, also include the
-licenses, notices and inventory described in the
-[dependency license review](dependency-licenses.md#distribution-boundaries).
+The [packaging command](packaging.md) creates this runtime layout with the user
+documentation and project/dependency license materials. You can also arrange it
+manually with executables built for the destination operating system and
+architecture. When distributing it, preserve the licenses, notices and inventory
+described in the [dependency license review](dependency-licenses.md#distribution-boundaries).
 
 Prepare the adapter at its final location using a compatible SDK:
 
@@ -305,10 +344,12 @@ files in the installation.
 
 | Symptom | Check |
 | --- | --- |
+| Archive checksum fails | Stop and obtain the matching, unmodified archive and checksum files before extracting. |
+| Executable cannot run on this machine | Check the archive's operating system and architecture. Packaging does not produce a universal executable. |
 | Adapter dependency resolution fails | Confirm the SDK is Dart 3.13.x and use the checked-in adapter lockfile. |
 | Installation cannot be determined | Use the installed `bin/` layout or pass `--installation` pointing to the installation root. Custom Cargo output locations need an explicit root. |
 | Adapter cannot be found | Prepare `<installation>/adapters/dart`, or select a prepared adapter with `--adapter-root` or the profile's `adapter_root`. |
-| Native analysis helper cannot be found | Build the workspace and keep `failforge-adapter-campaign` beside `failforge`. |
+| Native analysis helper cannot be found | Keep `failforge-adapter-campaign` beside `failforge`; extract the complete archive or build both executables from source. |
 | Package metadata is missing | Run the appropriate `pub get` in the target with the selected SDK. |
 | Baseline tests fail or time out | Run the target's normal test command first, then review the baseline report and timeout settings. |
 | Output already exists | Choose a new report directory. Generated profile files also reject replacement unless `--force` is explicit. |

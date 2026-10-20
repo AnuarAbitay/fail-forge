@@ -188,7 +188,7 @@ dependencies = [
 
 [[package]]
 name = "failforge-cli"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "clap",
  "failforge-config",
@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "failforge-config"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "libc",
  "libyaml-safer",
@@ -218,7 +218,7 @@ dependencies = [
 
 [[package]]
 name = "failforge-dart"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "failforge-runner",
  "failforge-workspace",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "failforge-profile"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "caseless",
  "failforge-config",
@@ -253,7 +253,7 @@ dependencies = [
 
 [[package]]
 name = "failforge-runner"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "libc",
  "sha2",
@@ -264,7 +264,7 @@ dependencies = [
 
 [[package]]
 name = "failforge-tools"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "clap",
  "failforge-config",
@@ -278,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "failforge-workspace"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "libc",
  "serde",

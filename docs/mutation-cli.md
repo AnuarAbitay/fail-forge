@@ -298,12 +298,14 @@ ancestor containing a readable regular `pubspec.yaml`, starting at the profile's
 directory, identifies the project. A missing pubspec is a configuration error;
 the invocation directory does not select a different project.
 
-Prepared profiles are inside the Flutter fixture:
-[classic](../examples/flutter_fixture/profiles/failforge.classic.yml),
-[failure mode](../examples/flutter_fixture/profiles/failforge.failure-mode.yml),
-[Dart semantic](../examples/flutter_fixture/profiles/failforge.dart-semantic.yml),
-and [one source file](../examples/flutter_fixture/profiles/subject.yml).
-Prepare the fixture's dependencies before using them.
+The source checkout includes example profiles in its Flutter fixture:
+[classic](https://github.com/AnuarAbitay/fail-forge/blob/main/examples/flutter_fixture/profiles/failforge.classic.yml),
+[failure mode](https://github.com/AnuarAbitay/fail-forge/blob/main/examples/flutter_fixture/profiles/failforge.failure-mode.yml),
+[Dart semantic](https://github.com/AnuarAbitay/fail-forge/blob/main/examples/flutter_fixture/profiles/failforge.dart-semantic.yml),
+and [one source file](https://github.com/AnuarAbitay/fail-forge/blob/main/examples/flutter_fixture/profiles/subject.yml).
+These links show the repository's `main` branch, not a versioned release asset.
+The fixture is not bundled in the runtime archive. Use the source checkout and
+prepare the fixture's dependencies before running those examples.
 
 For example, place this file at `my_package/profiles/calculator.yml`:
 

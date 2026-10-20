@@ -236,4 +236,6 @@ observed group members, sent signals, errors, and output completion. A process
 group is not an inescapable container: descendants that create another group or
 session fall outside its guarantee. SIGKILL of FailForge, abrupt destruction of
 its runtime, or supervisor abort cannot promise normal Unix cleanup. See
-[architecture.md](architecture.md) for the lifecycle and guarantee boundary.
+[the architecture guide in the source repository](https://github.com/AnuarAbitay/fail-forge/blob/main/docs/architecture.md)
+for the lifecycle and guarantee boundary. That link follows `main`; development
+documentation is not bundled in the runtime archive.

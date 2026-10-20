@@ -5,7 +5,7 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Source archives are downloaded anonymously. No repository token or personal
+# Source revisions are fetched anonymously. No repository token or personal
 # account is used for checkout, and this workflow never publishes artifacts.
 permissions: {}
 
@@ -26,15 +26,17 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - name: Download public source without authentication
+      - name: Check out the exact public revision without authentication
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --location --retry 3 --max-time 60 \
-            --output "$RUNNER_TEMP/failforge-source.tar.gz" \
-            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/archive/$GITHUB_SHA.tar.gz"
-          tar -xzf "$RUNNER_TEMP/failforge-source.tar.gz" \
-            --strip-components=1 -C "$GITHUB_WORKSPACE"
+          git init --quiet "$GITHUB_WORKSPACE"
+          GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+            GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false \
+            git -c credential.helper= -c http.extraHeader= fetch --quiet --no-tags --depth=1 \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git checkout --quiet --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -58,15 +60,17 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - name: Download public source without authentication
+      - name: Check out the exact public revision without authentication
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --location --retry 3 --max-time 60 \
-            --output "$RUNNER_TEMP/failforge-source.tar.gz" \
-            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/archive/$GITHUB_SHA.tar.gz"
-          tar -xzf "$RUNNER_TEMP/failforge-source.tar.gz" \
-            --strip-components=1 -C "$GITHUB_WORKSPACE"
+          git init --quiet "$GITHUB_WORKSPACE"
+          GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+            GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false \
+            git -c credential.helper= -c http.extraHeader= fetch --quiet --no-tags --depth=1 \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git checkout --quiet --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - uses: dtolnay/rust-toolchain@1.85.1
       - name: Toolchain
         run: rustc --version --verbose
@@ -80,15 +84,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Download public source without authentication
+      - name: Check out the exact public revision without authentication
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --location --retry 3 --max-time 60 \
-            --output "$RUNNER_TEMP/failforge-source.tar.gz" \
-            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/archive/$GITHUB_SHA.tar.gz"
-          tar -xzf "$RUNNER_TEMP/failforge-source.tar.gz" \
-            --strip-components=1 -C "$GITHUB_WORKSPACE"
+          git init --quiet "$GITHUB_WORKSPACE"
+          GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+            GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false \
+            git -c credential.helper= -c http.extraHeader= fetch --quiet --no-tags --depth=1 \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git checkout --quiet --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - uses: dtolnay/rust-toolchain@stable
       - name: Doctests
         run: cargo test --workspace --doc --locked
@@ -100,21 +106,23 @@ jobs:
   dart-adapter:
     name: Dart adapter / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - name: Download public source without authentication
+      - name: Check out the exact public revision without authentication
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --location --retry 3 --max-time 60 \
-            --output "$RUNNER_TEMP/failforge-source.tar.gz" \
-            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/archive/$GITHUB_SHA.tar.gz"
-          tar -xzf "$RUNNER_TEMP/failforge-source.tar.gz" \
-            --strip-components=1 -C "$GITHUB_WORKSPACE"
+          git init --quiet "$GITHUB_WORKSPACE"
+          GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+            GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false \
+            git -c credential.helper= -c http.extraHeader= fetch --quiet --no-tags --depth=1 \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git checkout --quiet --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - uses: dtolnay/rust-toolchain@stable
       - name: Install pinned official Flutter SDK and verify archive digest
         shell: bash
@@ -154,3 +162,25 @@ jobs:
         shell: bash
         run: |
           target/release/failforge-tools regression --binary-dir target/release --output "$RUNNER_TEMP/native-regression" --dart-sdk "$RUNNER_TEMP/flutter/bin/cache/dart-sdk" --flutter-sdk "$RUNNER_TEMP/flutter"
+      - name: Package native beta with the matching Rust runtime notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup component add rust-docs rust-src
+          target/debug/failforge-tools package \
+            --installation "$GITHUB_WORKSPACE" \
+            --output "$RUNNER_TEMP/beta-package"
+      - name: Verify and install the actual archive with a fresh dependency cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd "$RUNNER_TEMP/beta-package" && shasum -a 256 -c SHA256SUMS)
+          archive=$(jq -er '.archive' "$RUNNER_TEMP/beta-package/package-manifest.json")
+          archive_root=$(jq -er '.archiveRoot' "$RUNNER_TEMP/beta-package/package-manifest.json")
+          mkdir "$RUNNER_TEMP/extracted beta"
+          tar -xzf "$RUNNER_TEMP/beta-package/$archive" -C "$RUNNER_TEMP/extracted beta"
+          mv "$RUNNER_TEMP/extracted beta/$archive_root" "$RUNNER_TEMP/moved beta installation"
+          target/debug/failforge-tools package-smoke \
+            --installation "$RUNNER_TEMP/moved beta installation" \
+            --dart-sdk "$RUNNER_TEMP/flutter/bin/cache/dart-sdk" \
+            --output "$RUNNER_TEMP/beta-package-smoke"

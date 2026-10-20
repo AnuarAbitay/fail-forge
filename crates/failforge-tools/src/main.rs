@@ -2,6 +2,8 @@
 mod benchmark;
 mod common;
 mod installer;
+mod package;
+mod package_smoke;
 mod public_regression;
 mod regression;
 mod semantic;
@@ -31,6 +33,10 @@ enum Commands {
     Regression(regression::Options),
     /// Repeat explicitly selected archived public-project scopes.
     PublicRegression(public_regression::Options),
+    /// Build a native-host release archive with verified license material.
+    Package(package::Options),
+    /// Verify a relocated installation with the real Dart SDK.
+    PackageSmoke(package_smoke::Options),
 }
 
 fn main() -> std::process::ExitCode {
@@ -47,6 +53,8 @@ fn main() -> std::process::ExitCode {
         Commands::SemanticE2e(options) => semantic::run(options),
         Commands::Regression(options) => regression::run(options),
         Commands::PublicRegression(options) => public_regression::run(options),
+        Commands::Package(options) => package::run(options),
+        Commands::PackageSmoke(options) => package_smoke::run(options),
     };
     match outcome {
         Ok(()) => std::process::ExitCode::SUCCESS,

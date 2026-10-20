@@ -10,7 +10,7 @@ Beta interfaces and report formats may change between releases.
 | --- | --- |
 | Host operating systems | Linux and macOS have process backends. Windows is unsupported. |
 | Local verification | Recorded native and real Dart/Flutter regression runs were performed on macOS arm64. |
-| CI | Linux/macOS jobs are configured. Their configuration alone does not establish that a release commit has passed on either platform. Check the actual workflow results for that commit. |
+| CI | Linux/macOS jobs are configured. The current anonymous source download requires a public repository; it cannot fetch a private repository without an approved authentication change. Check actual workflow results for the release commit rather than treating configuration as a passed run. |
 | Rust source builds | Rust 1.85 or newer is declared; the recorded minimum-version checks use 1.85.1. Build with the committed `Cargo.lock`. |
 | Dart tooling SDK | The adapter requires `>=3.13.0 <3.14.0`; the locally exercised version is 3.13.5. |
 | Flutter | The recorded SDK is Flutter 3.47.7 with Dart 3.13.5. Other Flutter/SDK combinations need their own validation. |
@@ -22,21 +22,29 @@ example. The SDK and package dependencies are separate installation requirements
 
 ## Installation is more than one binary
 
-The documented installation path currently starts from the source repository:
+Install from a native archive or build from the source repository:
 
 ```sh
 cargo build --workspace --locked
 dart --suppress-analytics pub get --enforce-lockfile --directory adapters/dart
 ```
 
-Cargo and the platform's native build tools are required to build from source.
+Cargo and the platform's native build tools are required only to build from source.
 The ordinary build is optimized by the workspace configuration and places
 executables in `target/debug`.
 
 Mutation testing also requires the prepared `adapters/dart` package. Applicability
 analysis for `profile generate` requires `failforge-adapter-campaign` beside the
 `failforge` executable. Copying only `failforge` is insufficient. The Dart/Flutter
-SDK is supplied separately; no Python interpreter is needed.
+SDK is supplied separately; no Python interpreter is needed. A native archive
+also excludes prepared Pub dependencies: run `pub get --enforce-lockfile` for
+the adapter at its final location.
+
+The [local packaging command](packaging.md) builds a host-specific `.tar.gz`
+with both executables, adapter sources, user documentation and license material.
+It does not publish a GitHub release. The initial local archive target is macOS
+arm64; this is not evidence of successful Linux packaging or CI. Archives are
+not universal executables, signed installers or notarized macOS applications.
 
 If arranging a relocated installation, preserve these relationships:
 
@@ -54,8 +62,8 @@ installation/
       .dart_tool/package_config.json  # generated locally by pub get
 ```
 
-This tree describes runtime requirements, not an available prebuilt release
-asset. `installation/bin/failforge` finds the installation from its own real
+This tree describes the runtime layout; it does not imply that a GitHub release
+asset has been published. `installation/bin/failforge` finds the installation from its own real
 location; the source layouts `<checkout>/target/debug/failforge` and
 `<checkout>/target/release/failforge` find that checkout. Relocation does not
 depend on the checkout used to build the binary.
@@ -119,7 +127,7 @@ your own OS/container isolation.
 - Mutation scope selects library code. Class/method filters select mutation
   locations, not a reduced test suite. Generated files and test/dependency sources
   are excluded from mutation discovery. Operators have explicit supported AST/type
-  subsets; see the [classic catalogue](dart-adapter.md#operators-and-patch-contract) and
+  subsets; see [classical applicability](mutation-operators.md#classical-applicability) and
   [Dart semantic catalogue](dart-semantic-mutations.md).
 - The default is one worker; the supported range is **1–4**. Families execute in
   order, and workers parallelize mutants within the current family. More workers
@@ -181,7 +189,7 @@ rename after sudden power loss.
 
 The repository contains unit, process, real-SDK and public-project regression
 checks. Recorded local results and their scope are in
-[known issues and verification history](known-issues.md). That document also
+[known issues and verification history in the source repository](https://github.com/AnuarAbitay/fail-forge/blob/main/docs/known-issues.md). That document also
 records historical defects that have been fixed; they should not be read as a
 list of currently open bugs.
 

@@ -201,8 +201,10 @@ The profile's nearest ancestor `pubspec.yaml` identifies the project. YAML has n
 `version` or `project` field. `language: dart` is mandatory inside a present
 `language_specific` section, including disabled sections. Only individually
 enabled operators run; omitted operators and families are off. The full
-[Dart profile](../examples/flutter_fixture/profiles/failforge.dart-semantic.yml)
-lists all 19 switches, grouped with comments. A profile can also select classical
+[Dart profile in the source repository](https://github.com/AnuarAbitay/fail-forge/blob/main/examples/flutter_fixture/profiles/failforge.dart-semantic.yml)
+lists all 19 switches, grouped with comments. This link follows `main`; its
+Flutter fixture requires a source checkout and is not part of the runtime
+archive. A profile can also select classical
 and failure-mode operators; their results stay separate. See the
 [profile rules](mutation-cli.md#explicit-yaml-configuration).
 

@@ -1,8 +1,55 @@
 # Native developer tools
 
-`failforge-tools` contains the maintained regression and measurement workflows.
+`failforge-tools` contains the maintained packaging, regression and measurement workflows.
 All orchestration is Rust. The Dart adapter and its tests remain Dart. None of
-these commands invokes Python or installs project dependencies implicitly.
+these commands invokes Python. Regression workflows use prepared targets;
+`package-smoke` explicitly prepares an extracted adapter and its own fixture.
+
+## Local beta package
+
+```sh
+rustup component add rust-src rust-docs
+cargo run -p failforge-tools --locked -- package \
+  --output /absolute/new-beta-output \
+  --expected-version 0.1.0-beta.1
+```
+
+The matching `rust-src` and `rust-docs` components supply the Rust runtime notices
+retained in the archive; the package command does not install them implicitly.
+The command builds the two native production executables for the Rust toolchain's
+host using locked dependencies and the optimized default profile, then creates a
+`.tar.gz` with adapter source, user documentation and license material. The
+archive is accompanied by `SHA256SUMS` and `package-manifest.json`. The version is
+read from the freshly built CLI; `--expected-version` rejects a mismatch rather
+than relabeling the archive.
+
+`--installation` selects a source checkout; `--output` must identify a new
+directory. Cargo can download missing build dependencies. No SDK, prepared Pub
+cache, local reports, test fixtures or developer executables are bundled. This
+command does not publish, sign or notarize a release. See the
+[packaging guide](../../docs/packaging.md) for contents, verification and the
+separate archive-installation checks.
+
+Exercise a trusted, extracted archive with:
+
+```sh
+target/debug/failforge-tools package-smoke \
+  --installation "/absolute/path/to/extracted beta installation" \
+  --dart-sdk /absolute/path/to/dart-sdk \
+  --output /absolute/new-package-smoke-results
+```
+
+The smoke command prepares the adapter and a small fixture with enforced
+lockfiles and a fresh cache, then checks the installed CLI from another working
+directory through a symlink. It compares direct and generated-profile execution
+for one classical boolean mutant, including identities, selected paths, reports,
+source preservation and cleanup. It is not the full regression suite. `--offline`
+uses an existing populated `PUB_CACHE` instead; retain the output and its cache
+while inspecting that disposable installation. The output must be outside the
+installation and SDK. The manifest's CLI version and listed payload files are
+checked before and after execution.
+
+## Regression setup
 
 Build the native executables before a real SDK regression, then keep production
 sources, binaries, prepared dependency metadata and SDK files unchanged until
@@ -84,7 +131,7 @@ CPU consumption.
 target/debug/failforge-tools install-test-flutter --destination /absolute/sdk-parent
 ```
 
-This is the only command that downloads anything. It selects Flutter 3.47.7 for
+This command downloads the test SDK. It selects Flutter 3.47.7 for
 the current supported macOS/Linux architecture from the official release
 manifest, verifies the complete archive SHA-256, extracts into staging and
 publishes without replacing any existing destination. The installer unit tests

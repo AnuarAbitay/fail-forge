@@ -7,8 +7,8 @@ When a test catches a change, the mutant is **killed**. When the tests still
 pass, the mutant **survives** and gives you a concrete place to review your
 assertions, edge cases or requirements.
 
-FailForge is preparing for its first public beta. Installation currently uses
-a source checkout. Read the [installation guide](docs/installation.md) and
+FailForge is preparing for its first public beta. Install from a prepared native
+archive or build from source. Read the [installation guide](docs/installation.md) and
 [beta limitations](docs/beta-limitations.md) before your first run.
 
 [Get started](#get-started) ·
@@ -80,20 +80,23 @@ Mutation analysis requires a compatible **Dart SDK `>=3.13.0 <3.14.0`**,
 or Flutter with a Dart SDK in that range. Building from source requires
 **Rust 1.85.1 or newer** and a C linker.
 
-Follow the [installation guide](docs/installation.md) to build FailForge,
-prepare its adapter and prepare your target package's dependencies. It also
-explains Flutter setup and the platforms verified so far.
-After building, you can [move FailForge into a separate installation](docs/installation.md#relocate-an-installation)
-without keeping the original checkout. A compatible SDK and prepared adapter
-dependencies are still required.
+Follow the [installation guide](docs/installation.md) to extract a prepared
+archive or build FailForge, prepare its adapter and prepare your target package's
+dependencies. A native archive needs no Rust installation. A compatible SDK and
+prepared adapter dependencies are still required. Public beta publication is a
+separate step; see [beta limitations](docs/beta-limitations.md) for verification
+scope.
 
 The examples below run from the **target package root**, with these paths set:
 
 ```sh
 export FAILFORGE_HOME=/absolute/path/to/fail-forge
 export DART_SDK=/absolute/path/to/dart-sdk
-export PATH="$FAILFORGE_HOME/target/debug:$PATH"
+export PATH="$FAILFORGE_HOME/bin:$PATH"
 ```
+
+Set `FAILFORGE_HOME` to the extracted installation. For a source build, set it
+to the checkout and use `export PATH="$FAILFORGE_HOME/target/debug:$PATH"` instead.
 
 Replace `lib/src/calculator.dart` with an existing source file in your package.
 Begin with one operator and one file:
@@ -299,6 +302,7 @@ Use `failforge --help` or `<command> --help` for available options.
 ## Documentation and feedback
 
 - [Installation and first run](docs/installation.md)
+- [Build and verify a local beta archive](docs/packaging.md)
 - [Complete mutation operator catalogue](docs/mutation-operators.md)
 - [Mutation commands and profile reference](docs/mutation-cli.md)
 - [Beta limitations and verification scope](docs/beta-limitations.md)
