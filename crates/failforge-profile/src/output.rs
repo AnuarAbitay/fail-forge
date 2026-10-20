@@ -34,6 +34,7 @@ struct Entry {
 }
 
 impl Entry {
+    #[allow(clippy::unnecessary_cast)] // mode_t is narrower than u32 on macOS.
     fn regular(&self) -> bool {
         self.state.mode & libc::S_IFMT as u32 == libc::S_IFREG as u32
     }

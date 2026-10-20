@@ -44,6 +44,11 @@ fn same_directory(left: &Metadata, right: &Metadata) -> bool {
     left.is_dir() && right.is_dir() && left.dev() == right.dev() && left.ino() == right.ino()
 }
 
+#[allow(clippy::unnecessary_cast)] // dev_t is signed on macOS and u64 on Linux.
+fn same_identity(named: &libc::stat, owned: &Metadata) -> bool {
+    named.st_dev as u64 == owned.dev() && named.st_ino == owned.ino()
+}
+
 fn component(value: &OsStr) -> Result<CString, NamespaceError> {
     CString::new(value.as_bytes()).map_err(|_| invalid("invalid namespace artifact name"))
 }
@@ -89,8 +94,7 @@ impl ReportDirectory {
         let owned = file.metadata()?;
         if !owned.is_file()
             || named.st_mode & libc::S_IFMT != libc::S_IFREG
-            || named.st_dev as u64 != owned.dev()
-            || named.st_ino != owned.ino()
+            || !same_identity(&named, &owned)
         {
             return Err(invalid("namespace report artifact changed"));
         }
@@ -109,8 +113,7 @@ impl ReportDirectory {
         if !same_directory(&parent, &fs::symlink_metadata(&self.parent_path)?)
             || !same_directory(&owned, &fs::symlink_metadata(&self.path)?)
             || named.st_mode & libc::S_IFMT != libc::S_IFDIR
-            || named.st_dev as u64 != owned.dev()
-            || named.st_ino != owned.ino()
+            || !same_identity(&named, &owned)
         {
             return Err(invalid("namespace report directory changed"));
         }
@@ -125,10 +128,7 @@ impl ReportDirectory {
             result => result?,
         };
         let owned = file.metadata()?;
-        if named.st_mode & libc::S_IFMT != libc::S_IFREG
-            || named.st_dev as u64 != owned.dev()
-            || named.st_ino != owned.ino()
-        {
+        if named.st_mode & libc::S_IFMT != libc::S_IFREG || !same_identity(&named, &owned) {
             return Err(invalid("namespace report artifact changed"));
         }
         let name = component(name)?;
@@ -168,10 +168,7 @@ impl ReportDirectory {
             self.verify()?;
             let named = stat_at(&self.file, name)?;
             let owned = file.metadata()?;
-            if named.st_dev as u64 != owned.dev()
-                || named.st_ino != owned.ino()
-                || named.st_mode & libc::S_IFMT != libc::S_IFREG
-            {
+            if !same_identity(&named, &owned) || named.st_mode & libc::S_IFMT != libc::S_IFREG {
                 return Err(invalid("namespace report artifact changed"));
             }
             Ok::<_, NamespaceError>(())

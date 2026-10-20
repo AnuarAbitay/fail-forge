@@ -38,6 +38,7 @@ pub(super) fn stat(parent: &File, name: &str) -> io::Result<libc::stat> {
     Ok(unsafe { result.assume_init() })
 }
 
+#[allow(clippy::unnecessary_cast)] // dev_t is signed on macOS and u64 on Linux.
 pub(super) fn same(info: &libc::stat, file: &File, kind: libc::mode_t) -> io::Result<bool> {
     let owned = file.metadata()?;
     Ok(info.st_mode & libc::S_IFMT == kind

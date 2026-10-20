@@ -36,6 +36,8 @@ unreleased; no published release or release date is implied.
 
 ### Fixed
 
+- Permanent output-read errors are recorded without waiting for a readability
+  event that Linux may never emit; capture workers can then finish cleanup.
 - Relocated installations find their installation root relative to the executable
   instead of the original build checkout. Standard source-build locations work
   as well; `--installation` remains an explicit override for custom layouts.

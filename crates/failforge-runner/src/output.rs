@@ -804,19 +804,26 @@ async fn read_pipe(
 ) {
     let mut buffer = vec![0; read_chunk];
     loop {
-        let read = pipe
-            .async_io(Interest::READABLE, |fd| {
-                // SAFETY: fd remains owned by AsyncFd; buffer is writable for
-                // its entire declared length, and read never stores pointers.
-                let bytes =
-                    unsafe { libc::read(fd.as_raw_fd(), buffer.as_mut_ptr().cast(), buffer.len()) };
-                if bytes < 0 {
-                    Err(io::Error::last_os_error())
-                } else {
-                    Ok(bytes as usize)
-                }
-            })
-            .await;
+        let mut read_now = |fd: &OwnedFd| {
+            // SAFETY: fd remains owned by AsyncFd; buffer is writable for
+            // its entire declared length, and read never stores pointers.
+            let bytes =
+                unsafe { libc::read(fd.as_raw_fd(), buffer.as_mut_ptr().cast(), buffer.len()) };
+            if bytes < 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(bytes as usize)
+            }
+        };
+        // A permanent read error need not produce a readable event on Linux.
+        // Probe the nonblocking descriptor first; only WouldBlock needs the
+        // reactor, which also handles readiness arriving between these calls.
+        let read = match read_now(pipe.get_ref()) {
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                pipe.async_io(Interest::READABLE, read_now).await
+            }
+            result => result,
+        };
         let bytes = match read {
             Ok(0) => {
                 lock(&state).summary.eof = true;
@@ -2066,10 +2073,13 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(!lock(&state).summary.eof);
+        let summary = lock(&state).summary.clone();
+        assert!(!summary.eof);
+        assert_eq!(summary.bytes_read, 0);
         assert!(matches!(
-            lock(&state).summary.issue,
-            Some(CaptureIssue::ReadError(_))
+            summary.issue,
+            Some(CaptureIssue::ReadError(message))
+                if message == error_description(&io::Error::from_raw_os_error(libc::EBADF))
         ));
     }
 
