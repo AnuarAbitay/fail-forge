@@ -51,7 +51,7 @@ struct Family {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Request {
+pub(crate) struct Request {
     operation: String,
     mode: Mode,
     project: PreparedProject,
@@ -98,7 +98,10 @@ fn rules(value: &Value, component: bool) -> Result<(), NamespaceError> {
 }
 
 fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
-    let value = parse_json(raw)?;
+    decode_value(parse_json(raw)?)
+}
+
+pub(crate) fn decode_value(value: Value) -> Result<Request, NamespaceError> {
     for key in [
         "",
         "/project",
@@ -356,8 +359,46 @@ async fn verify_inputs(request: Arc<Request>) -> Result<(), NamespaceError> {
     .await
 }
 
+/// Shared campaign semantics; the enclosing lifecycle owns the wire commitment.
+pub(crate) trait CampaignEvents {
+    fn emit_campaign(&mut self, event: Value) -> io::Result<()>;
+    fn finish_campaign(
+        &mut self,
+        status: &str,
+        error: Option<&str>,
+        completed_families: usize,
+        expected_families: usize,
+        completed_mutants: usize,
+        expected_mutants: Option<usize>,
+    ) -> io::Result<()>;
+}
+
+impl CampaignEvents for Stream {
+    fn emit_campaign(&mut self, event: Value) -> io::Result<()> {
+        self.emit_campaign(event)
+    }
+    fn finish_campaign(
+        &mut self,
+        status: &str,
+        error: Option<&str>,
+        completed_families: usize,
+        expected_families: usize,
+        completed_mutants: usize,
+        expected_mutants: Option<usize>,
+    ) -> io::Result<()> {
+        self.finish_campaign(
+            status,
+            error,
+            completed_families,
+            expected_families,
+            completed_mutants,
+            expected_mutants,
+        )
+    }
+}
+
 fn stage(
-    stream: &mut Stream,
+    stream: &mut impl CampaignEvents,
     name: &str,
     family: Option<&str>,
     elapsed: Option<f64>,
@@ -373,7 +414,7 @@ fn stage(
 
 async fn verify_phase(
     request: Arc<Request>,
-    stream: &mut Stream,
+    stream: &mut impl CampaignEvents,
     name: &str,
     family: Option<&str>,
     cancel: &Cancellation,
@@ -396,14 +437,14 @@ struct Ledger {
     infrastructure: bool,
 }
 
-struct FamilySink<'a> {
-    stream: &'a mut Stream,
+struct FamilySink<'a, S> {
+    stream: &'a mut S,
     ledger: &'a mut Ledger,
     family: &'a str,
     started: Instant,
     terminal: Option<(String, Option<String>)>,
 }
-impl FamilyEvents for FamilySink<'_> {
+impl<S: CampaignEvents> FamilyEvents for FamilySink<'_, S> {
     fn emit(&mut self, event: Value) -> io::Result<()> {
         let mutant = event["kind"] == "mutant";
         let infrastructure = mutant && event["record"]["outcome"] == "INFRA_ERROR";
@@ -436,7 +477,7 @@ async fn schedule(
     guards: &Guards,
     caps: &LifecycleCaps,
     cancel: &Cancellation,
-    stream: &mut Stream,
+    stream: &mut impl CampaignEvents,
     ledger: &mut Ledger,
 ) -> Result<(), NamespaceError> {
     let mut discoveries = Vec::new();
@@ -569,7 +610,7 @@ async fn schedule(
 }
 
 fn terminal(
-    stream: &mut Stream,
+    stream: &mut impl CampaignEvents,
     result: Result<(), NamespaceError>,
     cancel: &Cancellation,
     ledger: &Ledger,
@@ -618,11 +659,11 @@ fn terminal_state(
     }
 }
 
-async fn run_owned(
+pub(crate) async fn run_owned(
     request: Arc<Request>,
     caps: LifecycleCaps,
     cancel: &Cancellation,
-    stream: &mut Stream,
+    stream: &mut impl CampaignEvents,
 ) -> Result<(), NamespaceError> {
     let expected_families = request.families.len();
     let mut ledger = Ledger::default();

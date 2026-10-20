@@ -333,8 +333,8 @@ source/dependency/SDK hashes, immutable snapshots, fresh project copies and
 workspace lifecycle operations run through `failforge-workspace` in Rust. One
 native campaign owner schedules discovery and selected families; shared family
 execution owns the baseline, bounded mutant queue and final original control.
-The Python controller prepares campaigns and publishes aggregate evidence and
-scores. Each native test process keeps
+The Python controller transports normalized settings and publishes aggregate evidence and
+scores. Native preflight, snapshot creation and final cleanup share the same owner. Each native test process keeps
 the same Rust Runner ownership. Working copies live in a private per-user
 registry protected by campaign leases. Startup recovery removes only validated
 unlocked campaigns; inherited lease descriptors keep a live Rust cleanup owner
@@ -345,17 +345,24 @@ recovery itself can be retried. Named profiles, persistent resume and Pub
 workspace support remain outside this implementation. See the
 [mutation CLI](mutation-cli.md).
 
-The input bridge uses one context-scoped client per public campaign or profile,
-shared by campaign preparation and native campaign dispatch. A private unlinked JSON descriptor carries
-one bounded workspace request to the existing native owner; a single batched
-binding request hashes all dependencies, SDK inputs, tools and controller files.
-The bridge validates a bounded versioned JSON response and never falls back to
-Python after an error. Copy owners inherit the current campaign lease. Read-only
-source verification uses an independent cancellation token so a cancelled test
-cannot hide input drift. Initial preflight, snapshot/bootstrap lifecycle and
-aggregate report assembly remain in Python in this migration stage. Direct research helpers
-without a production client retain their legacy
-Python implementations for diagnostics and differential tests.
+If bound snapshot removal detects a replaced allocation or otherwise cannot
+prove removal, the session does not fall through to the generic campaign reaper.
+It creates `.cleanup-blocked` relative to its retained campaign descriptor and
+reports deferred cleanup. The marker is an unrecognized control entry, so later
+automatic recovery also preserves that campaign for inspection. Cleanup success
+is never inferred merely from the disappearance of an old pathname.
+
+Both public modes send one bounded request through an unlinked descriptor to
+`campaign-run`. Rust checks original project/toolchain/configuration inputs before
+creating any report output, allocates the private registry and snapshot, hashes
+all dependencies, SDK inputs, tools and controller files, and calls the shared
+campaign scheduler directly. Ownership stays in Rust until final workspace cleanup
+and original-source verification finish. Cancellation cannot skip those final
+checks. Python does not issue input/lifecycle IPC or borrow workspace descriptors
+on this public path; it retains environment/configuration transport and aggregate
+report publication. Standalone prepared-input bridges and research helpers remain
+available as explicit diagnostics and differential-test oracles, without fallback
+from a failed production operation.
 
 Dart namespace isolation lives in `failforge-dart`: lexical scanning, source and
 plan bindings, prefix edits, inverse proofs, preflight validation and rollback
@@ -396,8 +403,8 @@ It verifies campaign input bindings before and after each control, and source,
 capture or cleanup failures override any policy confirmation or cancellation.
 It writes the final mutation record with candidate metadata and the public
 control proof; reusable policy state remains private. Python transports the
-campaign request and sealed records, retaining all four workspace capabilities
-through completion. It does not apply patches, schedule causal controls or rewrite the
+campaign request and sealed records. The native session retains workspace capabilities
+through completion; standalone diagnostic bridges borrow them explicitly. Python does not apply patches, schedule causal controls or rewrite the
 record on this path. A completed `CANCELLED` record is returned to the outer
 scheduler so partial reports retain the finished owner's evidence.
 
@@ -421,8 +428,7 @@ requests cancellation, continues retaining later completed records without furth
 publication, and waits for native cleanup. Missing or invalid terminal evidence
 cannot establish success.
 
-Both public launch modes now dispatch one `campaign-execute` operation. The native
-owner discovers every selected family before any baseline starts, applies the
+Inside the public `campaign-run` lifecycle, the shared campaign scheduler discovers every selected family before any baseline starts, applies the
 profile's shared mutant cap, and runs families in canonical order: `classic`,
 `failure_mode`, `language_specific`. It calls shared discovery and family
 implementations directly, without recursive CLI calls or Python dispatch between
@@ -437,8 +443,10 @@ completion validates semantics without inventing a second byte stream. Every
 frame remains capped at 64 MiB, and the event count is bounded by the mutant cap
 plus per-family stage events. Python validates family order, the shared limit,
 unique candidate identities, nested record bindings and terminal coverage before
-accepting success. It still owns initial preflight, snapshot allocation, final
-workspace cleanup and aggregate publication. Partial native records survive
+accepting success. The lifecycle stream additionally authenticates prepared metadata,
+workspace allocation, snapshot and bindings, then both cleanup phases and their
+receipt. Aggregate reports are initialized only after the native `prepared` event.
+No success is accepted without final cleanup and terminal evidence. Partial native records survive
 callback failures, while an infrastructure failure cannot be hidden by callback
 cancellation or a completed inner family.
 
@@ -449,13 +457,13 @@ and reconstructs its in-memory patch from the source snapshot. The native owner
 writes the bounded transcript and drains the adapter before authenticating
 captures, checking unchanged inputs and publishing its receipt. The native
 campaign owner calls it directly; Python validates the emitted receipt without
-reparsing the public transcript. The controller retains the same campaign lease
+reparsing the public transcript. The native session retains the same campaign lease
 during the entire operation. SIGINT and SIGTERM
 are forwarded once after readiness; owned cancellation is returned only after
 cleanup, and infrastructure failures take precedence. The separately installed
 adapter helper remains available to profile generation and diagnostic tools.
 
-The lifecycle bridge obtains already opened registry, campaign, work and lease
+The standalone diagnostic lifecycle bridge obtains already opened registry, campaign, work and lease
 descriptors through a private Unix socket's `SCM_RIGHTS` handoff. The queued
 message retains the same locked open-file description after the creator exits;
 the controller never reopens a returned pathname to acquire its lease. Subsequent
@@ -480,7 +488,7 @@ Rust discovery owner. A cancellation or controller crash closes the private
 control channel so that owner drains its adapter before releasing the workspace
 lease. Generation verifies complete static evidence and unchanged inputs before
 publishing through directory-bound atomic filesystem operations. Campaign
-bootstrap and aggregate publication remain in Python during the incremental migration.
+aggregate publication, manifests and terminal tables remain in Python during the migration.
 
 Primary Dart/Flutter test classification lives in `failforge-dart`. The native
 test owner parses the complete JSON reporter stream after Runner shutdown and

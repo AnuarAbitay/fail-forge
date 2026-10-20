@@ -49,6 +49,9 @@ pub(crate) enum Commands {
     /// Private campaign discovery and family scheduling operation.
     #[command(hide = true)]
     CampaignExecute,
+    /// Private owner of preflight, snapshot, campaign execution and cleanup.
+    #[command(hide = true)]
+    CampaignRun,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

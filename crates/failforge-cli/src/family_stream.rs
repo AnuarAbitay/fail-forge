@@ -84,6 +84,32 @@ impl<W: FrameWriter> Stream<W> {
         )
     }
 
+    pub(crate) fn emit_session(&mut self, event: Value) -> io::Result<()> {
+        self.emit_known(
+            event,
+            &[
+                "prepared",
+                "stage_started",
+                "stage_finished",
+                "workspace",
+                "snapshot",
+                "bindings",
+                "campaign_event",
+                "campaign_finished",
+                "cleanup",
+            ],
+        )
+    }
+
+    pub(crate) fn finish_session(&mut self, status: &str, error: Option<&str>) -> io::Result<()> {
+        if !matches!(status, "completed" | "no_mutants" | "failed" | "cancelled")
+            || (matches!(status, "completed" | "no_mutants") && error.is_some())
+        {
+            return Err(invalid("invalid session terminal"));
+        }
+        self.seal(json!({"status":status,"error":error}))
+    }
+
     fn emit_known(&mut self, mut event: Value, kinds: &[&str]) -> io::Result<()> {
         self.ready()?;
         let fields = event

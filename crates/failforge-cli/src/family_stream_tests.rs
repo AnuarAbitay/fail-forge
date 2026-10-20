@@ -12,6 +12,62 @@ fn rows(bytes: &[u8]) -> Vec<Value> {
 }
 
 #[test]
+fn session_seals_outer_cleanup_and_unversioned_campaign_events_once() {
+    let mut stream = Stream::new(Vec::new());
+    for kind in [
+        "prepared",
+        "stage_started",
+        "stage_finished",
+        "workspace",
+        "snapshot",
+        "bindings",
+        "campaign_event",
+        "campaign_finished",
+        "cleanup",
+    ] {
+        stream.emit_session(json!({"kind":kind})).unwrap();
+    }
+    let prefix = stream.writer.clone();
+    assert!(stream.finish_session("completed", Some("failure")).is_err());
+    assert!(stream.finish_session("other", None).is_err());
+    assert_eq!(stream.writer, prefix);
+    stream.finish_session("completed", None).unwrap();
+    let values = rows(&stream.writer);
+    assert_eq!(values.len(), 10);
+    let terminal = values.last().unwrap();
+    assert_eq!(terminal["eventCount"], 9);
+    assert_eq!(
+        terminal["eventSha256"],
+        format!("{:x}", Sha256::digest(prefix))
+    );
+    assert_eq!(terminal["status"], "completed");
+    assert!(stream.emit_session(json!({"kind":"cleanup"})).is_err());
+    assert!(stream.finish_session("failed", Some("late")).is_err());
+}
+
+#[test]
+fn session_rejects_forged_envelopes_and_size_without_advancing_commitment() {
+    let mut stream = Stream::new(Vec::new());
+    stream.limit = 512;
+    for event in [
+        json!({"kind":"mutant"}),
+        json!({"kind":"terminal"}),
+        json!({"kind":"prepared","sequence":99}),
+        json!({"kind":"cleanup","eventSha256":"forged"}),
+        json!({"kind":"bindings","value":"x".repeat(512)}),
+    ] {
+        assert!(stream.emit_session(event).is_err());
+        assert!(stream.writer.is_empty());
+        assert_eq!(stream.count, 0);
+    }
+    stream.emit_session(json!({"kind":"cleanup"})).unwrap();
+    stream
+        .finish_session("failed", Some("bounded event rejected"))
+        .unwrap();
+    assert_eq!(rows(&stream.writer).len(), 2);
+}
+
+#[test]
 fn frames_are_flat_ordered_and_terminal_hashes_exact_utf8_prefix_with_delimiters() {
     let mut stream = Stream::new(Vec::new());
     stream

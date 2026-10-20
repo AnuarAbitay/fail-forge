@@ -22,26 +22,28 @@ candidate binding. The native mutant owner executes those controls and checks
 input bindings between them. One native campaign owner schedules discovery,
 profile family ordering and execution input checkpoints. Shared family execution
 runs the baseline, worker queue and final original control. The Python controller
-retains preflight/bootstrap, cancellation forwarding and aggregate report assembly.
+retains normalized settings/environment transport, cancellation forwarding and aggregate report assembly.
 
 Prepared package inspection, source and tool hashes, dependency bindings,
 snapshot copying and fresh attempt copying execute in Rust through
-`failforge-workspace`. Each campaign has its own native input client, including
-native campaign dispatch; native errors fail the operation without a Python fallback.
-Copy requests retain the campaign workspace lease. Read-only source checks still
+`failforge-workspace`. One `campaign-run` owner performs preflight, output creation,
+registry recovery, snapshot preparation, binding, discovery and execution, then
+workspace cleanup and final original-source verification. Preflight failure creates
+no report output. Native errors fail the operation without a Python fallback.
+The native owner retains the campaign workspace lease. Read-only source checks still
 execute after cancellation and report changed inputs as infrastructure failure.
 Registry allocation, leases, recovery and removal of owned copies also execute
 in Rust. Dart namespace scanning, copy rewrites, inverse proofs and read-only
 analyzer planning also execute in Rust through `failforge-dart` and the existing
 Runner. The native family owner retains its namespace-plan cache. The controller
-retains inherited descriptor capabilities, campaign context lifetimes and
-aggregate report assembly.
+retains aggregate report assembly. Public launches send only a request descriptor;
+workspace descriptors never leave the native session.
 
 The native campaign owner calls the shared discovery implementation. It starts the persistent
 `AdapterClient` directly, validates the handshake, complete discovery and each
 candidate, checks source-bound patches, drains the adapter and Runner, verifies
 unchanged inputs and publishes the transcript and receipt. The controller sends
-one campaign request while retaining the campaign lease; it neither starts the
+one campaign request; the native owner retains the campaign lease. Python neither starts the
 adapter helper nor re-parses its protocol journal on this production path.
 The receipt's `command` remains the reproducible helper recipe. Discovery
 artifacts include `payload.json`, `adapter-session.jsonl`, `adapter.stderr` and
@@ -59,8 +61,8 @@ session does not override a failed final source or artifact check.
 One native owner now performs each complete attempt: allocation, fresh copying,
 namespace preparation, source-bound patch application, test execution, capture
 authentication, input verification, temporary-copy cleanup and private report
-publication. The controller borrows four workspace capabilities while that owner
-runs. It transports the expected patch hash; Rust independently reconstructs the
+publication. The native session retains the workspace capabilities; standalone
+diagnostic bridges can borrow them explicitly. Rust independently reconstructs the
 patch from the bound mutant and rejects a mismatch before starting tests.
 Opaque baseline catalogues, initialization continuations and namespace plans stay
 outside public attempt JSON. The native family owner retains them directly between
@@ -74,12 +76,11 @@ tests. Initialization failures follow the existing native causal policy through
 at most three fresh attempts: original-before, mutant-replay and original-after.
 The owner checks the frozen campaign bindings before and after each control and
 publishes the final `result.json` with mutant metadata and the public control
-proof. The Python bridge retains the workspace capabilities until completion;
-it does not repeat the patch checks, schedule those controls or rewrite that
-record. Private continuation state remains outside public JSON.
+proof. Python does not repeat the patch checks, schedule those controls or rewrite
+that record. The native session retains ownership until cleanup completes. Private continuation state remains outside public JSON.
 
-Both direct and profile launches use one native scheduling operation. Rust first
-discovers every selected family, checks the profile's aggregate mutant limit,
+Both direct and profile launches use one native lifecycle operation. After
+preflight and snapshot preparation, Rust discovers every selected family, checks the profile's aggregate mutant limit,
 then runs families in the fixed order `classic`, `failure_mode`,
 `language_specific`. It verifies the original source and frozen execution inputs
 at phase boundaries; a failed phase stops later families. No Python discovery
@@ -96,14 +97,15 @@ an empty profile family skips author execution.
 The controller receives discovery receipts, progress and completed records as
 bounded LF-framed JSON events, draining stderr concurrently. Each frame is limited
 to 64 MiB; the event count is bounded by the configured mutant cap plus per-family
-stage events. A terminal event commits the preceding raw bytes with SHA-256 and
-validates family and mutant coverage. Nested family completion has no separate
-byte commitment. Records arriving
+stage events and bounded lifecycle phases. The same stream includes prepared
+metadata, snapshot/binding receipts and final cleanup evidence. A terminal event
+commits all preceding raw bytes with SHA-256; nested campaign and family completion
+validate coverage without separate byte commitments. Records arriving
 after cancellation remain in the partial report. If a progress or report callback
 fails, the controller requests cancellation and retains subsequent records without
 calling that failing publication path again. A successful native terminal still
-requires final source checks, workspace cleanup and aggregate publication
-before the campaign can report success.
+already includes final source checks and workspace cleanup. Python then atomically
+publishes the aggregate report before the campaign can report success.
 
 An attempt becomes terminal after source verification and cleanup. Cancellation
 observed before that point is recorded in its result; a later cancellation stops
