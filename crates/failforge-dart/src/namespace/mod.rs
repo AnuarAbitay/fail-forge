@@ -4,7 +4,7 @@
 //! complete source/configuration binding, authorizes only namespace-prefix
 //! bytes, and commits prepared-copy edits with rollback on failure. Original
 //! project and framework files are read-only inputs.
-mod fs;
+pub(crate) mod fs;
 mod isolation;
 mod plan;
 mod scanner;

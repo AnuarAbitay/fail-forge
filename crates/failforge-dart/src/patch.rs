@@ -103,6 +103,16 @@ pub fn read_and_apply_mutant(
     mutant: &Mutant,
     max_source_bytes: usize,
 ) -> Result<Vec<u8>, PatchError> {
+    apply_mutant(&read_mutant_source(root, mutant, max_source_bytes)?, mutant)
+}
+
+/// Bind even a statically invalid candidate to its original source without
+/// treating static invalidity as permission to read another file.
+pub(crate) fn read_mutant_source(
+    root: &Path,
+    mutant: &Mutant,
+    max_source_bytes: usize,
+) -> Result<Vec<u8>, PatchError> {
     validate_relative_target(&mutant.file)?;
     mutant.validate_model()?;
     let root = root.canonicalize()?;
@@ -118,7 +128,10 @@ pub fn read_and_apply_mutant(
     if source.len() > max_source_bytes {
         return Err(PatchError::SourceTooLarge);
     }
-    apply_mutant(&source, mutant)
+    if sha256_hex(&source) != mutant.source_hash {
+        return Err(PatchError::HashMismatch);
+    }
+    Ok(source)
 }
 
 fn open_relative_regular_file(root: &Path, relative: &str) -> Result<std::fs::File, PatchError> {

@@ -2,10 +2,16 @@
 #[cfg(not(unix))]
 compile_error!("FailForge's first stage supports Linux and macOS only");
 
+mod adapter_discovery;
 mod args;
+mod attempt;
+mod attempt_artifacts;
+mod attempt_execution;
 mod dart_namespace;
 mod diagnostics;
 mod display;
+mod mutant_confirmation;
+mod mutant_execution;
 mod mutate;
 mod namespace_planner;
 mod private_request;
@@ -63,6 +69,9 @@ fn main() -> ExitCode {
         Commands::WorkspaceInputs => return workspace_inputs::execute(),
         Commands::WorkspaceLifecycle => return workspace_lifecycle::execute(),
         Commands::DartNamespace => return dart_namespace::execute(),
+        Commands::TestAttempt => return attempt::execute(),
+        Commands::AdapterDiscover => return adapter_discovery::execute(),
+        Commands::MutantExecute => return mutant_execution::execute(),
         Commands::Profile(arguments) => match arguments.command {
             ProfileCommands::Generate(arguments) => {
                 return profile::execute(*arguments, &invocation_cwd);

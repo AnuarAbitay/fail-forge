@@ -52,7 +52,7 @@ async fn sequential_requests_remote_errors_and_shared_runner_admission_are_indep
     assert_eq!(client.validate(json!({})).await.unwrap()["sequence"], 3);
     let result = close_bounded(client).await.unwrap();
     assert!(result.status.unwrap().success());
-    assert!(result.cleanup.is_complete());
+    assert!(result.cleanup.is_complete(), "cleanup: {result:?}");
     // Closing one session does not close Runner admission or its global owner.
     let mut second = AdapterClient::start(runner.clone(), spec("normal"), options()).unwrap();
     second.handshake().await.unwrap();
@@ -62,7 +62,14 @@ async fn sequential_requests_remote_errors_and_shared_runner_admission_are_indep
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn malformed_version_identity_size_and_eof_fail_closed() {
-    for mode in ["wrong-id", "wrong-version", "malformed", "oversize", "eof"] {
+    for mode in [
+        "wrong-id",
+        "wrong-version",
+        "malformed",
+        "oversize",
+        "eof",
+        "duplicate-nested",
+    ] {
         let runner = Arc::new(Runner::new());
         let mut client = AdapterClient::start(runner.clone(), spec(mode), options()).unwrap();
         let error = client.handshake().await.unwrap_err();
@@ -75,6 +82,7 @@ async fn malformed_version_identity_size_and_eof_fail_closed() {
                 "wrong-version" =>
                     matches!(error, ClientError::Protocol(ProtocolError::VersionMismatch)),
                 "malformed" => matches!(error, ClientError::Json(_)),
+                "duplicate-nested" => matches!(error, ClientError::InvalidMetadata),
                 "oversize" => matches!(error, ClientError::LineTooLarge),
                 "eof" => matches!(error, ClientError::UnexpectedEof),
                 _ => false,
@@ -85,7 +93,12 @@ async fn malformed_version_identity_size_and_eof_fail_closed() {
             client.handshake().await,
             Err(ClientError::InterruptedRequest)
         ));
-        let _ = close_bounded(client).await;
+        let closed = tokio::time::timeout(Duration::from_secs(5), client.close_with_result())
+            .await
+            .unwrap();
+        let result = closed.result.unwrap();
+        assert!(result.cleanup.child_reaped);
+        assert!(result.stdout.eof && result.stderr.eof);
         shutdown(&runner).await;
     }
 }
@@ -96,10 +109,17 @@ async fn stdout_after_last_response_is_rejected_at_close_after_cleanup() {
     let mut client =
         AdapterClient::start(runner.clone(), spec("extra-on-close"), options()).unwrap();
     client.handshake().await.unwrap();
+    let closed = tokio::time::timeout(Duration::from_secs(5), client.close_with_result())
+        .await
+        .unwrap();
     assert!(matches!(
-        close_bounded(client).await,
+        closed.outcome,
         Err(ClientError::UnsolicitedResponse)
     ));
+    let result = closed.result.unwrap();
+    assert!(result.cleanup.is_complete());
+    assert!(result.stdout.eof && result.stderr.eof);
+    assert!(result.stdout.sha256.is_some() && result.stderr.sha256.is_some());
     shutdown(&runner).await;
 }
 
@@ -203,8 +223,50 @@ async fn request_deadline_stops_its_owned_process() {
         client.handshake().await,
         Err(ClientError::TimedOut)
     ));
-    let _ = close_bounded(client).await;
+    let closed = tokio::time::timeout(Duration::from_secs(5), client.close_with_result())
+        .await
+        .unwrap();
+    let result = closed.result.unwrap();
+    assert!(result.cleanup.child_reaped);
+    assert!(result.stdout.eof && result.stderr.eof);
     shutdown(&runner).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn close_deadline_retains_capture_receipt_after_forced_owned_cleanup() {
+    let runner = Arc::new(Runner::new());
+    let mut specification = spec("hang-on-close");
+    specification.timeout_policy.grace_period = Duration::from_millis(50);
+    specification.timeout_policy.forced_wait = Duration::from_millis(100);
+    specification.timeout_policy.output_drain = Duration::from_millis(50);
+    let mut client = AdapterClient::start(
+        runner.clone(),
+        specification,
+        ClientOptions {
+            request_timeout: Duration::from_secs(1),
+            ..options()
+        },
+    )
+    .unwrap();
+    client.handshake().await.unwrap();
+    let closed = tokio::time::timeout(Duration::from_secs(5), client.close_with_result())
+        .await
+        .unwrap();
+    shutdown(&runner).await;
+    assert!(matches!(closed.outcome, Err(ClientError::TimedOut)));
+    let result = closed.result.unwrap();
+    assert!(result.cleanup.child_reaped);
+    assert!(matches!(
+        result.cleanup.group,
+        failforge_runner::GroupState::NoLiveMembers { .. }
+    ));
+    // A cooperative exit can race the forced signal. Preserve any recorded
+    // signal error instead of inventing successful cleanup for this timeout.
+    if !result.cleanup.errors.is_empty() {
+        assert!(!result.cleanup.is_complete());
+    }
+    assert!(result.stdout.eof && result.stderr.eof);
+    assert!(result.stdout.sha256.is_some() && result.stderr.sha256.is_some());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

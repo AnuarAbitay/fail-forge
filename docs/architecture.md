@@ -366,6 +366,53 @@ The receipt's command is the actual Dart child command. Python retains the plan
 cache and dispatches fresh attempts; active production requests cannot fall back
 to the diagnostic Python scanner or planner after a native failure.
 
+Each production test attempt is one native operation. Its owner borrows the
+registry, campaign, work and lease capabilities, allocates a fresh copy, performs
+namespace isolation and validates the exact mutant patch before calling Runner.
+After Runner shutdown it authenticates captures, applies catalogue and
+initialization policy, verifies unchanged execution inputs and removes the owned
+copy even after cancellation. Only then does it seal the public attempt report.
+Cancellation after that terminal publication affects the campaign's remaining
+work; the Python `TestExecutor` bridge never reclassifies or rewrites the sealed
+attempt.
+
+The private response carries the public result separately from reusable baseline
+catalogues, initialization continuations and namespace-plan cache entries. The
+controller validates transport shapes and caches opaque values without reading
+report files as authority or reparsing raw reporter events. Its first namespace
+preparation is serialized per executor; later attempts, including header-only
+isolation, run in parallel. Direct unconfigured diagnostic attempts retain the
+legacy path. Campaign scheduling, baseline and final original controls, global
+input checkpoints and aggregate report publication remain in Python.
+
+Each production mutant also has one native owner. It validates the discovered
+candidate against the current source and reconstructed patch, then calls the
+shared attempt implementation directly. A statically invalid candidate produces
+an `INVALID` record without allocating a test copy. When initialization evidence
+requires causal confirmation, the same owner follows the native policy through
+at most three fresh controls: original-before, mutant-replay and original-after.
+It verifies campaign input bindings before and after each control, and source,
+capture or cleanup failures override any policy confirmation or cancellation.
+It writes the final mutation record with candidate metadata and the public
+control proof; reusable policy state remains private. Python only transports the
+request and sealed result, retaining all four workspace capabilities through
+completion. It does not apply patches, schedule causal controls or rewrite the
+record on this path. A completed `CANCELLED` record is returned to the outer
+scheduler so partial reports retain the finished owner's evidence. Families and
+workers still run through the Python campaign scheduler during this migration.
+
+Production discovery has its own private native operation. It owns one
+`AdapterClient` session directly through Runner, checks the selected family's
+operator catalogue and canonical mutant identities, validates every candidate
+and reconstructs its in-memory patch from the source snapshot. The native owner
+writes the bounded transcript and drains the adapter before authenticating
+captures, checking unchanged inputs and publishing its receipt. The controller
+retains the same campaign lease during the entire operation and validates the
+private response without reparsing the public transcript. SIGINT and SIGTERM
+are forwarded once after readiness; owned cancellation is returned only after
+cleanup, and infrastructure failures take precedence. The separately installed
+adapter helper remains available to profile generation and diagnostic tools.
+
 The lifecycle bridge obtains already opened registry, campaign, work and lease
 descriptors through a private Unix socket's `SCM_RIGHTS` handoff. The queued
 message retains the same locked open-file description after the creator exits;
@@ -396,12 +443,14 @@ execution controller remains in Python during the incremental migration.
 Primary Dart/Flutter test classification lives in `failforge-dart`. The native
 test owner parses the complete JSON reporter stream after Runner shutdown and
 uses its typed process result, so diagnostics printed by a child cannot supply
-cleanup or termination evidence. The remaining Python campaign controller passes
-a private anonymous regular-file descriptor to that owner. Both descriptor copies
-close on child exec, and the private environment variable is removed from the
-test command. The committed envelope binds the reporter mode, actual owner exit,
-and byte lengths and SHA-256 hashes of both raw captures. Missing, uncommitted or
-inconsistent evidence fails closed before author-failure attribution.
+cleanup or termination evidence. The Python campaign controller passes the
+attempt request through a private anonymous regular-file descriptor. It closes on
+child exec, and its environment variable is removed from the test command.
+The native attempt owner binds the reporter mode, typed execution result, and
+byte lengths and SHA-256 hashes of both raw captures before returning the private
+completion. Inconsistent evidence fails closed before author-failure attribution.
+The lower-level `run` diagnostic interface retains its separate committed
+evidence descriptor for compatibility.
 Runner computes each digest from bytes read from the child's pipe, before disk
 writing. Native classification and publication compare the stored capture to
 that digest, so a same-length file replacement cannot manufacture a verdict.
@@ -410,9 +459,9 @@ Author-test identities and catalogue comparison also live in `failforge-dart`.
 The native owner emits a bounded catalogue snapshot with normalized paths,
 group ancestry, source locations, multiplicities and diagnostics. The controller
 retains the passing baseline snapshot as opaque data. On subsequent attempts it
-passes that snapshot and the expected selection through a separate private,
-anonymous context descriptor, read before child startup and closed on child exec.
-The context is limited to 64 MiB and rejects malformed or duplicate JSON fields.
+passes that snapshot and the expected selection in the private attempt request,
+read before child startup. The request is limited to 64 MiB and rejects malformed
+or duplicate JSON fields.
 Baseline comparison therefore does not depend on reopening an already cleaned
 baseline working copy. Retained reporter data, observed identities and the
 structural catalogue view each have a separate 32 MiB accounting budget.
@@ -424,8 +473,9 @@ exact-selection checks.
 Native setup-suppression analysis explains missing tests without claiming their
 identities were observed. An incomplete catalogue remains unclassified unless a
 separate, unique ordinary test passed in the baseline and now has a source-bound
-failure outside the suppressed group. Changed source inputs still override any
-native classification with an infrastructure error in the controller.
+failure outside the suppressed group. The attempt owner overrides classification
+with an infrastructure error when execution inputs change. Campaign-wide binding
+checks in the controller also guard original, dependency and tool inputs.
 
 Loader observations, suite selection and causal initialization decisions also
 live in `failforge-dart`. The owner reports the next required control and an
@@ -435,9 +485,11 @@ startup. The ordered original/mutant/original experiment only confirms a kill
 after both originals pass and the mutant reproduces the eligible diagnostic.
 The private envelope carries both the current attempt and the causal decision;
 reports retain the original observation and all executed controls, without
-publishing reusable continuation state. The controller still checks capture
-identity, source integrity, cancellation and execution bindings before accepting
-the native confirmation.
+publishing reusable continuation state. Each native attempt owner checks capture
+identity, execution-source integrity, cancellation and copy cleanup before
+returning a continuation. The enclosing native mutant owner checks campaign
+execution bindings between controls and executes the requested next role through
+the same attempt implementation.
 
 Initialization observations require a complete valid reporter stream. A control
 timeout with an incomplete stream keeps its primary `TIMEOUT` evidence, but
@@ -447,8 +499,11 @@ context remain capped at 64 MiB each. These are data limits, not process RSS
 limits. Temporary workspace paths are normalized while diagnostic text, stack
 coordinates and test identity multiplicities remain part of the comparison.
 
-The controller still owns baseline/control execution, working copies, scheduling
-and final reports. Legacy diagnostic scripts retain
+The controller still schedules baselines, mutant workers and final original
+controls, retains opaque per-run caches, checks campaign bindings and publishes
+aggregate reports. Native mutant owners perform causal controls and publish each
+mutation record; shared native attempts manage fresh working copies,
+authenticated captures and cleanup. Legacy diagnostic scripts retain
 their Python reporter implementation during migration; product test attempts do
 not fall back to it. Native parsing rejects duplicate keys, non-finite numbers,
 invalid Unicode and excessive nesting. Integer tokens must fit signed or

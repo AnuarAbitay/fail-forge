@@ -61,6 +61,8 @@ pub enum ClientError {
     Protocol(#[from] ProtocolError),
     #[error("adapter JSON failed: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("adapter JSON contains invalid or duplicate metadata")]
+    InvalidMetadata,
     #[error("adapter transport I/O failed: {0}")]
     Io(#[from] io::Error),
     #[error("adapter spawn failed: {0}")]
@@ -82,6 +84,14 @@ pub struct AdapterClient {
     next_id: u64,
     in_flight: bool,
     poisoned: bool,
+}
+
+/// The process receipt survives post-execution protocol and capture failures.
+/// An owner can authenticate both captures before classifying cancellation.
+#[derive(Debug)]
+pub struct ClientClose {
+    pub outcome: Result<Arc<CommandResult>, ClientError>,
+    pub result: Option<Arc<CommandResult>>,
 }
 
 impl AdapterClient {
@@ -221,7 +231,17 @@ impl AdapterClient {
             chunk.mark_displayed(consumed);
             self.check_loss()?;
             if finished {
-                let response: ResponseEnvelope = serde_json::from_slice(&line)?;
+                // Preserve the existing syntax-error category, then reject
+                // duplicate nested keys before Value can silently collapse
+                // contradictory adapter metadata.
+                let value =
+                    failforge_workspace::parse_json(&line).map_err(
+                        |_| match serde_json::from_slice::<ResponseEnvelope>(&line) {
+                            Err(error) => ClientError::Json(error),
+                            Ok(_) => ClientError::InvalidMetadata,
+                        },
+                    )?;
+                let response: ResponseEnvelope = serde_json::from_value(value)?;
                 response.validate_for(id, command)?;
                 return Ok(response);
             }
@@ -238,7 +258,20 @@ impl AdapterClient {
     /// Closes adapter input and waits for this run only. The actual status is
     /// returned for the caller to classify; an adapter error cannot shut down
     /// unrelated commands using the shared Runner.
-    pub async fn close(mut self) -> Result<Arc<CommandResult>, ClientError> {
+    pub async fn close(self) -> Result<Arc<CommandResult>, ClientError> {
+        self.close_with_result().await.outcome
+    }
+
+    pub async fn close_with_result(self) -> ClientClose {
+        let mut result = None;
+        let outcome = self.close_recorded(&mut result).await;
+        ClientClose { outcome, result }
+    }
+
+    async fn close_recorded(
+        mut self,
+        evidence: &mut Option<Arc<CommandResult>>,
+    ) -> Result<Arc<CommandResult>, ClientError> {
         if self.poisoned {
             self.handle.force_cancel(CancelReason::User);
         } else if self.in_flight {
@@ -261,12 +294,26 @@ impl AdapterClient {
         }).await;
         let result = match outcome {
             Ok(Ok(result)) => result,
-            Ok(Err(error)) => return Err(ClientError::Execution(error)),
+            Ok(Err(error)) => {
+                *evidence = error
+                    .partial_result()
+                    .map(|result| Arc::new(result.clone()));
+                return Err(ClientError::Execution(error));
+            }
             Err(_) => {
                 self.handle.force_cancel(CancelReason::User);
+                // Keep the sole result consumer alive through owned cleanup.
+                // Runner's forced-wait/output-drain policies bound this wait.
+                *evidence = match self.handle.wait().await {
+                    Ok(result) => Some(result),
+                    Err(error) => error
+                        .partial_result()
+                        .map(|result| Arc::new(result.clone())),
+                };
                 return Err(ClientError::TimedOut);
             }
         };
+        *evidence = Some(result.clone());
         self.check_loss()?;
         if result.stdout.stream_dropped_bytes != 0 || result.stderr.stream_dropped_bytes != 0 {
             return Err(ClientError::OutputLost);

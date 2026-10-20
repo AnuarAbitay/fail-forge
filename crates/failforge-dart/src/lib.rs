@@ -18,7 +18,9 @@
 //! Its confirmation remains subject to the controller's source-integrity and
 //! cancellation checks before publication.
 
+pub mod attempt_workspace;
 mod client;
+pub mod discovery;
 mod evidence;
 mod initialization;
 pub mod namespace;
@@ -28,7 +30,7 @@ mod test_catalog;
 mod test_outcome;
 mod test_reporter;
 
-pub use client::{AdapterClient, ClientError, ClientOptions};
+pub use client::{AdapterClient, ClientClose, ClientError, ClientOptions};
 pub use evidence::{TestEvidence, TestRunClassification, classify_test_run};
 pub use initialization::{
     ConfirmationSignature, InitializationAttempt, InitializationContext, InitializationDecision,
@@ -45,6 +47,6 @@ pub use protocol::{
 };
 pub use test_catalog::{
     CatalogError, CatalogSnapshot, SelectionContext, analyze_catalogue, apply_selection,
-    parse_selection_context,
+    parse_selection_context, validate_selection_context,
 };
 pub use test_outcome::{ReporterMode, classify_dart_capture, classify_dart_result};

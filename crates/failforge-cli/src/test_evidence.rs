@@ -6,6 +6,7 @@ use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 
+use failforge_dart::{CatalogSnapshot, InitializationHandoff, SelectionContext};
 use failforge_runner::{CaptureSummary, CommandResult, CommandSpec};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -15,6 +16,74 @@ use crate::args::TestReporter;
 pub(crate) const EVIDENCE_ENV: &str = "FAILFORGE_TEST_EVIDENCE_FD";
 const MAX_CAPTURE: u64 = 256 * 1024 * 1024;
 const MAX_REPORT: usize = 64 * 1024 * 1024;
+
+/// In-memory evidence shared by `run` and the complete native attempt owner.
+/// Private catalogue/continuation state is deliberately not Serialize: callers
+/// choose the explicit private envelope rather than embedding it in reports.
+#[derive(Debug)]
+pub(crate) struct AttemptEvidence {
+    pub(crate) classification: serde_json::Value,
+    pub(crate) catalogue: Option<CatalogSnapshot>,
+    pub(crate) initialization: InitializationHandoff,
+    pub(crate) stdout_length: u64,
+    pub(crate) stdout_hash: String,
+    pub(crate) stderr_length: u64,
+    pub(crate) stderr_hash: String,
+}
+
+/// Authenticate both complete captures after Runner shutdown, then reuse the
+/// native verdict, catalogue and initialization policy without a CLI round trip.
+pub(crate) fn analyze(
+    result: &CommandResult,
+    native_ok: bool,
+    cwd: &Path,
+    reporter: TestReporter,
+    context: &SelectionContext,
+) -> io::Result<AttemptEvidence> {
+    failforge_dart::validate_selection_context(context).map_err(|_| invalid())?;
+    let stdout = read_capture(&result.stdout, true)?;
+    let stderr = read_capture(&result.stderr, false)?;
+    let mut classification =
+        failforge_dart::classify_dart_result(&stdout.bytes, result, reporter.mode());
+    if !native_ok {
+        classification["outcome"] = "INFRA_ERROR".into();
+        classification["reason"] = "native_owner_failed".into();
+    }
+    let mut catalogue = None;
+    if matches!(
+        classification["outcome"].as_str(),
+        Some("KILLED" | "SURVIVED" | "LOAD_FAILURE")
+    ) {
+        match failforge_dart::analyze_catalogue(&stdout.bytes, cwd, reporter.mode()) {
+            Ok(snapshot) => {
+                failforge_dart::apply_selection(&mut classification, &snapshot, context)
+                    .map_err(|_| invalid())?;
+                catalogue = Some(snapshot);
+            }
+            Err(_) => {
+                classification["outcome"] = "INFRA_ERROR".into();
+                classification["reason"] = "invalid_author_test_catalogue".into();
+            }
+        }
+    }
+    let initialization = failforge_dart::initialization_handoff(
+        &stdout.bytes,
+        cwd,
+        reporter.mode(),
+        &mut classification,
+        context,
+    )
+    .map_err(|_| invalid())?;
+    Ok(AttemptEvidence {
+        classification,
+        catalogue,
+        initialization,
+        stdout_length: stdout.length,
+        stdout_hash: stdout.hash,
+        stderr_length: stderr.length,
+        stderr_hash: stderr.hash,
+    })
+}
 
 pub(crate) struct EvidenceHandoff {
     file: File,
@@ -87,47 +156,15 @@ impl EvidenceHandoff {
         native_ok: bool,
         cwd: &Path,
     ) -> io::Result<()> {
-        let stdout = read_capture(&result.stdout, true)?;
-        let stderr = read_capture(&result.stderr, false)?;
-        let mut classification =
-            failforge_dart::classify_dart_result(&stdout.bytes, result, self.mode.mode());
-        if !native_ok {
-            classification["outcome"] = "INFRA_ERROR".into();
-            classification["reason"] = "native_owner_failed".into();
-        }
-        let mut catalogue = None;
         let context = self.context.unwrap_or_default();
-        if matches!(
-            classification["outcome"].as_str(),
-            Some("KILLED" | "SURVIVED" | "LOAD_FAILURE")
-        ) {
-            match failforge_dart::analyze_catalogue(&stdout.bytes, cwd, self.mode.mode()) {
-                Ok(snapshot) => {
-                    failforge_dart::apply_selection(&mut classification, &snapshot, &context)
-                        .map_err(|_| invalid())?;
-                    catalogue = Some(snapshot);
-                }
-                Err(_) => {
-                    classification["outcome"] = "INFRA_ERROR".into();
-                    classification["reason"] = "invalid_author_test_catalogue".into();
-                }
-            }
-        }
-        let initialization = failforge_dart::initialization_handoff(
-            &stdout.bytes,
-            cwd,
-            self.mode.mode(),
-            &mut classification,
-            &context,
-        )
-        .map_err(|_| invalid())?;
+        let evidence = analyze(result, native_ok, cwd, self.mode, &context)?;
         let value = json!({
             "version":3,"reporterMode":self.mode.as_str(),"ownerExitCode":exit_code,
-            "stdoutBytes":stdout.length,"stderrBytes":stderr.length,
-            "stdoutSha256":stdout.hash,"stderrSha256":stderr.hash,
-            "classification":classification,
-            "catalogue":catalogue,
-            "initialization":initialization,
+            "stdoutBytes":evidence.stdout_length,"stderrBytes":evidence.stderr_length,
+            "stdoutSha256":evidence.stdout_hash,"stderrSha256":evidence.stderr_hash,
+            "classification":evidence.classification,
+            "catalogue":evidence.catalogue,
+            "initialization":evidence.initialization,
         });
         let mut encoded = BoundedReport(Vec::new());
         serde_json::to_writer(&mut encoded, &value)?;

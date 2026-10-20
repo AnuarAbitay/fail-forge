@@ -262,3 +262,98 @@ fn changed_handoff_never_receives_a_report() {
     assert!(evidence.publish(&result, 125, false, &fixture.0).is_err());
     assert_eq!(file.metadata().unwrap().len(), 8);
 }
+
+#[test]
+fn in_memory_analysis_matches_private_handoff_without_publishing_private_state() {
+    let fixture = Fixture::new();
+    let raw = [
+        json!({"type":"start","time":0,"protocolVersion":"0.1.1","runnerVersion":"1.33.0","pid":10}),
+        json!({"type":"suite","time":1,"suite":{"id":0,"platform":"vm","path":"test/author_test.dart"}}),
+        json!({"type":"group","time":2,"group":{"id":1,"suiteID":0,"parentID":null,"name":"","testCount":1,"metadata":{"skip":false}}}),
+        json!({"type":"testStart","time":3,"test":{"id":2,"suiteID":0,"groupIDs":[1],"name":"author","metadata":{"skip":false}}}),
+        json!({"type":"testDone","time":4,"testID":2,"result":"success","hidden":false,"skipped":false}),
+        json!({"type":"allSuites","time":5,"count":1}),
+        json!({"type":"done","time":6,"success":true}),
+    ].into_iter().flat_map(|event| {
+        let mut bytes = serde_json::to_vec(&event).unwrap();
+        bytes.push(b'\n');
+        bytes
+    }).collect::<Vec<_>>();
+    let context = SelectionContext {
+        alias: "subject".into(),
+        ..Default::default()
+    };
+    let result = CommandResult {
+        cause: CompletionCause::ProcessCompleted,
+        status: Some(ExitStatus::from_raw(0)),
+        timings: Default::default(),
+        stdout: fixture.capture("stdout", &raw),
+        stderr: fixture.capture("stderr", b"\0\xff"),
+        cleanup: CleanupReport {
+            child_reaped: true,
+            output_finished: true,
+            group: GroupState::NoLiveMembers { zombies: 0 },
+            ..Default::default()
+        },
+    };
+    let native = analyze(&result, true, &fixture.0, TestReporter::Dart, &context).unwrap();
+    assert_eq!(native.classification["outcome"], "SURVIVED");
+    assert_eq!(
+        native.classification["testIdentities"],
+        json!([["test/author_test.dart", "author"]])
+    );
+    assert!(native.catalogue.is_some());
+    assert!(native.initialization.observation.observation.is_some());
+    let mut file = fixture.file("private-result", true);
+    let mut handoff = adopt(&file).unwrap();
+    handoff.context = Some(context);
+    handoff.publish(&result, 0, true, &fixture.0).unwrap();
+    file.rewind().unwrap();
+    let mut encoded = Vec::new();
+    file.read_to_end(&mut encoded).unwrap();
+    assert!(encoded.ends_with(b"\n"));
+    let envelope: serde_json::Value = serde_json::from_slice(&encoded).unwrap();
+    assert_eq!(
+        envelope,
+        json!({
+            "version":3, "reporterMode":"dart", "ownerExitCode":0,
+            "stdoutBytes":native.stdout_length, "stderrBytes":native.stderr_length,
+            "stdoutSha256":native.stdout_hash, "stderrSha256":native.stderr_hash,
+            "classification":native.classification, "catalogue":native.catalogue,
+            "initialization":native.initialization,
+        })
+    );
+}
+
+#[test]
+fn invalid_typed_context_and_fifo_capture_cannot_supply_evidence() {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let fixture = Fixture::new();
+    let result = CommandResult {
+        cause: CompletionCause::ProcessCompleted,
+        status: None,
+        timings: Default::default(),
+        stdout: fixture.capture("stdout", b""),
+        stderr: fixture.capture("stderr", b""),
+        cleanup: Default::default(),
+    };
+    let context = SelectionContext {
+        baseline: Some(CatalogSnapshot {
+            raw_sha256: "invalid".into(),
+            cwd: "/".into(),
+            identities: vec![],
+            view: None,
+        }),
+        ..Default::default()
+    };
+    assert!(analyze(&result, true, &fixture.0, TestReporter::Dart, &context).is_err());
+    let path = fixture.0.join("fifo");
+    let native = CString::new(path.as_os_str().as_bytes()).unwrap();
+    // SAFETY: native is a terminated private fixture pathname; no FD is opened
+    // here. The tested reader must reject this FIFO without waiting for writers.
+    assert_eq!(unsafe { libc::mkfifo(native.as_ptr(), 0o600) }, 0);
+    let mut fifo = result.stdout;
+    fifo.file_path = Some(path);
+    assert!(read_capture(&fifo, true).is_err());
+}

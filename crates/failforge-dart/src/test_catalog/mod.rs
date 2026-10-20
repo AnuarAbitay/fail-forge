@@ -40,12 +40,19 @@ pub fn parse_selection_context(bytes: &[u8]) -> Result<SelectionContext, Catalog
         .map_err(|_| CatalogError("invalid test selection context"))?;
     let context: SelectionContext = serde_json::from_value(value)
         .map_err(|_| CatalogError("invalid test selection context"))?;
+    validate_selection_context(&context)?;
+    Ok(context)
+}
+
+/// Validate an already-decoded context before starting a child. Native owners
+/// keep this value in memory; they do not need to encode a private FD request.
+pub fn validate_selection_context(context: &SelectionContext) -> Result<(), CatalogError> {
     if let Some(baseline) = &context.baseline {
         comparison::validate_snapshot(baseline)?;
     }
-    crate::initialization::validate_request(&context)
+    crate::initialization::validate_request(context)
         .map_err(|_| CatalogError("invalid initialization context"))?;
-    Ok(context)
+    Ok(())
 }
 
 /// Apply catalogue policy only after native capture authentication and primary
@@ -101,4 +108,44 @@ pub fn apply_selection(
         result["reason"] = Value::from("author_test_catalogue_incomplete_after_setup_failure");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod context_validation_tests {
+    use super::*;
+
+    #[test]
+    fn typed_context_validation_matches_wire_validation() {
+        let valid = SelectionContext {
+            alias: "subject".into(),
+            ..Default::default()
+        };
+        assert!(validate_selection_context(&valid).is_ok());
+        assert!(parse_selection_context(&serde_json::to_vec(&valid).unwrap()).is_ok());
+        let bad_baseline = SelectionContext {
+            baseline: Some(CatalogSnapshot {
+                raw_sha256: "bad".into(),
+                cwd: "/".into(),
+                identities: vec![],
+                view: None,
+            }),
+            ..valid.clone()
+        };
+        let bad_initialization = SelectionContext {
+            initialization: Some(crate::InitializationRequest::Initial {
+                candidate_valid: true,
+                baseline: crate::InitializationEvidence {
+                    outcome: "SURVIVED".into(),
+                    reason: "user_tests_passed".into(),
+                    test_identities: None,
+                    observation: None,
+                },
+            }),
+            ..valid
+        };
+        for context in [bad_baseline, bad_initialization] {
+            assert!(validate_selection_context(&context).is_err());
+            assert!(parse_selection_context(&serde_json::to_vec(&context).unwrap()).is_err());
+        }
+    }
 }

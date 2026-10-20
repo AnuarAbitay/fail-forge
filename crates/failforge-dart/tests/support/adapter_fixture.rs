@@ -39,6 +39,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         let mut line = String::new();
         if reader.read_line(&mut line)? == 0 {
+            if mode == "hang-on-close" {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+            }
             if mode == "extra-on-close" {
                 stdout.write_all(b"{}\n")?;
                 stdout.flush()?;
@@ -75,6 +78,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if mode == "oversize" {
             stdout.write_all(&vec![b'x'; 1025])?;
             stdout.write_all(b"\n")?;
+            stdout.flush()?;
+            continue;
+        }
+        if mode == "duplicate-nested" {
+            writeln!(
+                stdout,
+                "{{\"protocolVersion\":1,\"requestId\":{},\"kind\":\"handshake\",\"payload\":{{\"valid\":true,\"valid\":false}}}}",
+                serde_json::to_string(&request.request_id)?
+            )?;
             stdout.flush()?;
             continue;
         }

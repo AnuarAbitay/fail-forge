@@ -9,6 +9,109 @@ use std::time::{Duration, Instant};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
+#[test]
+fn bound_allocation_retains_lease_through_cleanup_until_owner_drop() {
+    let fixture = Fixture::new();
+    let started = start(&fixture.root, &Cancellation::default()).unwrap();
+    let close_caps = LifecycleCaps {
+        root: started.caps.root.try_clone().unwrap(),
+        campaign: started.caps.campaign.try_clone().unwrap(),
+        work: started.caps.work.try_clone().unwrap(),
+        lease: None,
+    };
+    let lease_path = fixture.root.join(&started.campaign_name).join(LEASE);
+    let mut allocation = allocate_bound(
+        &fixture.root,
+        &started.campaign_name,
+        started.caps,
+        "attempt",
+        &Cancellation::default(),
+    )
+    .unwrap();
+    assert!(busy(&lease_path));
+    assert!(allocation.name().starts_with("attempt-"));
+    allocation.verify(&Cancellation::default()).unwrap();
+    private_file(&allocation.path().join("payload"), b"data");
+    allocation.remove(&Cancellation::default()).unwrap();
+    allocation.remove(&Cancellation::default()).unwrap();
+    assert!(busy(&lease_path));
+    assert!(allocation.verify(&Cancellation::default()).is_err());
+    drop(allocation);
+    assert!(!busy(&lease_path));
+    assert!(
+        !close(
+            &fixture.root,
+            &started.campaign_name,
+            close_caps,
+            &Cancellation::default()
+        )
+        .unwrap()
+        .cleanup_deferred
+    );
+}
+
+#[test]
+fn bound_allocation_distinguishes_removed_inode_from_renamed_empty_directory() {
+    for renamed in [false, true] {
+        let fixture = Fixture::new();
+        let started = start(&fixture.root, &Cancellation::default()).unwrap();
+        let mut allocation = allocate_bound(
+            &fixture.root,
+            &started.campaign_name,
+            started.caps,
+            "attempt",
+            &Cancellation::default(),
+        )
+        .unwrap();
+        let path = allocation.path().to_owned();
+        let outside = fixture.base.join("renamed");
+        if renamed {
+            fs::rename(&path, &outside).unwrap();
+            assert!(allocation.remove(&Cancellation::default()).is_err());
+            assert!(outside.is_dir());
+            fs::rename(outside, &path).unwrap();
+        } else {
+            fs::remove_dir(&path).unwrap();
+        }
+        allocation.remove(&Cancellation::default()).unwrap();
+        allocation.remove(&Cancellation::default()).unwrap();
+        assert!(!path.exists());
+    }
+}
+
+#[test]
+fn bound_allocation_cleanup_cancel_is_retryable_without_releasing_its_lease() {
+    let fixture = Fixture::new();
+    let started = start(&fixture.root, &Cancellation::default()).unwrap();
+    let lease = fixture.root.join(&started.campaign_name).join(LEASE);
+    let mut allocation = allocate_bound(
+        &fixture.root,
+        &started.campaign_name,
+        started.caps,
+        "attempt",
+        &Cancellation::default(),
+    )
+    .unwrap();
+    private_file(&allocation.path().join("a"), b"first");
+    private_file(&allocation.path().join("b"), b"second");
+    let cancel = Cancellation::default();
+    let request = cancel.clone();
+    TEST_HOOK.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(move |stage| {
+            if stage == Stage::WorkEntryRemoved {
+                request.request(libc::SIGTERM);
+            }
+        }))
+    });
+    let result = allocation.remove(&cancel);
+    TEST_HOOK.with(|slot| slot.borrow_mut().take());
+    assert!(matches!(result, Err(InputError::Cancelled(libc::SIGTERM))));
+    assert!(busy(&lease));
+    assert!(allocation.path().is_dir());
+    allocation.remove(&Cancellation::default()).unwrap();
+    assert!(!allocation.path().exists());
+}
+
 struct Fixture {
     base: PathBuf,
     root: PathBuf,
@@ -142,6 +245,82 @@ fn cloned(caps: &LifecycleCaps, lease: bool) -> LifecycleCaps {
             None
         },
     }
+}
+
+#[test]
+fn public_capability_duplicates_retain_the_same_lease_until_the_last_owner_closes() {
+    let fixture = Fixture::new();
+    let started = begin(&fixture.root);
+    let caps = started.caps.try_clone().unwrap();
+    caps.verify(
+        &fixture.root,
+        &started.campaign_name,
+        &Cancellation::default(),
+    )
+    .unwrap();
+    for file in [
+        &caps.root,
+        &caps.campaign,
+        &caps.work,
+        caps.lease.as_ref().unwrap(),
+    ] {
+        // SAFETY: each descriptor is owned by the live capability object.
+        assert_ne!(
+            unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFD) } & libc::FD_CLOEXEC,
+            0
+        );
+    }
+    let campaign = started.campaign_name.clone();
+    assert!(finish(started).cleanup_deferred);
+    assert!(fixture.root.join(&campaign).is_dir());
+    caps.verify(&fixture.root, &campaign, &Cancellation::default())
+        .unwrap();
+    let mut closing = caps.try_clone().unwrap();
+    drop(caps);
+    assert!(busy(&fixture.root.join(&campaign).join("lease")));
+    closing.lease.take();
+    assert!(
+        !close(&fixture.root, &campaign, closing, &Cancellation::default())
+            .unwrap()
+            .cleanup_deferred
+    );
+    assert!(!fixture.root.join(campaign).exists());
+}
+
+#[test]
+fn capability_verification_without_allocation_rejects_missing_lease_and_replaced_work() {
+    let fixture = Fixture::new();
+    let started = begin(&fixture.root);
+    let mut caps = started.caps.try_clone().unwrap();
+    caps.lease.take();
+    failure_reason(
+        caps.verify(
+            &fixture.root,
+            &started.campaign_name,
+            &Cancellation::default(),
+        ),
+        "missing_workspace_lease",
+    );
+    let work = fixture.root.join(&started.campaign_name).join(WORK);
+    let displaced = fixture.base.join("old-work");
+    fs::rename(&work, &displaced).unwrap();
+    private_directory(&work);
+    failure_reason(
+        started.caps.verify(
+            &fixture.root,
+            &started.campaign_name,
+            &Cancellation::default(),
+        ),
+        "directory_changed",
+    );
+    fs::remove_dir(work).unwrap();
+    fs::rename(
+        displaced,
+        fixture.root.join(&started.campaign_name).join(WORK),
+    )
+    .unwrap();
+    drop(caps);
+    assert!(!finish(started).cleanup_deferred);
 }
 
 fn finish(mut started: StartResult) -> CloseReport {

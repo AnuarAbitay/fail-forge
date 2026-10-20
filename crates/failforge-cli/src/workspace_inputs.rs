@@ -43,14 +43,14 @@ enum Request {
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RuntimeInputs {
-    installation: PathBuf,
-    runner: PathBuf,
-    dart_sdk: PathBuf,
-    flutter_sdk: Option<PathBuf>,
-    adapter_root: PathBuf,
+pub(crate) struct RuntimeInputs {
+    pub(crate) installation: PathBuf,
+    pub(crate) runner: PathBuf,
+    pub(crate) dart_sdk: PathBuf,
+    pub(crate) flutter_sdk: Option<PathBuf>,
+    pub(crate) adapter_root: PathBuf,
 }
 
 fn invalid(message: &str) -> InputError {
@@ -178,7 +178,7 @@ impl Trees<'_> {
     }
 }
 
-fn bind_inputs(
+pub(crate) fn bind_inputs(
     runtime: &RuntimeInputs,
     project: &PreparedProject,
     environment: &BTreeMap<String, String>,

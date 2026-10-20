@@ -34,6 +34,15 @@ pub(crate) enum Commands {
     /// Internal Dart namespace planning and isolated byte rewriting.
     #[command(hide = true)]
     DartNamespace,
+    /// Internal complete test attempt owned by one native process.
+    #[command(hide = true)]
+    TestAttempt,
+    /// Internal owned adapter discovery and source-bound validation.
+    #[command(hide = true)]
+    AdapterDiscover,
+    /// Internal complete mutant execution and causal controls.
+    #[command(hide = true)]
+    MutantExecute,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]

@@ -312,6 +312,11 @@ fresh snapshots, bounded parallel attempts, machine-event evidence and reports
 through the Python campaign package. It supports prepared standalone Dart and
 Flutter packages. Named profiles, persistent resume and Pub workspaces remain
 outside that implementation. `session` remains a low-level Rust example.
+Production discovery itself now has a native owner: it calls `AdapterClient`
+directly, validates source-bound candidates, drains the adapter and publishes
+the complete transcript and receipt while retaining the campaign lease. The
+Python controller only transports this private response and schedules subsequent
+attempts; its diagnostic transcript reader is not a fallback on native failure.
 `scripts/dart_adapter_e2e.py` is an executable fixture harness demonstrating
 snapshot/baseline/discover/validate/copy/patch/test/cleanup with explicit test files.
 Its Flutter-3.47.7 reporter extraction distinguishes assertion/test failures,

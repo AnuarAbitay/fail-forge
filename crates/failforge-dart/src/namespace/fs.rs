@@ -148,7 +148,7 @@ pub(super) fn sync(file: &File) -> io::Result<()> {
     }
 }
 
-pub(super) struct Root {
+pub(crate) struct Root {
     pub path: PathBuf,
     file: File,
 }
@@ -245,7 +245,7 @@ impl Root {
     }
 }
 
-pub(super) struct BoundFile {
+pub(crate) struct BoundFile {
     relative: String,
     parent: File,
     name: OsString,

@@ -13,13 +13,14 @@ test timeout or kill that cleanup owner.
 Primary Dart/Flutter reporter parsing, author-test catalogue comparison and
 outcome classification run in Rust. This includes conservative setup-suppression
 analysis, independent ordinary-failure witnesses and initialization confirmation.
-The campaign accepts the native verdict only after verifying its private handoff
-against both raw captures. A private input descriptor transfers the opaque
+The native attempt owner authenticates both raw captures against the Runner
+result before accepting its verdict. A private input descriptor transfers the opaque
 baseline catalogue and expected test selection to each native owner before it
 starts the test process. For an eligible loading failure, Rust requests the next
 original/mutant/original control through opaque state and validates its order and
-candidate binding. The campaign controller executes those requests and retains
-source-integrity checks, cancellation and report assembly.
+candidate binding. The native mutant owner executes those controls and checks
+input bindings between them. The campaign controller retains the worker queue,
+campaign-wide input checkpoints, cancellation and aggregate report assembly.
 
 Prepared package inspection, source and tool hashes, dependency bindings,
 snapshot copying and fresh attempt copying execute in Rust through
@@ -33,11 +34,65 @@ analyzer planning also execute in Rust through `failforge-dart` and the existing
 Runner. The controller retains inherited descriptor capabilities, temporary
 context lifetimes, per-project plan caching, overall scheduling and report assembly.
 
+Discovery also runs through one native owner. It starts the persistent
+`AdapterClient` directly, validates the handshake, complete discovery and each
+candidate, checks source-bound patches, drains the adapter and Runner, verifies
+unchanged inputs and publishes the transcript and receipt. The controller sends
+one private request while retaining the campaign lease; it neither starts the
+adapter helper nor re-parses its protocol journal on this production path.
+The receipt's `command` remains the reproducible helper recipe. Discovery
+artifacts include `payload.json`, `adapter-session.jsonl`, `adapter.stderr` and
+`result.json`. Transcript records retain the 8 MiB limit, and the complete native
+transcript and private response are each bounded to 64 MiB. Exceeding a bound
+fails discovery without publishing candidates for execution.
+Source verification retains its 4 MiB per-file limit. The native owner also
+authenticates raw adapter captures, accepting at most 128 MiB of stdout and
+8 MiB of stderr; a capture issue or an exceeded bound fails the operation.
+When the output directory remains valid, cancellation or failure also leaves a
+receipt with `freshStaticValidation: false`: `exitCode` is 130 for SIGINT,
+143 for SIGTERM or 125 for an infrastructure failure. A cleanly closed adapter
+session does not override a failed final source or artifact check.
+
+One native owner now performs each complete attempt: allocation, fresh copying,
+namespace preparation, source-bound patch application, test execution, capture
+authentication, input verification, temporary-copy cleanup and private report
+publication. The controller borrows four workspace capabilities while that owner
+runs. It transports the expected patch hash; Rust independently reconstructs the
+patch from the bound mutant and rejects a mismatch before starting tests.
+Opaque baseline catalogues, initialization continuations and namespace plans stay
+outside public attempt JSON. The controller caches them only after validating the
+complete private response. The `TestExecutor` bridge does not parse raw captures
+or rewrite the native result.
+
+A complete mutant is now one native operation as well. Rust checks the candidate
+and source-bound patch before calling the shared attempt implementation directly.
+Statically invalid candidates receive an `INVALID` record without starting author
+tests. Initialization failures follow the existing native causal policy through
+at most three fresh attempts: original-before, mutant-replay and original-after.
+The owner checks the frozen campaign bindings before and after each control and
+publishes the final `result.json` with mutant metadata and the public control
+proof. The Python bridge retains the workspace capabilities until completion;
+it does not repeat the patch checks, schedule those controls or rewrite that
+record. Private continuation state remains outside public JSON.
+
+An attempt becomes terminal after source verification and cleanup. Cancellation
+observed before that point is recorded in its result; a later cancellation stops
+subsequent campaign work without changing an already sealed attempt. Input,
+capture or cleanup failures still take precedence over cancellation. The public
+`command` retains the reproducible `failforge run ... -- dart ...` or Flutter
+recipe. The attempt owner starts the SDK child directly through Runner; it does
+not recursively invoke that recipe. `exitCode` records the native test-execution
+exit policy. Successful private transport can therefore
+return a killed, timed-out or cancelled attempt as a complete result.
+
 Configuration loading itself needs neither Python nor an SDK and never starts
 author tests. Python is still required for campaign execution. Profile generation
 runs through the native `failforge-profile` crate without Python or PyYAML. The native
 configuration library also exposes the direct settings and profile APIs for
-later migration stages; this step does not migrate the execution engine.
+later migration stages. Worker queues, baseline and final original controls,
+family scheduling and aggregate reports still use the Python controller. Standalone diagnostic tools
+retain their Python transcript implementation during migration; a native
+production error never falls back to that implementation.
 
 ## Prepare the installation and target
 

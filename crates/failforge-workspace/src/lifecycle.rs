@@ -19,6 +19,10 @@ use crate::{Cancellation, InputError, failure};
 mod fs;
 use fs::*;
 
+#[path = "lifecycle_allocation.rs"]
+mod allocation;
+pub use allocation::{BoundAllocation, allocate_bound};
+
 pub const LEASE_MAGIC: &[u8] = b"FAILFORGE_WORKSPACE_LEASE_V1\n";
 const GLOBAL: &str = ".global.lock";
 const OWNER: &str = ".owner";
@@ -63,6 +67,30 @@ pub struct LifecycleCaps {
     pub campaign: File,
     pub work: File,
     pub lease: Option<File>,
+}
+
+impl LifecycleCaps {
+    /// Share the same leased open-file description with another owned attempt.
+    /// No pathname is reopened and dropping a duplicate never unlocks a peer.
+    pub fn try_clone(&self) -> io::Result<Self> {
+        Ok(Self {
+            root: self.root.try_clone()?,
+            campaign: self.campaign.try_clone()?,
+            work: self.work.try_clone()?,
+            lease: self.lease.as_ref().map(File::try_clone).transpose()?,
+        })
+    }
+
+    /// Authenticate a leased campaign without allocating a temporary copy.
+    pub fn verify(
+        &self,
+        root: &Path,
+        campaign: &str,
+        cancel: &Cancellation,
+    ) -> Result<(), InputError> {
+        drop(validate_caps(root, campaign, self, cancel)?);
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -577,22 +605,7 @@ pub fn allocate(
     kind: &str,
     cancel: &Cancellation,
 ) -> Result<Allocation, InputError> {
-    require(
-        matches!(kind, "snapshot" | "attempt"),
-        "invalid_workspace_kind",
-    )?;
-    let _guard = validate_caps(root_path, campaign_name, &caps, cancel)?;
-    cancel.check()?;
-    let name = format!("{kind}-{}", random_token()?);
-    mkdir_at(caps.work.as_raw_fd(), OsStr::new(&name))?;
-    #[cfg(test)]
-    stage(Stage::AllocationCreated);
-    // Do not observe late cancellation after committing an allocation: its name
-    // must reach the caller so its context manager can clean it up.
-    Ok(Allocation {
-        path: root_path.join(campaign_name).join(WORK).join(&name),
-        name,
-    })
+    Ok(allocate_bound(root_path, campaign_name, caps, kind, cancel)?.into_unbound())
 }
 
 /// Remove one known temporary allocation, without following payload aliases.

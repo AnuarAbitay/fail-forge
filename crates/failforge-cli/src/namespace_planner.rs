@@ -71,7 +71,7 @@ fn stat_at(parent: &File, name: &OsStr) -> Result<libc::stat, NamespaceError> {
 /// A report pathname is checked for visibility, but it never authorizes a
 /// write. All private artifacts are created relative to the retained directory
 /// descriptor, including failure receipts and partial-publication cleanup.
-struct ReportDirectory {
+pub(crate) struct ReportDirectory {
     path: PathBuf,
     parent_path: PathBuf,
     parent: File,
@@ -80,7 +80,29 @@ struct ReportDirectory {
 }
 
 impl ReportDirectory {
-    fn verify(&self) -> Result<(), NamespaceError> {
+    pub(crate) fn verify_file(&self, name: &str, file: &File) -> Result<(), NamespaceError> {
+        if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
+            return Err(invalid("invalid namespace artifact name"));
+        }
+        self.verify()?;
+        let named = stat_at(&self.file, OsStr::new(name))?;
+        let owned = file.metadata()?;
+        if !owned.is_file()
+            || named.st_mode & libc::S_IFMT != libc::S_IFREG
+            || named.st_dev as u64 != owned.dev()
+            || named.st_ino != owned.ino()
+        {
+            return Err(invalid("namespace report artifact changed"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn canonical_path(&self) -> Result<PathBuf, NamespaceError> {
+        self.verify()?;
+        Ok(self.parent_path.join(&self.name))
+    }
+
+    pub(crate) fn verify(&self) -> Result<(), NamespaceError> {
         let parent = self.parent.metadata()?;
         let owned = self.file.metadata()?;
         let named = stat_at(&self.parent, &self.name)?;
@@ -118,7 +140,7 @@ impl ReportDirectory {
         Ok(())
     }
 
-    fn write_private(&self, name: &str, raw: &[u8]) -> Result<File, NamespaceError> {
+    pub(crate) fn write_private(&self, name: &str, raw: &[u8]) -> Result<File, NamespaceError> {
         if name.is_empty() || name.contains('/') || matches!(name, "." | "..") {
             return Err(invalid("invalid namespace artifact name"));
         }
@@ -161,7 +183,7 @@ impl ReportDirectory {
         Ok(file)
     }
 
-    fn write_json(&self, name: &str, value: &Value) -> Result<File, NamespaceError> {
+    pub(crate) fn write_json(&self, name: &str, value: &Value) -> Result<File, NamespaceError> {
         let mut raw =
             serde_json::to_vec_pretty(value).map_err(|_| invalid("invalid namespace receipt"))?;
         raw.push(b'\n');
@@ -173,6 +195,35 @@ fn report_directory(
     project: &PlanProject,
     directory: &Path,
     runtime: &PlanRuntime,
+) -> Result<ReportDirectory, NamespaceError> {
+    let protected = protected_inputs(project, runtime)?;
+    create_report_directory(directory, &protected)
+}
+
+pub(crate) fn protected_inputs(
+    project: &PlanProject,
+    runtime: &PlanRuntime,
+) -> Result<Vec<PathBuf>, NamespaceError> {
+    let mut protected = vec![
+        project.root.canonicalize()?,
+        runtime.adapter_root.canonicalize()?,
+        runtime.dart_sdk.canonicalize()?,
+    ];
+    if let Some(flutter) = &runtime.flutter_sdk {
+        protected.push(flutter.canonicalize()?);
+    }
+    protected.extend(
+        failforge_workspace::dependency_roots(
+            &project.root.join(".dart_tool/package_config.json"),
+        )?
+        .into_values(),
+    );
+    Ok(protected)
+}
+
+pub(crate) fn create_report_directory(
+    directory: &Path,
+    protected: &[PathBuf],
 ) -> Result<ReportDirectory, NamespaceError> {
     // Campaign outputs already have an existing parent. Anchor validation there
     // so an alias cannot place analyzer artifacts inside an input tree.
@@ -189,20 +240,6 @@ fn report_directory(
         .read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
         .open(&parent)?;
-    let mut protected = vec![
-        project.root.canonicalize()?,
-        runtime.adapter_root.canonicalize()?,
-        runtime.dart_sdk.canonicalize()?,
-    ];
-    if let Some(flutter) = &runtime.flutter_sdk {
-        protected.push(flutter.canonicalize()?);
-    }
-    protected.extend(
-        failforge_workspace::dependency_roots(
-            &project.root.join(".dart_tool/package_config.json"),
-        )?
-        .into_values(),
-    );
     if protected
         .iter()
         .any(|root| output.starts_with(root) || root.starts_with(&output))
@@ -271,6 +308,7 @@ fn command(
         }
     }
     directory.write_json("payload.json", &payload)?;
+    let canonical = directory.canonical_path()?;
     let program = runtime.dart_sdk.join("bin/dart");
     let args = vec![
         format!(
@@ -281,8 +319,7 @@ fn command(
                 .display()
         ),
         tool.to_string_lossy().into_owned(),
-        directory
-            .path
+        canonical
             .join("payload.json")
             .to_string_lossy()
             .into_owned(),
@@ -316,7 +353,7 @@ fn command(
                 ..Default::default()
             },
             capture_policy: CapturePolicy {
-                capture_dir: Some(directory.path.join("capture")),
+                capture_dir: Some(canonical.join("capture")),
                 ..Default::default()
             },
         },
@@ -486,7 +523,7 @@ pub(crate) async fn prepare(
         receipt["complete"] = true.into();
         receipt["planSha256"] = format!("{:x}", Sha256::digest(&raw)).into();
         receipt["files"] = files.len().into();
-        receipt["planFile"] = json!(directory.join("plan.json"));
+        receipt["planFile"] = json!(report.canonical_path()?.join("plan.json"));
         Ok::<_, NamespaceError>(plan)
     }
     .await;
