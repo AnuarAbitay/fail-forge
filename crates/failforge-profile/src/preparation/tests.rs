@@ -28,7 +28,7 @@ impl Fixture {
         fs::write(&source, "bool enabled() => true;\n").unwrap();
         let options = GenerateOptions {
             source,
-            output: project.join("profiles/calculator.yml"),
+            output: Some(project.join("profiles/calculator.yml")),
             families: vec!["classic".into()],
             language: None,
             operators: Vec::new(),
@@ -49,6 +49,9 @@ impl Fixture {
     fn prepare(&self) -> Result<ProfileDraft, ProfileError> {
         prepare_profile(&self.options, &self.context)
     }
+    fn output(&self) -> &Path {
+        self.options.output.as_deref().unwrap()
+    }
     fn error(&self, text: &str) {
         let error = self.prepare().unwrap_err();
         assert!(
@@ -56,13 +59,10 @@ impl Fixture {
             "expected {text:?}, got {error}"
         );
         assert!(
-            !self
-                .options
+            self.options
                 .output
-                .parent()
-                .unwrap()
-                .join(".temporary")
-                .exists()
+                .as_deref()
+                .is_none_or(|output| { !output.parent().unwrap().join(".temporary").exists() })
         );
     }
 }
@@ -77,7 +77,7 @@ impl Drop for Fixture {
 fn classic_defaults_roundtrip_through_native_loader_without_creating_directories() {
     let fixture = Fixture::new();
     let draft = fixture.prepare().unwrap();
-    assert!(!fixture.options.output.parent().unwrap().exists());
+    assert!(!fixture.output().parent().unwrap().exists());
     assert_eq!(
         draft.values["rules"],
         json!({"include": ["lib/calculator.dart"]})
@@ -209,7 +209,7 @@ fn selection_rejects_unknown_duplicate_empty_wrong_family_and_language_values() 
     fixture.error("explicit --language dart");
     fixture.options.language = Some("rust".into());
     fixture.error("explicit --language dart");
-    assert!(!fixture.options.output.parent().unwrap().exists());
+    assert!(!fixture.output().parent().unwrap().exists());
 }
 
 #[test]
@@ -238,7 +238,7 @@ fn relative_inputs_use_invocation_directory_and_nearest_package() {
     let mut fixture = Fixture::new();
     fixture.context.cwd = fixture.project.join("lib");
     fixture.options.source = PathBuf::from("../lib/calculator.dart");
-    fixture.options.output = PathBuf::from("../profiles/calculator.yaml");
+    fixture.options.output = Some(PathBuf::from("../profiles/calculator.yaml"));
     let draft = fixture.prepare().unwrap();
     assert_eq!(draft.project, fixture.project);
     assert_eq!(
@@ -249,6 +249,198 @@ fn relative_inputs_use_invocation_directory_and_nearest_package() {
         draft.values["rules"]["include"],
         json!(["lib/calculator.dart"])
     );
+}
+
+#[test]
+fn default_output_mirrors_nested_source_and_keeps_a_portable_package_scope() {
+    let mut fixture = Fixture::new();
+    fixture.options.source = fixture.project.join("lib/src/math/calculator.dart");
+    fixture.options.output = None;
+    fs::create_dir_all(fixture.options.source.parent().unwrap()).unwrap();
+    fs::write(&fixture.options.source, "bool enabled() => true;\n").unwrap();
+
+    let draft = fixture.prepare().unwrap();
+    assert_eq!(
+        draft.output,
+        fixture.project.join("profiles/lib/src/math/calculator.yml")
+    );
+    assert!(!fixture.project.join("profiles").exists());
+    assert_eq!(
+        draft.values["rules"]["include"],
+        json!(["lib/src/math/calculator.dart"])
+    );
+    for key in ["dart_sdk", "flutter_sdk", "adapter_root"] {
+        assert!(draft.values.get(key).is_none());
+    }
+    crate::output::write_profile(
+        &draft.project,
+        &draft.output,
+        &draft.text,
+        false,
+        Some(&draft.binding),
+    )
+    .unwrap();
+    let failforge_config::RunConfig::Profile(profile) =
+        failforge_config::load_yaml(&draft.output, &fixture.context).unwrap()
+    else {
+        panic!("expected a generated profile");
+    };
+    assert_eq!(profile.campaigns[0].project, fixture.project);
+    assert_eq!(
+        profile.campaigns[0].rules.include.as_deref().unwrap(),
+        ["lib/src/math/calculator.dart"]
+    );
+}
+
+#[test]
+fn default_outputs_distinguish_same_basename_in_different_directories() {
+    let mut fixture = Fixture::new();
+    fixture.options.output = None;
+    let mut outputs = Vec::new();
+    for directory in ["lib/a", "lib/b"] {
+        fixture.options.source = fixture.project.join(directory).join("calculator.dart");
+        fs::create_dir_all(fixture.options.source.parent().unwrap()).unwrap();
+        fs::write(&fixture.options.source, "bool enabled() => true;\n").unwrap();
+        let draft = fixture.prepare().unwrap();
+        assert_eq!(
+            draft.output,
+            fixture
+                .project
+                .join("profiles")
+                .join(directory)
+                .join("calculator.yml")
+        );
+        assert_eq!(
+            draft.values["rules"]["include"],
+            json!([format!("{directory}/calculator.dart")])
+        );
+        outputs.push(draft.output);
+    }
+    assert_ne!(outputs[0], outputs[1]);
+    assert!(!fixture.project.join("profiles").exists());
+}
+
+#[test]
+fn default_output_depends_on_source_package_instead_of_invocation_directory() {
+    let mut fixture = Fixture::new();
+    fixture.options.output = None;
+    let expected = fixture.project.join("profiles/lib/calculator.yml");
+    for (cwd, source) in [
+        (fixture.root.clone(), "package/lib/calculator.dart"),
+        (fixture.project.clone(), "lib/calculator.dart"),
+        (fixture.project.join("lib"), "../lib/calculator.dart"),
+    ] {
+        fixture.context.cwd = cwd;
+        fixture.options.source = source.into();
+        let draft = fixture.prepare().unwrap();
+        assert_eq!(draft.project, fixture.project);
+        assert_eq!(draft.output, expected);
+    }
+}
+
+#[test]
+fn explicit_output_overrides_the_source_derived_destination() {
+    let fixture = Fixture::new();
+    let draft = fixture.prepare().unwrap();
+    assert_eq!(draft.output, fixture.output());
+    assert_ne!(
+        draft.output,
+        fixture.project.join("profiles/lib/calculator.yml")
+    );
+    assert!(!fixture.project.join("profiles").exists());
+}
+
+#[test]
+fn existing_default_output_requires_force_and_is_preserved_until_publication() {
+    let mut fixture = Fixture::new();
+    fixture.options.output = None;
+    let destination = fixture.project.join("profiles/lib/calculator.yml");
+    fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    fs::write(&destination, "original profile").unwrap();
+    fixture.error("--force");
+    assert_eq!(
+        fs::read_to_string(&destination).unwrap(),
+        "original profile"
+    );
+
+    fixture.options.force = true;
+    let draft = fixture.prepare().unwrap();
+    assert_eq!(
+        fs::read_to_string(&destination).unwrap(),
+        "original profile"
+    );
+    crate::output::write_profile(
+        &draft.project,
+        &draft.output,
+        &draft.text,
+        fixture.options.force,
+        Some(&draft.binding),
+    )
+    .unwrap();
+    assert_eq!(fs::read_to_string(&destination).unwrap(), draft.text);
+    assert_eq!(
+        fs::read_to_string(&fixture.options.source).unwrap(),
+        "bool enabled() => true;\n"
+    );
+}
+
+#[test]
+fn default_output_rejects_aliases_and_nested_package_boundaries_even_with_force() {
+    for kind in ["parent_alias", "destination_alias", "nested_package"] {
+        let mut fixture = Fixture::new();
+        fixture.options.output = None;
+        fixture.options.force = true;
+        let destination = fixture.project.join("profiles/lib/calculator.yml");
+        let outside = fixture.root.join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("sentinel"), "untouched").unwrap();
+        match kind {
+            "parent_alias" => symlink(&outside, fixture.project.join("profiles")).unwrap(),
+            "destination_alias" => {
+                fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                symlink(outside.join("sentinel"), &destination).unwrap();
+            }
+            "nested_package" => {
+                fs::create_dir(fixture.project.join("profiles")).unwrap();
+                fs::write(
+                    fixture.project.join("profiles/pubspec.yaml"),
+                    "name: nested\n",
+                )
+                .unwrap();
+            }
+            _ => unreachable!(),
+        }
+        fixture.error(if kind == "nested_package" {
+            "same package"
+        } else {
+            "symlink"
+        });
+        assert_eq!(
+            fs::read_to_string(outside.join("sentinel")).unwrap(),
+            "untouched"
+        );
+        assert!(!outside.join("lib").exists());
+    }
+}
+
+#[test]
+fn default_output_is_rooted_in_the_nearest_source_package() {
+    let mut fixture = Fixture::new();
+    let nested = fixture.project.join("nested");
+    fixture.options.source = nested.join("lib/calculator.dart");
+    fixture.options.output = None;
+    fs::create_dir_all(nested.join("lib")).unwrap();
+    fs::write(nested.join("pubspec.yaml"), "name: nested\n").unwrap();
+    fs::write(&fixture.options.source, "bool enabled() => true;\n").unwrap();
+    let draft = fixture.prepare().unwrap();
+    assert_eq!(draft.project, nested);
+    assert_eq!(draft.output, nested.join("profiles/lib/calculator.yml"));
+    assert_eq!(
+        draft.values["rules"]["include"],
+        json!(["lib/calculator.dart"])
+    );
+    assert!(!nested.join("profiles").exists());
+    assert!(!fixture.project.join("profiles").exists());
 }
 
 #[test]
@@ -339,7 +531,7 @@ fn whole_package_alias_is_allowed_but_alias_to_package_interior_is_rejected() {
     let alias = fixture.root.join("alias");
     symlink(&fixture.project, &alias).unwrap();
     fixture.options.source = alias.join("lib/calculator.dart");
-    fixture.options.output = alias.join("profiles/calculator.yml");
+    fixture.options.output = Some(alias.join("profiles/calculator.yml"));
     assert_eq!(fixture.prepare().unwrap().project, fixture.project);
     let interior = fixture.root.join("interior");
     symlink(fixture.project.join("lib"), &interior).unwrap();
@@ -350,8 +542,8 @@ fn whole_package_alias_is_allowed_but_alias_to_package_interior_is_rejected() {
 #[test]
 fn output_aliases_are_rejected_even_when_dangling_or_forced() {
     let mut fixture = Fixture::new();
-    fs::create_dir(fixture.options.output.parent().unwrap()).unwrap();
-    symlink(fixture.project.join("absent.yml"), &fixture.options.output).unwrap();
+    fs::create_dir(fixture.output().parent().unwrap()).unwrap();
+    symlink(fixture.project.join("absent.yml"), fixture.output()).unwrap();
     for force in [false, true] {
         fixture.options.force = force;
         fixture.error("symlink");
@@ -371,7 +563,7 @@ fn output_cannot_cross_nearest_package_boundary() {
         fixture.root.join("outside.yml"),
         fixture.project.join("nested/profiles/source.yml"),
     ] {
-        fixture.options.output = path;
+        fixture.options.output = Some(path);
         fixture.error("same package");
     }
 }
@@ -385,23 +577,25 @@ fn reserved_names_and_tool_directories_are_protected_in_every_case() {
             (*name).to_string(),
             name.to_uppercase().replace(".YAML", ".yaml"),
         ] {
-            fixture.options.output = fixture.project.join(spelling);
+            fixture.options.output = Some(fixture.project.join(spelling));
             fixture.error("configuration or tool");
         }
     }
     for directory in TOOL_DIRECTORIES {
-        fixture.options.output = fixture
-            .project
-            .join(directory.to_uppercase())
-            .join("profile.yml");
+        fixture.options.output = Some(
+            fixture
+                .project
+                .join(directory.to_uppercase())
+                .join("profile.yml"),
+        );
         fixture.error("configuration or tool");
     }
     for name in ["pubſpec.yaml", "analyſis_options.yaml", "dart_teﬆ.yaml"] {
-        fixture.options.output = fixture.project.join(name);
+        fixture.options.output = Some(fixture.project.join(name));
         fixture.error("configuration or tool");
     }
     for name in ["profile", "profile.YML", "profile.dart"] {
-        fixture.options.output = fixture.project.join(name);
+        fixture.options.output = Some(fixture.project.join(name));
         fixture.error(".yml or .yaml");
     }
 }
@@ -409,26 +603,30 @@ fn reserved_names_and_tool_directories_are_protected_in_every_case() {
 #[test]
 fn existing_output_is_untouched_and_requires_force() {
     let mut fixture = Fixture::new();
-    fs::create_dir(fixture.options.output.parent().unwrap()).unwrap();
-    fs::write(&fixture.options.output, "original").unwrap();
+    fs::create_dir(fixture.output().parent().unwrap()).unwrap();
+    fs::write(fixture.output(), "original").unwrap();
     fixture.error("--force");
     fixture.options.force = true;
     fixture.prepare().unwrap();
-    assert_eq!(
-        fs::read_to_string(&fixture.options.output).unwrap(),
-        "original"
-    );
+    assert_eq!(fs::read_to_string(fixture.output()).unwrap(), "original");
 }
 
 #[test]
 fn invalid_unicode_nul_and_empty_paths_are_configuration_errors() {
     let mut fixture = Fixture::new();
-    for source in [
+    let valid_source = fixture.options.source.clone();
+    let invalid_paths = [
         PathBuf::new(),
         PathBuf::from("bad\0.dart"),
         PathBuf::from(std::ffi::OsString::from_vec(b"bad\xff.dart".to_vec())),
-    ] {
-        fixture.options.source = source;
+    ];
+    for source in &invalid_paths {
+        fixture.options.source = source.clone();
+        assert!(matches!(fixture.prepare(), Err(ProfileError::Config(_))));
+    }
+    fixture.options.source = valid_source;
+    for output in invalid_paths {
+        fixture.options.output = Some(output);
         assert!(matches!(fixture.prepare(), Err(ProfileError::Config(_))));
     }
 }

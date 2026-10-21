@@ -140,6 +140,20 @@ The same Dart version restriction applies. Run Flutter's normal setup first if
 its bundled Dart SDK is not yet available. Do not supply both `--dart-sdk` and
 `--flutter-sdk` to a FailForge command.
 
+Current source builds can discover a prepared SDK automatically:
+
+```sh
+export PATH="$DART_SDK/bin:$PATH"
+```
+
+For Flutter, add `"$FLUTTER_SDK/bin"` instead. An explicit SDK option or YAML
+SDK field takes priority over `PATH`. If no recognizable SDK is found, FailForge
+uses the installation's `.toolchain/flutter/bin/cache/dart-sdk` location.
+Discovery does not install an SDK, prepare Flutter or check version
+compatibility. Nonstandard SDK shims need an explicit root path.
+The published `0.1.0-beta.1` archive requires explicit SDK paths; these
+automatic defaults are available in source builds after that release.
+
 ## 3. Prepare the target package
 
 Set the root of the package whose tests you want to assess:
@@ -209,20 +223,23 @@ reuse its name.
 ## 5. Generate and run a YAML profile
 
 From the prepared target package, generate a profile for one existing library
-source file:
+source file. With a current source build and the SDK on `PATH`:
 
 ```sh
 cd "$FAILFORGE_PROJECT"
 failforge profile generate \
   --installation "$FAILFORGE_HOME" \
-  --dart-sdk "$DART_SDK" \
   --file lib/src/calculator.dart \
-  --family classic \
-  --output profiles/calculator.yml
+  --family classic
 ```
 
-For Flutter, again replace the SDK option with
-`--flutter-sdk "$FLUTTER_SDK"`.
+The default output is `profiles/lib/src/calculator.yml`, preserving the
+source's directory structure inside the package. An explicit `--output PATH`
+selects another destination; replacing an existing file requires `--force`.
+For the published `0.1.0-beta.1` archive, add `--output
+profiles/lib/src/calculator.yml` and `--dart-sdk "$DART_SDK"` (or
+`--flutter-sdk "$FLUTTER_SDK"`). Explicit SDK options remain supported by
+current source builds as well.
 
 Generation analyzes applicability and writes explicit operator switches. It
 does not run the target's tests. If no selected operator has a statically valid
@@ -243,14 +260,15 @@ candidates in that method.
 
 The profile must be inside the target package. One file is one profile; it has
 no `version` or `project` field. The generator records an explicit SDK override
-as an absolute path in the YAML.
+as an absolute path in the YAML. A discovered SDK is not saved; each profile
+run discovers it through its own `PATH`.
 
 Run it with:
 
 ```sh
 failforge mutate \
   --installation "$FAILFORGE_HOME" \
-  --config profiles/calculator.yml
+  --config profiles/lib/src/calculator.yml
 ```
 
 Do not add `--dart-sdk`, `--flutter-sdk`, `--output` or mutation-selection flags
@@ -259,7 +277,8 @@ With no YAML `output` setting, FailForge chooses a new report directory under
 the target's `.failforge/` directory. An explicit YAML output path is relative
 to the profile file, and it must identify a new directory.
 
-To move the profile to another machine, update its absolute SDK paths. See
+When moving a profile with explicit absolute SDK paths, update those paths.
+Profiles using discovery can keep the SDK fields omitted. See
 [mutation campaigns](mutation-cli.md) for multiple families, all configuration
 rules and the complete command reference.
 
@@ -336,9 +355,9 @@ The default adapter is `<installation>/adapters/dart`. To use a separately
 prepared adapter, pass `--adapter-root PATH` in direct commands or profile
 generation; with `mutate --config`, use `adapter_root` in YAML. This override does
 not replace installation selection, and the native analysis helper must still
-remain beside `failforge`. Continue passing `--dart-sdk` or `--flutter-sdk` for
-an SDK outside the installation's default `.toolchain/` location. With a YAML
-profile, set the corresponding SDK path in the profile.
+remain beside `failforge`. Add the SDK's `bin/` directory to `PATH`, or pass
+`--dart-sdk` or `--flutter-sdk` explicitly. With a YAML profile, explicit SDK
+paths belong in the corresponding profile field.
 
 The installed layout does not depend on the original build checkout. Keep the
 checkout if you want to rebuild, and retain the adapter's `bin/` and `lib/`

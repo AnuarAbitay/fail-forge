@@ -34,15 +34,6 @@ fn required_arguments_and_family_enum_are_enforced() {
             "generate",
             "--file",
             "a.dart",
-            "--family",
-            "classic",
-        ],
-        vec![
-            "failforge",
-            "profile",
-            "generate",
-            "--file",
-            "a.dart",
             "--output",
             "a.yml",
         ],
@@ -91,7 +82,7 @@ fn native_options_preserve_selection_and_paths_without_shell_parsing() {
     ]);
     let options = arguments.generate_options();
     assert_eq!(options.source, PathBuf::from("lib/a.dart"));
-    assert_eq!(options.output, PathBuf::from("profiles/a.yml"));
+    assert_eq!(options.output, Some(PathBuf::from("profiles/a.yml")));
     assert_eq!(options.families, ["classic", "language_specific"]);
     assert_eq!(options.operators, ["BOOLEAN_LITERAL_FLIP", "NSM-001"]);
     assert_eq!(options.language.as_deref(), Some("dart"));
@@ -202,5 +193,29 @@ fn non_unicode_and_dash_prefixed_paths_reach_native_validation_without_loss() {
     let ProfileCommands::Generate(arguments) = arguments.command;
     let options = arguments.generate_options();
     assert_eq!(options.source.as_os_str().as_bytes(), b"-source-\xff.dart");
-    assert_eq!(options.output.as_os_str().as_bytes(), b"-profile-\xfe.yml");
+    assert_eq!(
+        options.output.unwrap().as_os_str().as_bytes(),
+        b"-profile-\xfe.yml"
+    );
+}
+
+#[test]
+fn output_can_be_omitted_for_both_analysis_and_template_generation() {
+    for extra in [&[][..], &["--template"][..], &["--dry-run"][..]] {
+        let mut values = vec![
+            "failforge",
+            "profile",
+            "generate",
+            "--file",
+            "lib/src/a.dart",
+            "--family",
+            "classic",
+        ];
+        values.extend_from_slice(extra);
+        let Commands::Profile(arguments) = Cli::try_parse_from(values).unwrap().command else {
+            panic!("expected profile");
+        };
+        let ProfileCommands::Generate(arguments) = arguments.command;
+        assert!(arguments.generate_options().output.is_none());
+    }
 }

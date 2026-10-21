@@ -94,16 +94,21 @@ dependencies. A native archive needs no Rust installation. A compatible SDK and
 prepared adapter dependencies are still required. See
 [beta limitations](docs/beta-limitations.md) for verification scope.
 
+The automatic SDK and profile-path defaults below are available in current
+source builds. With the published `0.1.0-beta.1` archive, supply `--dart-sdk`
+or `--flutter-sdk` and `profile generate --output` explicitly.
+
 The examples below run from the **target package root**, with these paths set:
 
 ```sh
 export FAILFORGE_HOME=/absolute/path/to/fail-forge
 export DART_SDK=/absolute/path/to/dart-sdk
-export PATH="$FAILFORGE_HOME/bin:$PATH"
+export PATH="$FAILFORGE_HOME/bin:$DART_SDK/bin:$PATH"
 ```
 
 Set `FAILFORGE_HOME` to the extracted installation. For a source build, set it
-to the checkout and use `export PATH="$FAILFORGE_HOME/target/debug:$PATH"` instead.
+to the checkout and use
+`export PATH="$FAILFORGE_HOME/target/debug:$DART_SDK/bin:$PATH"` instead.
 
 Replace `lib/src/calculator.dart` with an existing source file in your package.
 Begin with one operator and one file:
@@ -118,16 +123,16 @@ failforge mutate \
   --test-timeout 30s \
   --command-timeout 120s \
   --output .failforge/first-run \
-  --installation "$FAILFORGE_HOME" \
-  --dart-sdk "$DART_SDK"
+  --installation "$FAILFORGE_HOME"
 ```
 
 The output directory must be new; choose another name for each run. Output
 inside the target package belongs under `.failforge/`. Omit `--operator` to
 select the default classical catalogue.
 
-For a Flutter package, replace `--dart-sdk "$DART_SDK"` with
-`--flutter-sdk /absolute/path/to/flutter`.
+FailForge searches `PATH` for a prepared Dart or Flutter SDK. An explicit
+`--dart-sdk PATH` or `--flutter-sdk PATH` takes priority. For Flutter, add its
+`bin/` directory to `PATH` or supply `--flutter-sdk /absolute/path/to/flutter`.
 
 ### Generate a profile
 
@@ -137,14 +142,17 @@ Save your choices in a profile next to your project:
 failforge profile generate \
   --file lib/src/calculator.dart \
   --family classic \
-  --output profiles/calculator.yml \
-  --installation "$FAILFORGE_HOME" \
-  --dart-sdk "$DART_SDK"
+  --installation "$FAILFORGE_HOME"
 
 failforge mutate \
-  --config profiles/calculator.yml \
+  --config profiles/lib/src/calculator.yml \
   --installation "$FAILFORGE_HOME"
 ```
+
+Without `--output`, the profile is saved to
+`profiles/lib/src/calculator.yml` inside the source package, mirroring the source
+path. Use `--output PATH` for a different destination. Existing files still
+require `--force`.
 
 Generation sets an operator to `true` only if it has at least one statically
 valid candidate in the selected file. It does not run your tests or establish
@@ -156,9 +164,10 @@ selecting `language_specific`. Use `--dry-run` to preview the profile,
 `--force` to replace an existing file, or `--template` to generate a catalogue
 template without source analysis. Template generation does not accept SDK flags.
 
-The generated profile records the selected SDK path. When using `--config`,
-change execution settings in YAML rather than adding `--dart-sdk`, `--workers`
-or other campaign options to the command.
+The generated profile records an SDK path only when explicitly supplied.
+Otherwise, each run discovers the SDK through `PATH`. When using `--config`,
+change explicit execution settings in YAML rather than adding `--dart-sdk`,
+`--workers` or other campaign options to the command.
 
 ### Run other families directly
 
@@ -230,7 +239,8 @@ limits:
 - Class and method filters select mutation sites; they do not select individual
   tests to run.
 
-Use `flutter_sdk` instead of `dart_sdk` for Flutter. The
+Both SDK fields are optional when the SDK is discoverable through `PATH`.
+Use `flutter_sdk` instead of `dart_sdk` to explicitly select Flutter. The
 [profile reference](docs/mutation-cli.md#explicit-yaml-configuration) covers
 all settings, defaults and path rules.
 

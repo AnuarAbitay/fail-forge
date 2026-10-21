@@ -42,7 +42,7 @@ fn execute(request: Request) -> Value {
     }
     let options = GenerateOptions {
         source: request.source,
-        output: request.output,
+        output: Some(request.output),
         families: request.families,
         language: request.language,
         operators: request.operators,

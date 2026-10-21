@@ -200,7 +200,7 @@ impl InputBinding {
         if graph.is_file() {
             files.insert(graph);
         }
-        if let Some(flutter) = &runtime.flutter_sdk {
+        if let Some(flutter) = runtime.flutter_sdk.as_ref().filter(|_| original.flutter) {
             for relative in ["bin/flutter", "bin/cache/flutter_tools.snapshot"] {
                 let path = flutter.join(relative);
                 if path.is_file() {
@@ -434,6 +434,161 @@ pub async fn analyze_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    struct BindingFixture {
+        root: PathBuf,
+        original: PreparedProject,
+        runtime: Runtime,
+    }
+
+    impl BindingFixture {
+        fn new(flutter: bool) -> Self {
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let root = std::env::temp_dir().join(format!(
+                "failforge-profile-input-binding-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            for relative in [
+                "package/.dart_tool",
+                "framework/lib",
+                "adapter/.dart_tool",
+                "flutter/bin/cache/dart-sdk/bin",
+                "flutter/bin/cache/dart-sdk/lib",
+                "flutter/bin/cache/artifacts/engine",
+            ] {
+                fs::create_dir_all(root.join(relative)).unwrap();
+            }
+            let root = root.canonicalize().unwrap();
+            let framework = if flutter { "flutter_test" } else { "test" };
+            fs::write(root.join("package/pubspec.yaml"), "name: subject\n").unwrap();
+            fs::write(
+                root.join("package/.dart_tool/package_config.json"),
+                json!({"configVersion": 2, "packages": [
+                    {"name": "subject", "rootUri": "../"},
+                    {"name": framework, "rootUri": "../../framework/"}
+                ]})
+                .to_string(),
+            )
+            .unwrap();
+            fs::write(
+                root.join("package/.dart_tool/package_graph.json"),
+                json!({"roots": ["subject"], "packages": [
+                    {"name": "subject", "dependencies": [framework]},
+                    {"name": framework, "dependencies": []}
+                ]})
+                .to_string(),
+            )
+            .unwrap();
+            fs::write(
+                root.join("adapter/.dart_tool/package_config.json"),
+                json!({"configVersion": 2, "packages": [
+                    {"name": "adapter", "rootUri": "../"}
+                ]})
+                .to_string(),
+            )
+            .unwrap();
+            for relative in [
+                "helper",
+                "flutter/bin/flutter",
+                "flutter/bin/cache/flutter_tools.snapshot",
+                "flutter/bin/cache/artifacts/engine/runtime",
+                "flutter/bin/cache/dart-sdk/bin/dart",
+                "flutter/bin/cache/dart-sdk/lib/core.dart",
+            ] {
+                fs::write(root.join(relative), "original bytes").unwrap();
+            }
+            let original =
+                inputs::inspect_project(&root.join("package"), &Cancellation::default()).unwrap();
+            let runtime = Runtime {
+                helper: root.join("helper"),
+                dart_sdk: root.join("flutter/bin/cache/dart-sdk"),
+                flutter_sdk: Some(root.join("flutter")),
+                adapter: root.join("adapter"),
+                installation: root.clone(),
+            };
+            Self {
+                root,
+                original,
+                runtime,
+            }
+        }
+
+        fn binding(&self) -> InputBinding {
+            InputBinding::capture(&self.runtime, &self.original, &Cancellation::default()).unwrap()
+        }
+    }
+
+    impl Drop for BindingFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn dart_project_binds_dart_inputs_without_unused_flutter_tools_or_engine() {
+        let fixture = BindingFixture::new(false);
+        assert!(!fixture.original.flutter);
+        assert!(fixture.runtime.flutter_sdk.is_some());
+        let binding = fixture.binding();
+        let flutter = fixture.runtime.flutter_sdk.as_ref().unwrap();
+        assert!(
+            !binding
+                .trees
+                .contains_key(&flutter.join("bin/cache/artifacts/engine"))
+        );
+        for relative in ["bin/flutter", "bin/cache/flutter_tools.snapshot"] {
+            assert!(!binding.files.contains_key(&flutter.join(relative)));
+        }
+        for relative in [
+            "bin/flutter",
+            "bin/cache/flutter_tools.snapshot",
+            "bin/cache/artifacts/engine/runtime",
+        ] {
+            fs::write(flutter.join(relative), "unused Flutter input changed").unwrap();
+        }
+        binding.verify(&Cancellation::default()).unwrap();
+
+        fs::write(
+            fixture.runtime.dart_sdk.join("lib/core.dart"),
+            "Dart input changed",
+        )
+        .unwrap();
+        assert!(binding.verify(&Cancellation::default()).is_err());
+    }
+
+    #[test]
+    fn flutter_project_binds_tools_and_engine_and_detects_each_changed_input() {
+        let fixture = BindingFixture::new(true);
+        assert!(fixture.original.flutter);
+        let binding = fixture.binding();
+        let flutter = fixture.runtime.flutter_sdk.as_ref().unwrap();
+        assert!(
+            binding
+                .trees
+                .contains_key(&flutter.join("bin/cache/artifacts/engine"))
+        );
+        for relative in ["bin/flutter", "bin/cache/flutter_tools.snapshot"] {
+            assert!(binding.files.contains_key(&flutter.join(relative)));
+        }
+        binding.verify(&Cancellation::default()).unwrap();
+        for relative in [
+            "bin/flutter",
+            "bin/cache/flutter_tools.snapshot",
+            "bin/cache/artifacts/engine/runtime",
+        ] {
+            let path = flutter.join(relative);
+            fs::write(&path, "Flutter input changed").unwrap();
+            assert!(
+                binding.verify(&Cancellation::default()).is_err(),
+                "{relative}"
+            );
+            fs::write(path, "original bytes").unwrap();
+            binding.verify(&Cancellation::default()).unwrap();
+        }
+    }
 
     #[test]
     fn analysis_environment_drops_private_workspace_transports() {

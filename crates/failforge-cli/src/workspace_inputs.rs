@@ -197,7 +197,9 @@ pub(crate) fn bind_inputs(
         paths.push(graph);
     }
     let mut sdk_roots = vec![runtime.dart_sdk.join("bin"), runtime.dart_sdk.join("lib")];
-    if let Some(flutter) = &runtime.flutter_sdk {
+    // A bundled Dart SDK can be used without invoking Flutter. Bind Flutter's
+    // tools and engine only when the prepared test framework actually uses them.
+    if let Some(flutter) = runtime.flutter_sdk.as_ref().filter(|_| project.flutter) {
         for relative in ["bin/flutter", "bin/cache/flutter_tools.snapshot"] {
             let path = flutter.join(relative);
             if path.is_file() {

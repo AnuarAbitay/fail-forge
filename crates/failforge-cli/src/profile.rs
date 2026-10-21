@@ -29,7 +29,8 @@ fn context(
     }
     let installation = crate::installation::resolve(arguments.installation.as_deref())
         .map_err(|error| ProfileError::Analysis(error.to_string()))?;
-    let context = Context::new(invocation_cwd, &installation)?;
+    let context =
+        Context::new(invocation_cwd, &installation)?.with_sdk_search_path(std::env::var_os("PATH"));
     if !context.installation.is_dir() {
         return Err(ProfileError::Analysis(
             "profile installation is unavailable; use --installation PATH".into(),

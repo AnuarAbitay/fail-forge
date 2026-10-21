@@ -81,12 +81,24 @@ are rejected. Extended attributes and ACLs are outside this copy contract.
 Cleanup can remove owned read-only copied directories without changing the
 original project's permissions.
 
-The default SDK is `.toolchain/flutter/bin/cache/dart-sdk` in the installation.
-Use `--dart-sdk /absolute/dart-sdk` for another Dart SDK, or
-`--flutter-sdk /absolute/flutter` for Flutter. The SDK must match the adapter's
-documented version constraints. A Flutter project can also use the installation's
-Flutter SDK when its Dart SDK has that layout. Runtime paths and effective rules
-are recorded in the manifest.
+SDK selection first honors `--dart-sdk /absolute/dart-sdk` or
+`--flutter-sdk /absolute/flutter` (or the corresponding YAML field). Without
+an explicit SDK, FailForge searches `PATH` in directory order, trying `dart`
+then `flutter` in each directory. It recognizes SDK executables, symlinks to
+them and Flutter wrappers whose bundled Dart SDK is already prepared. Relative
+and empty PATH entries are resolved from the invocation directory. Discovery
+checks executable permissions and SDK structure without running PATH programs.
+Shims without a recognizable SDK layout are skipped; use an explicit SDK root
+with these tools. If discovery finds nothing, the fallback is
+`.toolchain/flutter/bin/cache/dart-sdk` in the installation. Explicit paths never
+silently fall back to another SDK. The selected SDK must still match the
+adapter's documented version constraints. Flutter projects require the matching
+Flutter installation. Runtime paths and effective rules are recorded in the
+manifest.
+
+For a Flutter project, put Flutter's `bin/` before any standalone Dart SDK in
+`PATH`, or set `--flutter-sdk` explicitly. Discovery selects the first usable
+SDK; it does not switch to a later installation based on the target framework.
 
 Installation selection is shared by `mutate`, `replay` and `profile generate`:
 
@@ -123,8 +135,7 @@ Generation does not execute author tests or run a mutation campaign.
 Run this example from a prepared target package:
 
 ```sh
-failforge profile generate --file lib/src/calculator.dart --family classic \
-  --output profiles/calculator.yml
+failforge profile generate --file lib/src/calculator.dart --family classic
 ```
 
 Default analysis requires the prepared package metadata, dependencies, SDK and
@@ -132,7 +143,9 @@ adapter described above. `--dart-sdk PATH` or `--flutter-sdk PATH` selects an SD
 they are mutually exclusive. `--adapter-root PATH` selects a prepared adapter.
 Explicit SDK and adapter overrides are resolved from the invocation directory
 and saved as absolute YAML paths, so the suggested `mutate --config` command uses
-the same selections. Generation never installs dependencies or runs `pub get`.
+the same selections. A discovered SDK is not written into the YAML; profile runs
+discover it again using their own `PATH`. Generation never installs dependencies
+or runs `pub get`.
 
 Use `--template` to write the catalogue defaults without source analysis or
 prepared dependencies:
@@ -147,8 +160,12 @@ but it does not determine which operators apply to the file. It needs neither
 Python nor an SDK. `--template` cannot be combined with SDK or adapter
 overrides.
 
-`--file`, at least one `--family`, and `--output` are required. Relative CLI paths
-are resolved from the invocation directory. The source must be a regular
+`--file` and at least one `--family` are required. Omit `--output` to save at
+`<package>/profiles/<source-relative-path>.yml`: for example,
+`lib/src/calculator.dart` becomes `profiles/lib/src/calculator.yml`. The directory
+structure prevents collisions between same-named files in different folders.
+An explicit `--output` overrides this path. Relative CLI paths are resolved
+from the invocation directory. The source must be a regular
 `.dart` file under that package's `lib/`; its nearest parent `pubspec.yaml`
 identifies the package. Files outside `lib/` are rejected before writing a
 profile because the mutation engine discovers library sources. Existing

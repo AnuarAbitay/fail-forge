@@ -107,9 +107,9 @@ pub(crate) struct ProfileGenerateArgs {
     /// Restrict analysis or template selection to one operator ID; repeat as needed.
     #[arg(long, value_name = "ID", action = clap::ArgAction::Append)]
     operator: Vec<String>,
-    /// Destination YAML file within the source file's Dart package.
+    /// Destination YAML; defaults to profiles/<source-relative-path>.yml in its package.
     #[arg(long, value_name = "PATH")]
-    output: PathBuf,
+    output: Option<PathBuf>,
     /// Replace an existing profile file.
     #[arg(long)]
     force: bool,
@@ -119,7 +119,7 @@ pub(crate) struct ProfileGenerateArgs {
     /// Generate a catalogue template without analysis, an SDK or dependencies.
     #[arg(long, conflicts_with_all = ["dart_sdk", "flutter_sdk", "adapter_root"])]
     pub(crate) template: bool,
-    /// Dart SDK root for applicability analysis; conflicts with --flutter-sdk.
+    /// Dart SDK root for analysis; otherwise search PATH, then the installation.
     #[arg(long, value_name = "PATH", conflicts_with = "flutter_sdk")]
     dart_sdk: Option<PathBuf>,
     /// Flutter SDK root for applicability analysis using its bundled Dart SDK.
@@ -183,7 +183,7 @@ pub(crate) struct MutateArgs {
     /// New directory for campaign reports and raw captures.
     #[arg(long, value_name = "PATH")]
     output: Option<PathBuf>,
-    /// Dart SDK root; mutually exclusive with --flutter-sdk.
+    /// Dart SDK root; otherwise search PATH, then the installation.
     #[arg(long, value_name = "PATH", conflicts_with = "flutter_sdk")]
     dart_sdk: Option<PathBuf>,
     /// Flutter SDK root, whose bundled Dart SDK will be used.

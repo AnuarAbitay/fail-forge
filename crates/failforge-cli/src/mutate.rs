@@ -308,7 +308,7 @@ fn execute_selected(
         }
     };
     let context = match Context::new(invocation_cwd, &installation) {
-        Ok(context) => context,
+        Ok(context) => context.with_sdk_search_path(std::env::var_os("PATH")),
         Err(error) => {
             diagnostic(&error.to_string());
             return ExitCode::from(2);

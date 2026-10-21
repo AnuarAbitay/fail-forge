@@ -215,7 +215,12 @@ fn package_paths(
             "--file must be inside lib/: the mutation engine discovers library sources only",
         ));
     }
-    let (requested_output, output) = requested_path(&options.output, "output", &context.cwd)?;
+    let default_output = project
+        .join("profiles")
+        .join(relative)
+        .with_extension("yml");
+    let output_path = options.output.as_deref().unwrap_or(&default_output);
+    let (requested_output, output) = requested_path(output_path, "output", &context.cwd)?;
     reject_aliases(&requested_output, &project)?;
     let output_project = paths::profile_project(
         output

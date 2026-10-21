@@ -1,15 +1,18 @@
 //! Configuration normalization shared by native campaign entry points.
 //!
-//! Loading a profile reads bounded configuration metadata only. It never runs
-//! author code, installs dependencies, or probes an SDK for readiness.
+//! Loading a profile reads bounded configuration metadata. Optional SDK
+//! discovery inspects filesystem metadata using a caller-supplied PATH snapshot;
+//! it never runs author code or SDK programs, or installs dependencies.
 
 pub mod catalogue;
 pub mod duration;
 pub mod models;
 pub mod normalize;
 pub mod paths;
+mod sdk_discovery;
 pub mod yaml;
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
@@ -40,6 +43,9 @@ impl ConfigError {
 pub struct Context {
     pub cwd: PathBuf,
     pub installation: PathBuf,
+    /// An explicitly captured PATH to search when neither SDK is specified.
+    /// `None` keeps normalization independent of the process environment.
+    pub sdk_search_path: Option<OsString>,
 }
 
 impl Context {
@@ -48,7 +54,17 @@ impl Context {
             .map_err(|_| ConfigError::new("cannot determine current directory"))?;
         let cwd = paths::resolve_native_path(cwd, "cwd", &process_cwd)?;
         let installation = paths::resolve_native_path(installation, "installation", &cwd)?;
-        Ok(Self { cwd, installation })
+        Ok(Self {
+            cwd,
+            installation,
+            sdk_search_path: None,
+        })
+    }
+
+    /// Enable SDK discovery using a caller-supplied PATH snapshot.
+    pub fn with_sdk_search_path(mut self, sdk_search_path: Option<OsString>) -> Self {
+        self.sdk_search_path = sdk_search_path;
+        self
     }
 }
 

@@ -77,9 +77,12 @@ directories, need this option instead of a build-time path fallback. Keep
 `failforge-adapter-campaign` beside the actual `failforge` executable even when
 overriding the installation.
 
-Supply `--dart-sdk` or `--flutter-sdk` for an SDK outside the installation's
-default `.toolchain` location in direct CLI mode. With `mutate --config`, set
-`dart_sdk` or `flutter_sdk` in the YAML profile instead. A separately prepared
+Current source builds discover prepared SDKs through `PATH`, with the
+installation's `.toolchain` location as fallback. Explicit `--dart-sdk` or
+`--flutter-sdk` takes priority; with `mutate --config`, use the corresponding
+YAML field. The published `0.1.0-beta.1` archive predates PATH discovery and
+automatic profile output paths; supply SDK and profile output paths explicitly
+when using that archive. A separately prepared
 adapter remains selectable with `--adapter-root` or YAML `adapter_root`.
 Prepare adapter dependencies at their final location rather than shipping
 another machine's generated package configuration. See

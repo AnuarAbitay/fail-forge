@@ -5,8 +5,9 @@
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
+use std::os::unix::fs::symlink;
 use std::os::unix::process::CommandExt;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
@@ -160,15 +161,29 @@ impl Fixture {
         self.spawn_kind("mutate", arguments, close_stdin)
     }
     fn spawn_kind(&mut self, kind: &str, arguments: &[OsString], close_stdin: bool) -> u32 {
+        self.spawn_command(
+            &[kind],
+            arguments,
+            close_stdin,
+            OsStr::new("/nonexistent-path"),
+        )
+    }
+    fn spawn_command(
+        &mut self,
+        command_names: &[&str],
+        arguments: &[OsString],
+        close_stdin: bool,
+        search_path: &OsStr,
+    ) -> u32 {
         assert!(self.child.is_none());
         let mut command = Command::new(env!("CARGO_BIN_EXE_failforge"));
         command
-            .arg(kind)
+            .args(command_names)
             .args(arguments)
             .arg("--installation")
             .arg(self.install())
             .current_dir(self.project())
-            .env("PATH", "/nonexistent-path")
+            .env("PATH", search_path)
             .env("TMPDIR", self.root.join("temporary"))
             .env("FF_CAMPAIGN_FIXTURE", self.root.join("fixture.json"))
             .stdin(Stdio::null())
@@ -206,6 +221,15 @@ impl Fixture {
     }
     fn run(&mut self, arguments: &[OsString]) -> Output {
         self.spawn(arguments, false);
+        self.finish()
+    }
+    fn run_with_sdk_on_path(&mut self, arguments: &[OsString]) -> Output {
+        self.spawn_command(
+            &["mutate"],
+            arguments,
+            false,
+            self.sdk().join("bin").as_os_str(),
+        );
         self.finish()
     }
     fn retained_replay(&mut self) -> Vec<OsString> {
@@ -521,6 +545,187 @@ fn direct_native_campaign_runs_without_path_programs_and_preserves_original() {
     f.assert_clean(true);
     f.assert_progress();
 }
+
+#[test]
+fn direct_campaign_discovers_path_sdk_without_an_sdk_option() {
+    let mut f = Fixture::new();
+    let mut args = f.direct();
+    let index = args
+        .iter()
+        .position(|argument| argument == "--dart-sdk")
+        .unwrap();
+    args.drain(index..index + 2);
+    success(&f.run_with_sdk_on_path(&args));
+    assert_eq!(f.summary()["outcomeCounts"], json!({"KILLED":1}));
+    assert_eq!(f.rows("test_start").len(), 3);
+    f.assert_clean(true);
+}
+
+#[test]
+fn yaml_campaign_discovers_path_sdk_without_recording_a_machine_path() {
+    let mut f = Fixture::new();
+    let args = f.profile(&["classic"], 10);
+    let profile = f.project().join("profile.yml");
+    let text = fs::read_to_string(&profile).unwrap();
+    put(
+        &profile,
+        text.lines()
+            .filter(|line| !line.starts_with("dart_sdk:"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    success(&f.run_with_sdk_on_path(&args));
+    assert_eq!(f.summary()["outcomeCounts"], json!({"KILLED":1}));
+    assert_eq!(f.rows("test_start").len(), 3);
+    assert!(!fs::read_to_string(profile).unwrap().contains("dart_sdk:"));
+    f.assert_clean(true);
+}
+
+#[test]
+fn invalid_explicit_sdk_does_not_fall_back_to_a_valid_path_sdk() {
+    let mut f = Fixture::new();
+    let mut args = f.direct();
+    let index = args
+        .iter()
+        .position(|argument| argument == "--dart-sdk")
+        .unwrap();
+    args[index + 1] = f.root.join("missing-sdk").into_os_string();
+    let output = f.run_with_sdk_on_path(&args);
+    assert_eq!(output.status.code(), Some(125), "{output:?}");
+    assert!(f.rows("adapter_start").is_empty());
+    assert!(f.rows("test_start").is_empty());
+    assert!(!f.output().exists());
+}
+
+#[test]
+fn analyzed_profile_uses_path_sdk_and_default_output_and_remains_portable() {
+    let mut f = Fixture::new();
+    let args = vec![
+        "--file".into(),
+        f.project().join("lib/subject.dart").into_os_string(),
+        "--family".into(),
+        "classic".into(),
+        "--operator".into(),
+        OPERATORS[0].into(),
+        "--adapter-root".into(),
+        f.adapter().into_os_string(),
+    ];
+    f.spawn_command(
+        &["profile", "generate"],
+        &args,
+        false,
+        f.sdk().join("bin").as_os_str(),
+    );
+    success(&f.finish());
+    let profile = f.project().join("profiles/lib/subject.yml");
+    let generated = fs::read_to_string(&profile).unwrap();
+    let yaml = failforge_config::yaml::parse_yaml(&generated).unwrap();
+    assert!(yaml.get("dart_sdk").is_none());
+    assert!(yaml.get("flutter_sdk").is_none());
+    assert_eq!(yaml["rules"]["include"], json!(["lib/subject.dart"]));
+    let operators = yaml["mutations"]["classic"]["operators"]
+        .as_object()
+        .unwrap();
+    assert_eq!(operators.len(), 32);
+    for (operator, enabled) in operators {
+        assert_eq!(*enabled, json!(operator == OPERATORS[0]), "{operator}");
+    }
+    assert!(
+        f.rows("test_start").is_empty(),
+        "generation ran author tests"
+    );
+    assert_eq!(f.rows("discovery").len(), 1);
+    assert_eq!(f.rows("validation").len(), 1);
+    put(
+        &profile,
+        format!("{generated}\noutput: {}\n", json!(f.output())),
+    );
+    let args = vec!["--config".into(), profile.into_os_string()];
+    success(&f.run_with_sdk_on_path(&args));
+    assert_eq!(f.summary()["outcomeCounts"], json!({"KILLED":1}));
+    f.assert_clean(true);
+}
+
+#[test]
+fn flutter_path_discovery_retains_the_root_when_its_dart_cache_is_a_symlink() {
+    let mut f = Fixture::new();
+    let flutter = f.root.join("flutter");
+    fs::create_dir_all(flutter.join("bin/cache")).unwrap();
+    fs::copy(
+        env!("CARGO_BIN_EXE_failforge-campaign-sdk-fixture"),
+        flutter.join("bin/flutter"),
+    )
+    .unwrap();
+    symlink(f.sdk(), flutter.join("bin/cache/dart-sdk")).unwrap();
+    put(
+        f.project().join("pubspec.yaml"),
+        "name: subject\ndev_dependencies:\n  flutter_test:\n    sdk: flutter\n",
+    );
+    put(
+        f.project().join(".dart_tool/package_config.json"),
+        json!({"configVersion":2,"packages":[
+            {"name":"subject","rootUri":"../","packageUri":"lib/"},
+            {"name":"flutter_test","rootUri":"../../test%20dependency/","packageUri":"lib/"}]})
+        .to_string(),
+    );
+    put(
+        f.project().join(".dart_tool/package_graph.json"),
+        json!({"roots":["subject"],"packages":[
+            {"name":"subject","dependencies":[]},{"name":"flutter_test","dependencies":[]}]})
+        .to_string(),
+    );
+    for explicit in [false, true] {
+        let mut args = vec![
+            "--file".into(),
+            f.project().join("lib/subject.dart").into_os_string(),
+            "--family".into(),
+            "classic".into(),
+            "--operator".into(),
+            OPERATORS[0].into(),
+            "--adapter-root".into(),
+            f.adapter().into_os_string(),
+        ];
+        let profile = if explicit {
+            args.extend([
+                "--flutter-sdk".into(),
+                flutter.clone().into_os_string(),
+                "--output".into(),
+                f.project().join("profiles/explicit.yml").into_os_string(),
+            ]);
+            f.project().join("profiles/explicit.yml")
+        } else {
+            f.project().join("profiles/lib/subject.yml")
+        };
+        f.spawn_command(
+            &["profile", "generate"],
+            &args,
+            false,
+            flutter.join("bin").as_os_str(),
+        );
+        success(&f.finish());
+        let yaml =
+            failforge_config::yaml::parse_yaml(&fs::read_to_string(profile).unwrap()).unwrap();
+        assert_eq!(
+            yaml["mutations"]["classic"]["operators"][OPERATORS[0]],
+            true
+        );
+        assert!(yaml.get("dart_sdk").is_none());
+        assert_eq!(yaml.get("flutter_sdk").is_some(), explicit);
+    }
+    assert!(f.rows("test_start").is_empty());
+    let mut args = f.direct();
+    let index = args
+        .iter()
+        .position(|argument| argument == "--dart-sdk")
+        .unwrap();
+    args.drain(index..index + 2);
+    f.spawn_command(&["mutate"], &args, false, flutter.join("bin").as_os_str());
+    success(&f.finish());
+    assert_eq!(f.summary()["outcomeCounts"], json!({"KILLED":1}));
+    assert_eq!(f.rows("test_start").len(), 3);
+    f.assert_clean(true);
+}
+
 #[test]
 fn yaml_runs_all_families_in_canonical_order_and_publishes_consistent_children() {
     let mut f = Fixture::new();

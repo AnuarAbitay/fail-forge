@@ -39,6 +39,9 @@ impl Fixture {
     fn profile(&self) -> PathBuf {
         self.root.join("package/profiles/calculator.yml")
     }
+    fn default_profile(&self) -> PathBuf {
+        self.root.join("package/profiles/lib/calculator.yml")
+    }
     fn args(&self) -> Vec<OsString> {
         vec![
             "--file".into(),
@@ -49,6 +52,11 @@ impl Fixture {
             self.profile().into_os_string(),
             "--template".into(),
         ]
+    }
+    fn args_without_output(&self) -> Vec<OsString> {
+        let mut args = self.args();
+        args.drain(4..6);
+        args
     }
     fn spawn(&mut self, args: &[OsString]) {
         assert!(self.child.is_none());
@@ -155,6 +163,91 @@ fn templates_work_without_interpreter_python_sources_or_path_programs() {
     assert_eq!(raw["limits"], json!({"max_mutants":1000}));
     assert_eq!(raw["rules"]["include"], json!(["lib/calculator.dart"]));
     assert!(!f.root.join("package/.dart_tool").exists());
+}
+
+#[test]
+fn omitted_output_mirrors_source_directories_and_keeps_equal_basenames_distinct() {
+    let mut f = Fixture::new();
+    let mut args = f.args_without_output();
+    success(&f.run(&args));
+    let first = fs::read(f.default_profile()).unwrap();
+    assert_eq!(
+        f.raw(&f.default_profile())["rules"]["include"],
+        json!(["lib/calculator.dart"])
+    );
+    assert!(
+        !f.profile().exists(),
+        "default path discarded the source directory"
+    );
+    let source = f.root.join("package/lib/nested/calculator.dart");
+    fs::create_dir(source.parent().unwrap()).unwrap();
+    fs::write(&source, "int multiply(int a, int b) => a * b;\n").unwrap();
+    args[1] = source.into_os_string();
+    success(&f.run(&args));
+    let second = f.root.join("package/profiles/lib/nested/calculator.yml");
+    assert_eq!(
+        f.raw(&second)["rules"]["include"],
+        json!(["lib/nested/calculator.dart"])
+    );
+    assert_eq!(fs::read(f.default_profile()).unwrap(), first);
+}
+
+#[test]
+fn omitted_output_dry_run_creates_no_directories() {
+    let mut f = Fixture::new();
+    let mut args = f.args_without_output();
+    args.push("--dry-run".into());
+    let output = f.run(&args);
+    success(&output);
+    assert!(output.stderr.is_empty());
+    assert!(!f.root.join("package/profiles").exists());
+    let preview = f.root.join("package/preview.yml");
+    fs::write(&preview, output.stdout).unwrap();
+    let yaml = f.raw(&preview);
+    assert_eq!(yaml["rules"]["include"], json!(["lib/calculator.dart"]));
+    assert!(yaml.get("dart_sdk").is_none());
+    assert!(yaml.get("flutter_sdk").is_none());
+}
+
+#[test]
+fn default_output_requires_force_and_preserves_existing_file_permissions() {
+    let mut f = Fixture::new();
+    let mut args = f.args_without_output();
+    fs::create_dir_all(f.default_profile().parent().unwrap()).unwrap();
+    fs::write(f.default_profile(), "existing profile\n").unwrap();
+    fs::set_permissions(f.default_profile(), fs::Permissions::from_mode(0o600)).unwrap();
+    rejected(&f.run(&args));
+    assert_eq!(
+        fs::read_to_string(f.default_profile()).unwrap(),
+        "existing profile\n"
+    );
+    args.push("--force".into());
+    success(&f.run(&args));
+    f.raw(&f.default_profile());
+    assert_eq!(
+        fs::metadata(f.default_profile())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+}
+
+#[test]
+fn default_output_rejects_symlinked_profiles_directory_without_writing_outside() {
+    let mut f = Fixture::new();
+    let outside = f.root.join("outside");
+    fs::create_dir(&outside).unwrap();
+    symlink(&outside, f.root.join("package/profiles")).unwrap();
+    let mut args = f.args_without_output();
+    args.push("--force".into());
+    rejected(&f.run(&args));
+    assert!(fs::read_dir(outside).unwrap().next().is_none());
+    assert_eq!(
+        fs::read_to_string(f.source()).unwrap(),
+        "int add(int a, int b) => a + b;\n"
+    );
 }
 
 #[test]

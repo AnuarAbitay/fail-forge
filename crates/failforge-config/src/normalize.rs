@@ -1,4 +1,4 @@
-//! Pure normalization shared by explicit command settings and YAML profiles.
+//! Normalization shared by explicit command settings and YAML profiles.
 
 use crate::catalogue::{DART_OPERATOR_GROUPS, DART_OPERATORS, FAMILIES, operators};
 use crate::duration::resolve_timeout_policy;
@@ -285,7 +285,7 @@ pub fn from_mapping(
     context: &Context,
     base_dir: Option<&Path>,
 ) -> Result<CampaignConfig, ConfigError> {
-    let (_, installed, base) = context_paths(context, base_dir)?;
+    let (current, installed, base) = context_paths(context, base_dir)?;
     let values = object(value, "campaign", ROOT_KEYS)?;
     let family = values
         .get("family")
@@ -350,15 +350,23 @@ pub fn from_mapping(
             "dart_sdk and flutter_sdk are mutually exclusive inputs",
         ));
     }
-    let flutter_sdk = flutter_value
-        .map(|value| resolve_path(value, "flutter_sdk", &base))
-        .transpose()?;
-    let dart_sdk = if let Some(value) = dart_value {
-        resolve_path(value, "dart_sdk", &base)?
-    } else if let Some(flutter) = &flutter_sdk {
-        flutter.join("bin/cache/dart-sdk")
+    let (dart_sdk, flutter_sdk) = if let Some(value) = dart_value {
+        (resolve_path(value, "dart_sdk", &base)?, None)
+    } else if let Some(value) = flutter_value {
+        let flutter = resolve_path(value, "flutter_sdk", &base)?;
+        (flutter.join("bin/cache/dart-sdk"), Some(flutter))
     } else {
-        installed.join(".toolchain/flutter/bin/cache/dart-sdk")
+        context
+            .sdk_search_path
+            .as_deref()
+            .and_then(|search_path| crate::sdk_discovery::discover_path_sdk(search_path, &current))
+            .map(|sdk| (sdk.dart_sdk, sdk.flutter_sdk))
+            .unwrap_or_else(|| {
+                (
+                    installed.join(".toolchain/flutter/bin/cache/dart-sdk"),
+                    None,
+                )
+            })
     };
     let adapter_default = path_value(&installed.join("adapters/dart"), "adapter_root")?;
     let adapter_root = resolve_path(
@@ -474,6 +482,7 @@ pub fn from_profile_mapping(
         &Context {
             cwd: current,
             installation: installed,
+            sdk_search_path: context.sdk_search_path.clone(),
         },
         Some(&base),
     )?;
@@ -503,6 +512,7 @@ mod tests {
         Context {
             installation: cwd.join("installation-does-not-need-python"),
             cwd,
+            sdk_search_path: None,
         }
     }
     fn direct(value: Value) -> Result<CampaignConfig, ConfigError> {

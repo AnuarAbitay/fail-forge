@@ -118,7 +118,6 @@ fn binding_covers_project_dependencies_sdk_native_tools_and_environment() {
         ("dart/lib/core.dart", "sdk"),
         ("installation/bin/failforge", "tools"),
         ("adapter/lib/adapter.dart", "adapter"),
-        ("flutter/bin/cache/artifacts/engine/kernel.bin", "sdk"),
     ] {
         let before = bind_inputs(&runtime, &project, &environment, &cancel).unwrap();
         fixture.file(path, b"changed");
@@ -131,6 +130,41 @@ fn binding_covers_project_dependencies_sdk_native_tools_and_environment() {
     let mut project = project;
     project.packages.remove("test");
     assert!(bind_inputs(&runtime, &project, &environment, &cancel).is_err());
+}
+
+#[test]
+fn flutter_tools_and_engine_are_bound_only_for_flutter_test_projects() {
+    for flutter in [false, true] {
+        let fixture = Fixture::new();
+        let mut project = fixture.prepared();
+        project.flutter = flutter;
+        let runtime = fixture.runtime();
+        let cancel = Cancellation::default();
+        let environment = BTreeMap::new();
+        let first = bind_inputs(&runtime, &project, &environment, &cancel).unwrap();
+        for (path, section) in [
+            ("flutter/bin/flutter", "tools"),
+            ("flutter/bin/cache/flutter_tools.snapshot", "tools"),
+            ("flutter/bin/cache/artifacts/engine/kernel.bin", "sdk"),
+        ] {
+            let before = bind_inputs(&runtime, &project, &environment, &cancel).unwrap();
+            fixture.file(path, b"changed");
+            let after = bind_inputs(&runtime, &project, &environment, &cancel).unwrap();
+            assert_eq!(before[section] != after[section], flutter, "{path}");
+        }
+        if !flutter {
+            let engine_file = fixture
+                .0
+                .join("flutter/bin/cache/artifacts/engine/kernel.bin");
+            fs::remove_file(&engine_file).unwrap();
+            std::os::unix::fs::symlink(fixture.0.join("missing"), engine_file).unwrap();
+            let after = bind_inputs(&runtime, &project, &environment, &cancel).unwrap();
+            assert_eq!(
+                first, after,
+                "unused Flutter artifacts entered Dart bindings"
+            );
+        }
+    }
 }
 
 #[test]

@@ -39,7 +39,8 @@ impl ProfileError {
 #[derive(Clone, Debug)]
 pub struct GenerateOptions {
     pub source: PathBuf,
-    pub output: PathBuf,
+    /// Omit to mirror the source path under the package's `profiles/` directory.
+    pub output: Option<PathBuf>,
     pub families: Vec<String>,
     pub language: Option<String>,
     pub operators: Vec<String>,

@@ -4,6 +4,17 @@ User-visible changes are recorded by version. Check
 [GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for published
 downloads and their verification results.
 
+## Unreleased
+
+### Added
+
+- Automatic discovery of prepared Dart and Flutter SDKs through `PATH` when no
+  explicit SDK is configured. Explicit paths take priority; the installation's
+  `.toolchain` SDK remains the fallback.
+- Optional `profile generate --output`: the default mirrors the Dart source
+  path under the package's `profiles/` directory. SDKs discovered through `PATH`
+  are not embedded into generated profiles.
+
 ## 0.1.0-beta.1 — 2026-10-21
 
 ### Added
