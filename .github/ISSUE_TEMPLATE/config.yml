@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Installation and first run
+    url: https://github.com/AnuarAbitay/fail-forge/blob/main/docs/installation.md
+    about: Prepare FailForge, its adapter and your target package.
+  - name: Report a security vulnerability privately
+    url: https://github.com/AnuarAbitay/fail-forge/security/advisories/new
+    about: Use private reporting and follow SECURITY.md for suspected vulnerabilities.

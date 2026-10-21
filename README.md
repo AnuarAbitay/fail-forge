@@ -1,5 +1,9 @@
 # FailForge
 
+[![CI](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml)
+[![Beta](https://img.shields.io/badge/beta-0.1.0--beta.1-blue)](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.1)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 **Find the bugs your Dart and Flutter tests would miss.**
 
 FailForge makes small changes to your code and runs your tests against them.
@@ -14,8 +18,9 @@ arm64**; use a native source build on Linux or macOS Intel. Read the
 [installation guide](docs/installation.md) and
 [beta limitations](docs/beta-limitations.md) before your first run.
 
-[Get started](#get-started) ·
-[Mutation operators](docs/mutation-operators.md) ·
+[Download beta](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.1) ·
+[Installation](docs/installation.md) ·
+[Operators](docs/mutation-operators.md) ·
 [Profiles](#yaml-profiles) ·
 [Results](#understand-the-results) ·
 [Changelog](CHANGELOG.md)
@@ -311,8 +316,9 @@ Use `failforge --help` or `<command> --help` for available options.
 - [Changelog](CHANGELOG.md)
 - [Security policy and vulnerability reporting](SECURITY.md)
 
-Report ordinary bugs and feature requests in
-[GitHub Issues](https://github.com/AnuarAbitay/fail-forge/issues).
+Use the [bug report](https://github.com/AnuarAbitay/fail-forge/issues/new?template=bug_report.yml)
+or [feature request](https://github.com/AnuarAbitay/fail-forge/issues/new?template=feature_request.yml)
+form in [GitHub Issues](https://github.com/AnuarAbitay/fail-forge/issues).
 Include your FailForge revision/version, OS, SDK versions, a minimal reproduction
 and sanitized diagnostics. Use the security policy for suspected vulnerabilities.
 

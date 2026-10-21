@@ -10,7 +10,7 @@ Beta interfaces and report formats may change between releases.
 | --- | --- |
 | Host operating systems | Linux and macOS have process backends. Windows is unsupported. |
 | Local verification | Recorded native and real Dart/Flutter regression runs were performed on macOS arm64. |
-| CI | Linux/macOS jobs are configured. The current anonymous source download requires a public repository; it cannot fetch a private repository without an approved authentication change. Check actual workflow results for the release commit rather than treating configuration as a passed run. |
+| CI | All seven jobs passed for beta release commit `9551288`: stable and minimum-version Rust checks, documentation, and Dart/Flutter SDK regression and packaging checks on Linux/macOS. See the [release CI run](https://github.com/AnuarAbitay/fail-forge/actions/runs/39541608683). This does not establish compatibility with every target project or SDK. |
 | Rust source builds | Rust 1.85 or newer is declared; the recorded minimum-version checks use 1.85.1. Build with the committed `Cargo.lock`. |
 | Dart tooling SDK | The adapter requires `>=3.13.0 <3.14.0`; the locally exercised version is 3.13.5. |
 | Flutter | The recorded SDK is Flutter 3.47.7 with Dart 3.13.5. Other Flutter/SDK combinations need their own validation. |
@@ -42,9 +42,12 @@ the adapter at its final location.
 
 The [local packaging command](packaging.md) builds a host-specific `.tar.gz`
 with both executables, adapter sources, user documentation and license material.
-It does not publish a GitHub release. The initial local archive target is macOS
-arm64; this is not evidence of successful Linux packaging or CI. Archives are
-not universal executables, signed installers or notarized macOS applications.
+It does not publish a GitHub release. The published
+[beta `0.1.0-beta.1`](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.1)
+provides a **macOS arm64** archive, its SHA-256 checksums and package manifest.
+Build from source on Linux or macOS Intel; no prebuilt archive for those targets
+is included in this release. Archives are not universal executables, signed
+installers or notarized macOS applications.
 
 If arranging a relocated installation, preserve these relationships:
 
@@ -62,9 +65,9 @@ installation/
       .dart_tool/package_config.json  # generated locally by pub get
 ```
 
-This tree describes the runtime layout; it does not imply that a GitHub release
-asset has been published. `installation/bin/failforge` finds the installation from its own real
-location; the source layouts `<checkout>/target/debug/failforge` and
+This tree describes the runtime layout. `installation/bin/failforge` finds the
+installation from its own real location; the source layouts
+`<checkout>/target/debug/failforge` and
 `<checkout>/target/release/failforge` find that checkout. Relocation does not
 depend on the checkout used to build the binary.
 

@@ -1,0 +1,22 @@
+name: Feature request
+description: Suggest an improvement to FailForge.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the task you are trying to complete and the current limitation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the user-facing behavior you would like, with a small example if useful.
+  - type: textarea
+    id: context
+    attributes:
+      label: Alternatives and context
+      description: Include any workarounds or related use cases. Keep examples free of secrets and private project data.

@@ -1,0 +1,57 @@
+name: Bug report
+description: Report a problem with installation, profiles, execution or results.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Include a small reproduction that can be shared publicly. Remove secrets and private project data from commands, profiles and diagnostics.
+        For suspected vulnerabilities, use [private security reporting](https://github.com/AnuarAbitay/fail-forge/security/advisories/new) and follow [SECURITY.md](https://github.com/AnuarAbitay/fail-forge/blob/main/SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: FailForge version or commit
+      description: Run `failforge --version`. For a source build, also include the commit ID.
+      placeholder: 0.1.0-beta.1
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and architecture
+      placeholder: macOS arm64 or Linux x86_64, including the OS version
+    validations:
+      required: true
+  - type: textarea
+    id: sdk
+    attributes:
+      label: Dart or Flutter SDK
+      description: If relevant, include `dart --version` or `flutter --version` for the SDK used by FailForge.
+      render: text
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the command or sanitized YAML profile and a minimal example that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the exit code and relevant mutant outcome, if available.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Relevant diagnostics
+      description: Share only the relevant sanitized output or summary fields. Full reports, captures and private source code are not required.
+      render: text
