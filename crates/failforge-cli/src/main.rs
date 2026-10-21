@@ -22,6 +22,7 @@ mod campaign_workspace;
 mod dart_namespace;
 mod diagnostics;
 mod display;
+mod doctor;
 mod family_execution;
 mod family_queue;
 mod family_stream;
@@ -82,6 +83,7 @@ fn main() -> ExitCode {
     };
     let arguments = match cli.command {
         Commands::Run(arguments) => arguments,
+        Commands::Doctor(arguments) => return doctor::execute(*arguments, &invocation_cwd),
         Commands::Mutate(arguments) => return mutate::execute(*arguments, &invocation_cwd),
         Commands::Replay(arguments) => {
             let (arguments, replay) = arguments.into_campaign(&invocation_cwd);

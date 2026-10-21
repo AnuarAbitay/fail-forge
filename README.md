@@ -94,9 +94,10 @@ dependencies. A native archive needs no Rust installation. A compatible SDK and
 prepared adapter dependencies are still required. See
 [beta limitations](docs/beta-limitations.md) for verification scope.
 
-The automatic SDK and profile-path defaults below are available in current
-source builds. With the published `0.1.0-beta.1` archive, supply `--dart-sdk`
-or `--flutter-sdk` and `profile generate --output` explicitly.
+The `doctor` command and automatic SDK/profile-path defaults below are available
+in current source builds. The published `0.1.0-beta.1` archive has no `doctor`;
+supply `--dart-sdk` or `--flutter-sdk` and `profile generate --output` explicitly
+when using that archive.
 
 The examples below run from the **target package root**, with these paths set:
 
@@ -109,6 +110,15 @@ export PATH="$FAILFORGE_HOME/bin:$DART_SDK/bin:$PATH"
 Set `FAILFORGE_HOME` to the extracted installation. For a source build, set it
 to the checkout and use
 `export PATH="$FAILFORGE_HOME/target/debug:$DART_SDK/bin:$PATH"` instead.
+
+Check the prepared environment:
+
+```sh
+failforge doctor
+```
+
+It reports missing prerequisites and suggests commands to fix them, without
+running your tests or changing files. See the [doctor guide](docs/doctor.md).
 
 Replace `lib/src/calculator.dart` with an existing source file in your package.
 Begin with one operator and one file:
@@ -309,6 +319,7 @@ inspect the report to apply their own quality threshold.
 
 | Command | Purpose |
 | --- | --- |
+| `failforge doctor` | Check the SDK, adapter and target prerequisites with suggested fixes. |
 | `failforge profile generate` | Generate a profile using applicability analysis or a catalogue template. |
 | `failforge mutate` | Run a mutation campaign from YAML or command-line options. |
 | `failforge replay` | Re-run retained classical candidates with matching source and baseline evidence; see the [replay requirements](docs/mutation-cli.md#replay-a-retained-classic-transcript). |
@@ -319,6 +330,7 @@ Use `failforge --help` or `<command> --help` for available options.
 ## Documentation and feedback
 
 - [Installation and first run](docs/installation.md)
+- [Check environment prerequisites](docs/doctor.md)
 - [Build and verify a local beta archive](docs/packaging.md)
 - [Complete mutation operator catalogue](docs/mutation-operators.md)
 - [Mutation commands and profile reference](docs/mutation-cli.md)

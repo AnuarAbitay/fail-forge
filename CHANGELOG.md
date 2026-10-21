@@ -8,6 +8,9 @@ downloads and their verification results.
 
 ### Added
 
+- Read-only `failforge doctor` diagnostics for SDK compatibility, prepared
+  adapter and project dependencies, test prerequisites and environment paths,
+  with remediation commands and support for checking an existing YAML profile.
 - Automatic discovery of prepared Dart and Flutter SDKs through `PATH` when no
   explicit SDK is configured. Explicit paths take priority; the installation's
   `.toolchain` SDK remains the fallback.

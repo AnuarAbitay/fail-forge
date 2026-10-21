@@ -21,6 +21,8 @@ pub(crate) struct Cli {
 pub(crate) enum Commands {
     /// Run a program directly; child arguments must follow --.
     Run(RunArgs),
+    /// Check SDK, adapter and project prerequisites without running tests or changing files.
+    Doctor(Box<DoctorArgs>),
     /// Run a mutation campaign from a config file or explicit project options.
     Mutate(Box<MutateArgs>),
     /// Replay a retained classic discovery transcript against fresh isolated copies.
@@ -60,6 +62,53 @@ pub(crate) enum Commands {
     /// Private descriptor-bound atomic publication of final campaign reports.
     #[command(hide = true)]
     CampaignPublish,
+}
+
+#[derive(Args)]
+pub(crate) struct DoctorArgs {
+    /// Check an existing YAML profile; cannot be mixed with project or SDK options.
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["project", "dart_sdk", "flutter_sdk", "adapter_root"])]
+    pub(crate) config: Option<PathBuf>,
+    /// Root of the package to check; defaults to the invocation directory.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) project: Option<PathBuf>,
+    /// Dart SDK root; otherwise search PATH, then the installation.
+    #[arg(long, value_name = "PATH", conflicts_with = "flutter_sdk")]
+    pub(crate) dart_sdk: Option<PathBuf>,
+    /// Flutter SDK root, whose bundled Dart SDK will be checked.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) flutter_sdk: Option<PathBuf>,
+    /// Prepared Dart adapter directory.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) adapter_root: Option<PathBuf>,
+    /// Installation root; defaults to the running executable's installation.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) installation: Option<PathBuf>,
+}
+
+impl DoctorArgs {
+    pub(crate) fn configuration_values(&self) -> Result<serde_json::Value, &'static str> {
+        let mut values = serde_json::Map::new();
+        for (name, path) in [
+            ("config", &self.config),
+            ("project", &self.project),
+            ("dart_sdk", &self.dart_sdk),
+            ("flutter_sdk", &self.flutter_sdk),
+            ("adapter_root", &self.adapter_root),
+        ] {
+            if let Some(path) = path {
+                let text = path
+                    .to_str()
+                    .ok_or("configuration paths must contain valid Unicode")?;
+                values.insert(name.into(), text.into());
+            }
+        }
+        // Resolve shared runtime settings without selecting or running mutations.
+        if self.config.is_none() {
+            values.insert("family".into(), "classic".into());
+        }
+        Ok(values.into())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -509,3 +558,7 @@ mod mutate_tests;
 #[cfg(test)]
 #[path = "profile_args_tests.rs"]
 mod profile_tests;
+
+#[cfg(test)]
+#[path = "doctor_args_tests.rs"]
+mod doctor_tests;

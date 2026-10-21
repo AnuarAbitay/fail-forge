@@ -126,6 +126,12 @@ layout; it does not imply that a prebuilt release archive is available.
 
 ## Generate a profile
 
+Before generating a profile or starting a campaign, current source builds can
+check local prerequisites with `failforge doctor`. Use `failforge doctor
+--config PATH` to check an existing profile's environment and literal source
+selection. This reads local state without running tests or changing files;
+see the [doctor reference](doctor.md) for checks and remediation commands.
+
 `failforge profile generate` creates an explicit YAML profile for one existing
 Dart source file under `lib/`. By default it discovers mutations with the
 existing Dart adapter and statically validates them. An operator is written as

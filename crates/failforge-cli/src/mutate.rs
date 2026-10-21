@@ -53,7 +53,9 @@ fn environment(
     values
 }
 
-fn validate_profile_selection(config: &RunConfig) -> Result<(), failforge_config::ConfigError> {
+pub(crate) fn validate_profile_selection(
+    config: &RunConfig,
+) -> Result<(), failforge_config::ConfigError> {
     if let RunConfig::Profile(profile) = config {
         for campaign in &profile.campaigns {
             crate::campaign_workspace::literal_includes(

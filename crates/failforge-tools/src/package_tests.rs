@@ -25,6 +25,7 @@ fn tracked() -> Vec<String> {
         "adapters/dart/lib/tests/secret.dart",
         "target/debug/fixture",
         "docs/private.md",
+        "docs/doctor.md",
         ".env",
         "AGENTS.md",
     ]
@@ -51,6 +52,7 @@ fn payload_allowlist_excludes_tests_tool_state_secrets_and_untracked_sources() {
     let selected = assets::select(&tracked()).unwrap();
     assert!(selected.contains("adapters/dart/lib/engine.dart"));
     assert!(selected.contains("third-party/inventory.json"));
+    assert!(selected.contains("docs/doctor.md"));
     for path in [
         "adapters/dart/lib/untracked.dart",
         "adapters/dart/lib/.env",

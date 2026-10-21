@@ -184,6 +184,19 @@ must contain `pubspec.yaml`, `.dart_tool/package_config.json` and
 Use a standalone package, not a Pub workspace. Source symlinks are unsupported.
 Keep the target source, prepared dependencies and SDK unchanged during a run.
 
+With a current source build, check these prerequisites before starting:
+
+```sh
+failforge doctor --project "$FAILFORGE_PROJECT" \
+  --installation "$FAILFORGE_HOME" --dart-sdk "$DART_SDK"
+```
+
+For Flutter, use `--flutter-sdk "$FLUTTER_SDK"` instead of `--dart-sdk`.
+The command reads local state and suggests manual fixes. It does not install
+dependencies or run tests. See [doctor diagnostics](doctor.md) for its scope,
+profile mode and exit codes. The published `0.1.0-beta.1` archive does not yet
+include this command.
+
 ## 4. Run a small campaign without YAML
 
 Start with one source file, one method and one operator. The example below
