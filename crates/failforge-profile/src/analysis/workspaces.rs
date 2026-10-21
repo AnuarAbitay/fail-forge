@@ -103,9 +103,15 @@ fn try_lock(file: &File) -> io::Result<bool> {
     }
 }
 
-fn wait_for_lock(
+fn wait_for_lock(attempt: impl FnMut() -> io::Result<bool>, deadline: Instant) -> io::Result<bool> {
+    wait_for_lock_with_clock(attempt, deadline, Instant::now, std::thread::sleep)
+}
+
+fn wait_for_lock_with_clock(
     mut attempt: impl FnMut() -> io::Result<bool>,
     deadline: Instant,
+    mut now: impl FnMut() -> Instant,
+    mut sleep: impl FnMut(Duration),
 ) -> io::Result<bool> {
     loop {
         match attempt() {
@@ -114,10 +120,10 @@ fn wait_for_lock(
             Err(error) if error.kind() == io::ErrorKind::Interrupted => (),
             Err(error) => return Err(error),
         }
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+        let Some(remaining) = deadline.checked_duration_since(now()) else {
             return Ok(false);
         };
-        std::thread::sleep(remaining.min(LOCK_RETRY_INTERVAL));
+        sleep(remaining.min(LOCK_RETRY_INTERVAL));
     }
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use std::cell::{Cell, RefCell};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread::JoinHandle;
@@ -457,12 +458,37 @@ fn global_coordination_wait_is_bounded_shared_and_checks_identity() {
     fixture.work.close().unwrap();
 }
 
+struct LockClock {
+    now: Cell<Instant>,
+    sleeps: RefCell<Vec<Duration>>,
+}
+
+impl LockClock {
+    fn new() -> Self {
+        Self {
+            now: Cell::new(Instant::now()),
+            sleeps: RefCell::new(Vec::new()),
+        }
+    }
+
+    fn advance(&self, duration: Duration) {
+        self.now.set(self.now.get() + duration);
+    }
+
+    fn sleep(&self, duration: Duration) {
+        self.sleeps.borrow_mut().push(duration);
+        self.advance(duration);
+    }
+}
+
 #[test]
-fn interrupted_lock_retries_share_the_deadline_and_other_errors_are_immediate() {
-    let deadline = Instant::now() + Duration::from_millis(40);
+fn lock_retry_succeeds_after_two_interruptions_before_the_deadline() {
+    let clock = LockClock::new();
+    let started = clock.now.get();
+    let deadline = started + Duration::from_millis(40);
     let mut attempts = 0;
     assert!(
-        wait_for_lock(
+        wait_for_lock_with_clock(
             || {
                 attempts += 1;
                 if attempts < 3 {
@@ -471,18 +497,112 @@ fn interrupted_lock_retries_share_the_deadline_and_other_errors_are_immediate() 
                     Ok(true)
                 }
             },
-            deadline
+            deadline,
+            || clock.now.get(),
+            |duration| clock.sleep(duration),
         )
         .unwrap()
     );
     assert_eq!(attempts, 3);
-    assert!(!wait_for_lock(|| Err(io::Error::from_raw_os_error(libc::EINTR)), deadline).unwrap());
-    assert!(Instant::now() >= deadline);
-    let error = wait_for_lock(
-        || Err(io::Error::from_raw_os_error(libc::EPERM)),
+    assert_eq!(*clock.sleeps.borrow(), [LOCK_RETRY_INTERVAL; 2]);
+    assert_eq!(clock.now.get() - started, LOCK_RETRY_INTERVAL * 2);
+}
+
+#[test]
+fn lock_retry_interruptions_and_contention_share_the_original_deadline() {
+    let clock = LockClock::new();
+    let deadline = clock.now.get() + Duration::from_millis(12);
+    let mut attempts = 0;
+    assert!(
+        !wait_for_lock_with_clock(
+            || {
+                attempts += 1;
+                assert!(attempts <= 4, "lock retries restarted the deadline");
+                if attempts == 4 {
+                    // The loop attempts the lock after sleeping to the deadline;
+                    // account for that attempt's elapsed time without a real wait.
+                    clock.advance(Duration::from_nanos(1));
+                }
+                if attempts % 2 == 1 {
+                    Err(io::Error::from_raw_os_error(libc::EINTR))
+                } else {
+                    Ok(false)
+                }
+            },
+            deadline,
+            || clock.now.get(),
+            |duration| clock.sleep(duration),
+        )
+        .unwrap()
+    );
+    assert_eq!(attempts, 4);
+    assert_eq!(
+        *clock.sleeps.borrow(),
+        [
+            LOCK_RETRY_INTERVAL,
+            LOCK_RETRY_INTERVAL,
+            Duration::from_millis(2)
+        ]
+    );
+    assert_eq!(clock.now.get(), deadline + Duration::from_nanos(1));
+}
+
+#[test]
+fn lock_retry_delay_or_oversleep_can_expire_before_a_third_attempt() {
+    for delay_in_attempt in [true, false] {
+        let clock = LockClock::new();
+        let deadline = clock.now.get() + Duration::from_millis(40);
+        let mut attempts = 0;
+        assert!(
+            !wait_for_lock_with_clock(
+                || {
+                    attempts += 1;
+                    assert!(attempts <= 3);
+                    if delay_in_attempt {
+                        clock.advance(Duration::from_millis(45));
+                    }
+                    if attempts < 3 {
+                        Err(io::Error::from_raw_os_error(libc::EINTR))
+                    } else {
+                        Ok(true)
+                    }
+                },
+                deadline,
+                || clock.now.get(),
+                |duration| {
+                    clock.sleep(duration);
+                    clock.advance(Duration::from_millis(45));
+                },
+            )
+            .unwrap()
+        );
+        assert_eq!(attempts, if delay_in_attempt { 1 } else { 2 });
+        assert_eq!(
+            *clock.sleeps.borrow(),
+            if delay_in_attempt {
+                vec![]
+            } else {
+                vec![LOCK_RETRY_INTERVAL]
+            }
+        );
+        assert!(clock.now.get() > deadline);
+    }
+}
+
+#[test]
+fn lock_retry_errors_other_than_interrupted_are_immediate() {
+    let mut attempts = 0;
+    let error = wait_for_lock_with_clock(
+        || {
+            attempts += 1;
+            Err(io::Error::from_raw_os_error(libc::EPERM))
+        },
         Instant::now() + CLEANUP_LOCK_BUDGET,
+        || panic!("non-interrupted errors must not consult the clock"),
+        |_| panic!("non-interrupted errors must not sleep"),
     )
     .unwrap_err();
+    assert_eq!(attempts, 1);
     assert_eq!(error.raw_os_error(), Some(libc::EPERM));
 }
 
