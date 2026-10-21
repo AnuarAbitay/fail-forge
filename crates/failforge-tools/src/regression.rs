@@ -698,7 +698,9 @@ impl Harness {
                 "--test-timeout",
                 "1s",
                 "--command-timeout",
-                "10s",
+                // Leave headroom for the healthy Dart compiler/test startup on
+                // CI; the mutated synchronous loop still exceeds this budget.
+                "30s",
             ],
             0,
         )?;

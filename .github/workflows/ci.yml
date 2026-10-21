@@ -162,6 +162,10 @@ jobs:
         shell: bash
         run: |
           target/release/failforge-tools regression --suite timeouts --binary-dir target/release --output "$RUNNER_TEMP/timeout-regression" --dart-sdk "$RUNNER_TEMP/flutter/bin/cache/dart-sdk"
+          for scenario in inner-timeout outer-timeout; do
+            jq '{status, baseline: {outcome: .baseline.outcome, wallSeconds: .baseline.wallSeconds}, outcomeCounts, records: [.records[] | {outcome, reason, wallSeconds, runner: {cause: .runner.cause, cleanup: .runner.cleanup}}]}' \
+              "$RUNNER_TEMP/timeout-regression/$scenario/summary.json"
+          done
       - name: Native CLI, profiles, initialization, timeouts and recovery regressions
         shell: bash
         run: |
