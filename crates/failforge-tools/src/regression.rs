@@ -206,12 +206,25 @@ impl Harness {
             command.args(["--test-timeout", "2s", "--command-timeout", "30s"]);
         }
         println!("regression {name}");
-        let receipt = common::execute(
+        let executed = common::execute(
             &mut command,
             &self.output.join(format!("{name}-command")),
             Duration::from_secs(240),
             expected,
-        )?;
+        );
+        let receipt = match executed {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                if let Ok(summary) = common::read_json(&destination.join("summary.json")) {
+                    return Err(format!(
+                        "{error}; campaign diagnostics: {}",
+                        failure_diagnostics(&summary)
+                    )
+                    .into());
+                }
+                return Err(error);
+            }
+        };
         ensure(
             common::tree(project)? == before,
             format!("{name}: source inputs changed"),
@@ -1145,6 +1158,21 @@ impl Harness {
         )?;
         Ok(())
     }
+}
+
+fn failure_diagnostics(summary: &Value) -> Value {
+    fn attempt(value: &Value) -> Value {
+        json!({"outcome":value["outcome"],"reason":value["reason"],
+            "wallSeconds":value["wallSeconds"],"exitCode":value["exitCode"],
+            "runner":{"cause":value["runner"]["cause"],"cleanup":value["runner"]["cleanup"],"status":value["runner"]["status"]}})
+    }
+    let records = summary["records"].as_array();
+    json!({"status":summary["status"],"error":summary["error"],
+        "outcomeCounts":summary["outcomeCounts"],"timings":summary["timings"],
+        "baseline":attempt(&summary["baseline"]),
+        "originalControls":summary["originalControls"].as_array().into_iter().flatten().take(8).map(attempt).collect::<Vec<_>>(),
+        "recordCount":records.map(Vec::len),
+        "records":records.into_iter().flatten().take(8).map(attempt).collect::<Vec<_>>()})
 }
 fn mutant_ids(summary: &Value) -> Vec<&str> {
     summary["records"]

@@ -106,7 +106,7 @@ jobs:
   dart-adapter:
     name: Dart adapter / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 50
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -158,6 +158,10 @@ jobs:
         shell: bash
         run: |
           target/debug/failforge-tools semantic-e2e --output "$RUNNER_TEMP/dart-semantic-e2e" --dart-sdk "$RUNNER_TEMP/flutter/bin/cache/dart-sdk"
+      - name: Timeout scenarios before the full SDK regression
+        shell: bash
+        run: |
+          target/release/failforge-tools regression --suite timeouts --binary-dir target/release --output "$RUNNER_TEMP/timeout-regression" --dart-sdk "$RUNNER_TEMP/flutter/bin/cache/dart-sdk"
       - name: Native CLI, profiles, initialization, timeouts and recovery regressions
         shell: bash
         run: |

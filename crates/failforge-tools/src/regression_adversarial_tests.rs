@@ -2,6 +2,24 @@ use super::*;
 
 const DISPLAY: &[u8] = b"FailForge mutation summary\nReport: /report/summary.json\n";
 
+#[test]
+fn failed_campaign_diagnostics_preserve_causes_and_bound_records_without_raw_output() {
+    let summary = json!({
+        "status":"failed","error":"baseline did not pass",
+        "outcomeCounts":{},"timings":{"baseline":10.01},
+        "baseline":{"outcome":"TIMEOUT","reason":"command_timeout","wallSeconds":10.01,
+            "stdout":"author-secret","command":["credential-secret"],
+            "runner":{"cause":"Timeout","cleanup":"complete","status":"signal:9","private":"runner-secret"}},
+        "records":(0..20).map(|_|json!({"outcome":"INFRA_ERROR","reason":"fixture_reason","stdout":"record-secret"})).collect::<Vec<_>>()
+    });
+    let diagnostics = failure_diagnostics(&summary);
+    assert_eq!(diagnostics["baseline"]["reason"], "command_timeout");
+    assert_eq!(diagnostics["baseline"]["runner"]["cleanup"], "complete");
+    assert_eq!(diagnostics["recordCount"], 20);
+    assert_eq!(diagnostics["records"].as_array().unwrap().len(), 8);
+    assert!(!diagnostics.to_string().contains("secret"));
+}
+
 fn complete() -> Value {
     json!({
         "version":1,"family":"classic","output":"/report","status":"completed",
