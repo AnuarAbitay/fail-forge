@@ -7,8 +7,11 @@ When a test catches a change, the mutant is **killed**. When the tests still
 pass, the mutant **survives** and gives you a concrete place to review your
 assertions, edge cases or requirements.
 
-FailForge is preparing for its first public beta. Install from a prepared native
-archive or build from source. Read the [installation guide](docs/installation.md) and
+This documentation covers **FailForge `0.1.0-beta.1`**. Check
+[GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for versioned
+downloads, or build from source. The prebuilt target for this beta is **macOS
+arm64**; use a native source build on Linux or macOS Intel. Read the
+[installation guide](docs/installation.md) and
 [beta limitations](docs/beta-limitations.md) before your first run.
 
 [Get started](#get-started) ·
@@ -83,9 +86,8 @@ or Flutter with a Dart SDK in that range. Building from source requires
 Follow the [installation guide](docs/installation.md) to extract a prepared
 archive or build FailForge, prepare its adapter and prepare your target package's
 dependencies. A native archive needs no Rust installation. A compatible SDK and
-prepared adapter dependencies are still required. Public beta publication is a
-separate step; see [beta limitations](docs/beta-limitations.md) for verification
-scope.
+prepared adapter dependencies are still required. See
+[beta limitations](docs/beta-limitations.md) for verification scope.
 
 The examples below run from the **target package root**, with these paths set:
 

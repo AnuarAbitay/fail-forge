@@ -1,8 +1,10 @@
 # Installation and first run
 
-You can use a prepared native archive or build FailForge from source. A local
-archive can be produced with the [packaging command](packaging.md); this guide
-does not claim that a public GitHub release has been published.
+This guide covers FailForge `0.1.0-beta.1`. Check
+[GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for versioned
+downloads, or build from source. The prebuilt target for this beta is **macOS
+arm64**; Linux and macOS Intel use native source builds. Developers can also
+produce a local archive with the [packaging command](packaging.md).
 Read the [beta limitations](beta-limitations.md) before running a campaign.
 
 ## Requirements
@@ -26,10 +28,12 @@ permissions; working-copy isolation is not a security sandbox.
 
 ### Install from an archive
 
-Use an archive matching your operating system and architecture, together with
-its `SHA256SUMS` and `package-manifest.json`. The following example is for a
-locally prepared **macOS arm64** archive of `0.1.0-beta.1`; it does not imply
-that another platform has been built or tested.
+On macOS arm64, obtain the `0.1.0-beta.1` archive, `SHA256SUMS` and
+`package-manifest.json` from the same release on
+[GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases).
+Check that the release's version and target match your installation. GitHub's
+automatically generated source archives do not contain the native executables;
+use the named `.tar.gz` asset below or follow [Build from source](#build-from-source).
 
 Verify the checksum in the directory containing those files, then extract into
 a new parent directory:

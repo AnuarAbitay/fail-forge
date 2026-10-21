@@ -2,15 +2,16 @@
 
 ## Supported versions
 
-FailForge is preparing for its first public beta. Report suspected security
-issues against the current `main` revision and include its commit ID. There
-is no published stable support or backport schedule at this stage.
+This policy covers FailForge `0.1.0-beta.1` and the current `main` revision.
+Include the affected version and exact commit ID in a security report. There is
+no stable support or backport schedule during the beta.
 
 ## Report a vulnerability privately
 
 Use the repository's
 [Security Advisories page](https://github.com/AnuarAbitay/fail-forge/security/advisories)
-and choose **Report a vulnerability**, when that option is available.
+and choose **Report a vulnerability**. Private Vulnerability Reporting is enabled
+for this repository.
 GitHub's [private reporting guide](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/report-privately)
 explains how to submit the report.
 
@@ -37,7 +38,7 @@ Use a disposable test project. Do not include tokens, `.env` secrets, credential
 private source code or unreviewed capture archives. If an attachment is necessary,
 describe what it contains before sharing it privately.
 
-There is no guaranteed response or fix deadline during beta preparation. Keep
+There is no guaranteed response or fix deadline during the beta. Keep
 follow-up information in the same private conversation.
 
 ## Security boundaries
@@ -57,10 +58,3 @@ exposure of secrets by FailForge itself or a bypass of its documented input and
 path checks are appropriate topics for a private security report. Ordinary test
 failures, surviving mutants and expected command timeouts belong in public bug
 reports after sensitive information has been removed.
-
-## Repository setup before the public beta
-
-The maintainer must enable and verify GitHub Private Vulnerability Reporting
-before announcing it as an available private reporting channel. Adding this
-file does not enable that repository setting.
-See GitHub's [configuration instructions](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository).
