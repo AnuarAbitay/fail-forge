@@ -7,8 +7,8 @@ starting a campaign:
 failforge doctor
 ```
 
-`doctor` is available in current source builds. The published `0.1.0-beta.1`
-archive predates this command.
+`doctor` was added in `0.1.0-beta.2`, currently available from its source tag.
+The published `0.1.0-beta.1` archive predates this command.
 
 It reads local files and prepared dependency metadata. It does not run SDK
 programs, the adapter or your tests, download dependencies, create working

@@ -1,8 +1,9 @@
 # Build a local beta archive
 
 `failforge-tools package` builds a native FailForge archive for the machine on
-which it runs. The first beta version is `0.1.0-beta.1`. Creating an archive does
-not publish a GitHub release or establish that other platforms have passed.
+which it runs. The examples package source version `0.1.0-beta.2`; its native
+release assets have not been published. Creating an archive does not publish a
+GitHub release or establish that other platforms have passed.
 
 To use an archive, follow the [installation guide](installation.md#install-from-an-archive).
 This page is for preparing and checking the archive.
@@ -41,7 +42,7 @@ From the source checkout:
 rustup component add rust-src rust-docs
 cargo run -p failforge-tools --locked -- package \
   --output /absolute/new-beta-output \
-  --expected-version 0.1.0-beta.1
+  --expected-version 0.1.0-beta.2
 ```
 
 If the tool is already built, select the source checkout explicitly:
@@ -50,7 +51,7 @@ If the tool is already built, select the source checkout explicitly:
 target/debug/failforge-tools package \
   --installation /absolute/path/to/fail-forge-source \
   --output /absolute/another-new-beta-output \
-  --expected-version 0.1.0-beta.1
+  --expected-version 0.1.0-beta.2
 ```
 
 For this developer command, `--installation` identifies the source checkout to
@@ -75,7 +76,7 @@ A successful macOS arm64 package of this version produces:
 
 ```text
 new-beta-output/
-  failforge-0.1.0-beta.1-aarch64-apple-darwin.tar.gz
+  failforge-0.1.0-beta.2-aarch64-apple-darwin.tar.gz
   SHA256SUMS
   package-manifest.json
 ```
@@ -86,7 +87,7 @@ manifest with the corresponding archive.
 The archive has one top-level directory:
 
 ```text
-failforge-0.1.0-beta.1-aarch64-apple-darwin/
+failforge-0.1.0-beta.2-aarch64-apple-darwin/
   bin/
     failforge
     failforge-adapter-campaign
@@ -128,7 +129,7 @@ Run the generated checksum check from its output directory:
 ```sh
 cd /absolute/new-beta-output
 shasum -a 256 -c SHA256SUMS
-tar -tzf failforge-0.1.0-beta.1-aarch64-apple-darwin.tar.gz
+tar -tzf failforge-0.1.0-beta.2-aarch64-apple-darwin.tar.gz
 ```
 
 On systems providing `sha256sum`, `sha256sum -c SHA256SUMS` is an alternative.

@@ -1,9 +1,11 @@
 # Installation and first run
 
-This guide covers FailForge `0.1.0-beta.1`. Check
-[GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for versioned
-downloads, or build from source. The prebuilt target for this beta is **macOS
-arm64**; Linux and macOS Intel use native source builds. Developers can also
+This guide covers FailForge `0.1.0-beta.2`, available as a source tag. The latest
+published archive is **`0.1.0-beta.1` for macOS arm64**; `beta.2` binary assets
+have not been published. Check
+[GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for published
+downloads, or build the new version from source. Linux and macOS Intel use
+native source builds. Developers can also
 produce a local archive with the [packaging command](packaging.md).
 Read the [beta limitations](beta-limitations.md) before running a campaign.
 
@@ -67,10 +69,16 @@ this installation path.
 
 ### Build from source
 
-Obtain a checkout or source download from the
-[FailForge repository](https://github.com/AnuarAbitay/fail-forge).
-The following examples use a POSIX shell. Replace the absolute paths with your
-own paths:
+Obtain the versioned source from the
+[FailForge repository](https://github.com/AnuarAbitay/fail-forge):
+
+```sh
+git clone --branch v0.1.0-beta.2 --depth 1 \
+  https://github.com/AnuarAbitay/fail-forge.git
+```
+
+The following examples use a POSIX shell. Set `FAILFORGE_HOME` to the absolute
+path of that checkout:
 
 ```sh
 export FAILFORGE_HOME="/absolute/path/to/fail-forge"
@@ -140,7 +148,7 @@ The same Dart version restriction applies. Run Flutter's normal setup first if
 its bundled Dart SDK is not yet available. Do not supply both `--dart-sdk` and
 `--flutter-sdk` to a FailForge command.
 
-Current source builds can discover a prepared SDK automatically:
+Starting with `0.1.0-beta.2`, FailForge can discover a prepared SDK automatically:
 
 ```sh
 export PATH="$DART_SDK/bin:$PATH"
@@ -152,7 +160,7 @@ uses the installation's `.toolchain/flutter/bin/cache/dart-sdk` location.
 Discovery does not install an SDK, prepare Flutter or check version
 compatibility. Nonstandard SDK shims need an explicit root path.
 The published `0.1.0-beta.1` archive requires explicit SDK paths; these
-automatic defaults are available in source builds after that release.
+automatic defaults were added in `0.1.0-beta.2`.
 
 ## 3. Prepare the target package
 
@@ -184,7 +192,7 @@ must contain `pubspec.yaml`, `.dart_tool/package_config.json` and
 Use a standalone package, not a Pub workspace. Source symlinks are unsupported.
 Keep the target source, prepared dependencies and SDK unchanged during a run.
 
-With a current source build, check these prerequisites before starting:
+With `0.1.0-beta.2`, check these prerequisites before starting:
 
 ```sh
 failforge doctor --project "$FAILFORGE_PROJECT" \
@@ -194,7 +202,7 @@ failforge doctor --project "$FAILFORGE_PROJECT" \
 For Flutter, use `--flutter-sdk "$FLUTTER_SDK"` instead of `--dart-sdk`.
 The command reads local state and suggests manual fixes. It does not install
 dependencies or run tests. See [doctor diagnostics](doctor.md) for its scope,
-profile mode and exit codes. The published `0.1.0-beta.1` archive does not yet
+profile mode and exit codes. The published `0.1.0-beta.1` archive does not
 include this command.
 
 ## 4. Run a small campaign without YAML
@@ -236,7 +244,7 @@ reuse its name.
 ## 5. Generate and run a YAML profile
 
 From the prepared target package, generate a profile for one existing library
-source file. With a current source build and the SDK on `PATH`:
+source file. With `0.1.0-beta.2` and the SDK on `PATH`:
 
 ```sh
 cd "$FAILFORGE_PROJECT"
@@ -251,8 +259,8 @@ source's directory structure inside the package. An explicit `--output PATH`
 selects another destination; replacing an existing file requires `--force`.
 For the published `0.1.0-beta.1` archive, add `--output
 profiles/lib/src/calculator.yml` and `--dart-sdk "$DART_SDK"` (or
-`--flutter-sdk "$FLUTTER_SDK"`). Explicit SDK options remain supported by
-current source builds as well.
+`--flutter-sdk "$FLUTTER_SDK"`). Explicit SDK options remain supported in
+`0.1.0-beta.2` as well.
 
 Generation analyzes applicability and writes explicit operator switches. It
 does not run the target's tests. If no selected operator has a statically valid

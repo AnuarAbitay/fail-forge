@@ -1,7 +1,7 @@
 # Beta support and limitations
 
-This document describes the current implementation, not a promise of support for
-every Dart project. Use it with the [mutation command guide](mutation-cli.md).
+This document describes source version `0.1.0-beta.2`, not a promise of support
+for every Dart project. Use it with the [mutation command guide](mutation-cli.md).
 Beta interfaces and report formats may change between releases.
 
 ## Platforms and toolchains
@@ -10,7 +10,8 @@ Beta interfaces and report formats may change between releases.
 | --- | --- |
 | Host operating systems | Linux and macOS have process backends. Windows is unsupported. |
 | Local verification | Recorded native and real Dart/Flutter regression runs were performed on macOS arm64. |
-| CI | All seven jobs passed for beta release commit `9551288`: stable and minimum-version Rust checks, documentation, and Dart/Flutter SDK regression and packaging checks on Linux/macOS. See the [release CI run](https://github.com/AnuarAbitay/fail-forge/actions/runs/39541608683). This does not establish compatibility with every target project or SDK. |
+| CI history | All seven jobs passed for the `0.1.0-beta.1` release commit `9551288`: stable and minimum-version Rust checks, documentation, and Dart/Flutter SDK regression and packaging checks on Linux/macOS. See the [beta.1 CI run](https://github.com/AnuarAbitay/fail-forge/actions/runs/39541608683). This is historical evidence for beta.1, not a beta.2 CI result. |
+| Beta.2 preparation | Local verification recorded 1,381 passing tests and seven ignored tests, formatting, checks, Clippy, Rust 1.85.1, and focused real-SDK checks of the new commands/defaults. These do not replace final CI and packaged-release verification. |
 | Rust source builds | Rust 1.85 or newer is declared; the recorded minimum-version checks use 1.85.1. Build with the committed `Cargo.lock`. |
 | Dart tooling SDK | The adapter requires `>=3.13.0 <3.14.0`; the locally exercised version is 3.13.5. |
 | Flutter | The recorded SDK is Flutter 3.47.7 with Dart 3.13.5. Other Flutter/SDK combinations need their own validation. |
@@ -45,8 +46,9 @@ with both executables, adapter sources, user documentation and license material.
 It does not publish a GitHub release. The published
 [beta `0.1.0-beta.1`](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.1)
 provides a **macOS arm64** archive, its SHA-256 checksums and package manifest.
-Build from source on Linux or macOS Intel; no prebuilt archive for those targets
-is included in this release. Archives are not universal executables, signed
+Version `0.1.0-beta.2` is currently available as a source tag; its native release
+assets have not been published. Build from source for beta.2, Linux or macOS
+Intel. Archives are not universal executables, signed
 installers or notarized macOS applications.
 
 If arranging a relocated installation, preserve these relationships:
@@ -77,7 +79,7 @@ directories, need this option instead of a build-time path fallback. Keep
 `failforge-adapter-campaign` beside the actual `failforge` executable even when
 overriding the installation.
 
-Current source builds discover prepared SDKs through `PATH`, with the
+Starting with `0.1.0-beta.2`, FailForge discovers prepared SDKs through `PATH`, with the
 installation's `.toolchain` location as fallback. Explicit `--dart-sdk` or
 `--flutter-sdk` takes priority; with `mutate --config`, use the corresponding
 YAML field. The published `0.1.0-beta.1` archive predates PATH discovery and

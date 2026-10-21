@@ -1,7 +1,7 @@
 # FailForge
 
 [![CI](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml)
-[![Beta](https://img.shields.io/badge/beta-0.1.0--beta.1-blue)](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.1)
+[![Beta](https://img.shields.io/badge/beta-0.1.0--beta.2-blue)](https://github.com/AnuarAbitay/fail-forge/tree/v0.1.0-beta.2)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **Find the bugs your Dart and Flutter tests would miss.**
@@ -11,14 +11,16 @@ When a test catches a change, the mutant is **killed**. When the tests still
 pass, the mutant **survives** and gives you a concrete place to review your
 assertions, edge cases or requirements.
 
-This documentation covers **FailForge `0.1.0-beta.1`**. Check
-[GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for versioned
-downloads, or build from source. The prebuilt target for this beta is **macOS
-arm64**; use a native source build on Linux or macOS Intel. Read the
+This documentation covers **FailForge `0.1.0-beta.2`**, available as a source
+tag. The latest published native archive is **`0.1.0-beta.1` for macOS arm64**;
+`beta.2` binary assets have not been published. Build from source for the new
+features or on Linux and macOS Intel. Check
+[GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for published
+downloads. Read the
 [installation guide](docs/installation.md) and
 [beta limitations](docs/beta-limitations.md) before your first run.
 
-[Download beta](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.1) ·
+[Download beta.1](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.1) ·
 [Installation](docs/installation.md) ·
 [Operators](docs/mutation-operators.md) ·
 [Profiles](#yaml-profiles) ·
@@ -94,8 +96,8 @@ dependencies. A native archive needs no Rust installation. A compatible SDK and
 prepared adapter dependencies are still required. See
 [beta limitations](docs/beta-limitations.md) for verification scope.
 
-The `doctor` command and automatic SDK/profile-path defaults below are available
-in current source builds. The published `0.1.0-beta.1` archive has no `doctor`;
+The `doctor` command and automatic SDK/profile-path defaults below were added
+in `0.1.0-beta.2`. The published `0.1.0-beta.1` archive has no `doctor`;
 supply `--dart-sdk` or `--flutter-sdk` and `profile generate --output` explicitly
 when using that archive.
 

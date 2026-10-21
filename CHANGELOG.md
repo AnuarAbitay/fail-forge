@@ -4,7 +4,7 @@ User-visible changes are recorded by version. Check
 [GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for published
 downloads and their verification results.
 
-## Unreleased
+## 0.1.0-beta.2 — 2026-10-21
 
 ### Added
 

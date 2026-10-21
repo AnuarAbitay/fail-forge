@@ -58,8 +58,10 @@ protocols; the public campaign calls the same implementations directly.
 
 ## Prepare the installation and target
 
-The current installation starts from source. Build the native executables and
-prepare the Dart adapter separately with a compatible SDK:
+Version `0.1.0-beta.2` is available as a source tag; the latest published native
+archive is `0.1.0-beta.1` for macOS arm64. See the
+[installation guide](installation.md) for both paths. For a source build, build
+the native executables and prepare the Dart adapter with a compatible SDK:
 
 ```sh
 cargo build --workspace --locked
@@ -122,15 +124,18 @@ Profile applicability analysis uses `failforge-adapter-campaign` beside the real
 copied binary without the prepared adapter is insufficient. Prepare adapter
 dependencies at their final location. See the
 [installation guide](installation.md#relocate-an-installation) for the relocated
-layout; it does not imply that a prebuilt release archive is available.
+layout.
 
 ## Generate a profile
 
-Before generating a profile or starting a campaign, current source builds can
+Before generating a profile or starting a campaign, `0.1.0-beta.2` can
 check local prerequisites with `failforge doctor`. Use `failforge doctor
 --config PATH` to check an existing profile's environment and literal source
 selection. This reads local state without running tests or changing files;
 see the [doctor reference](doctor.md) for checks and remediation commands.
+The published beta.1 archive has no `doctor` and requires explicit SDK and
+profile output paths; PATH discovery and automatic profile paths were added
+in beta.2.
 
 `failforge profile generate` creates an explicit YAML profile for one existing
 Dart source file under `lib/`. By default it discovers mutations with the
