@@ -18,6 +18,7 @@ use checks::{
 #[derive(Debug, PartialEq, Eq)]
 enum Status {
     Ok,
+    Warn,
     Fail,
     Skip,
 }
@@ -75,6 +76,7 @@ impl Report {
         for check in &self.0 {
             let status = match check.status {
                 Status::Ok => "OK",
+                Status::Warn => "WARN",
                 Status::Fail => "FAIL",
                 Status::Skip => "SKIP",
             };
@@ -173,17 +175,26 @@ fn inspect(
     report.prerequisite(
         version.is_some(),
         "Dart SDK version",
-        &version.map_or_else(
+        &version.as_ref().map_or_else(
             || {
                 format!(
-                    "stable version >=3.13.0 <3.14.0 in {}",
+                    "stable version >=3.13.0 <4.0.0 in {}",
                     quote(&config.dart_sdk.join("version"))
                 )
             },
-            |version| format!("Dart {version} matches >=3.13.0 <3.14.0"),
+            |version| format!("Dart {version} matches >=3.13.0 <4.0.0"),
         ),
-        "select a stable Dart SDK with version >=3.13.0 <3.14.0".into(),
+        "select a stable Dart SDK with version >=3.13.0 <4.0.0".into(),
     );
+    if let Some(version) = version.filter(|version| !version.starts_with("3.13.")) {
+        report.add(
+            Status::Warn,
+            "Dart SDK compatibility",
+            format!(
+                "Dart {version} is allowed but newer than the recorded Dart 3.13.x toolchain (3.13.5); verify adapter/analyzer compatibility with analysis, tests and a mutation baseline"
+            ),
+        );
+    }
     report.prerequisite(
         readable_regular(&config.adapter_root.join("bin/failforge_dart_adapter.dart")),
         "Adapter entry point",

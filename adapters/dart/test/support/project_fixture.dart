@@ -13,7 +13,7 @@ class ProjectFixture {
     );
     fixture.write(
       'pubspec.yaml',
-      'name: fixture\nenvironment:\n  sdk: ">=3.13.0 <3.14.0"\n',
+      'name: fixture\nenvironment:\n  sdk: ">=3.13.0 <4.0.0"\n',
     );
     fixture.write(
       '.dart_tool/package_config.json',

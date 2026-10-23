@@ -104,13 +104,14 @@ jobs:
         run: cargo doc --workspace --no-deps --locked
 
   dart-adapter:
-    name: Dart adapter / ${{ matrix.os }}
+    name: Flutter ${{ matrix.flutter }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        flutter: ['3.47.7', stable]
     steps:
       - name: Check out the exact public revision without authentication
         shell: bash
@@ -124,25 +125,36 @@ jobs:
           git checkout --quiet --detach FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
       - uses: dtolnay/rust-toolchain@stable
-      - name: Install pinned official Flutter SDK and verify archive digest
+      - name: Install official Flutter SDK and verify archive digest
+        env:
+          FLUTTER_VERSION: ${{ matrix.flutter }}
         shell: bash
         run: |
           set -euo pipefail
-          cargo run -p failforge-tools --locked -- install-test-flutter --destination "$RUNNER_TEMP"
+          cargo run -p failforge-tools --locked -- install-test-flutter --version "$FLUTTER_VERSION" --destination "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
           echo "PUB_CACHE=$RUNNER_TEMP/pub-cache" >> "$GITHUB_ENV"
           echo "FLUTTER_SUPPRESS_ANALYTICS=true" >> "$GITHUB_ENV"
       - name: Prepare tooling dependencies and explicit example
+        env:
+          FLUTTER_VERSION: ${{ matrix.flutter }}
         shell: bash
         run: |
           dart --suppress-analytics pub get --enforce-lockfile --directory adapters/dart
-          (cd examples/flutter_fixture && flutter --suppress-analytics pub get --enforce-lockfile)
-      - name: Dart formatting, analysis and tests
+          if [ "$FLUTTER_VERSION" = stable ]; then
+            (cd examples/flutter_fixture && flutter --suppress-analytics pub get)
+          else
+            (cd examples/flutter_fixture && flutter --suppress-analytics pub get --enforce-lockfile)
+          fi
+      - name: Dart formatting on the pinned SDK
+        if: matrix.flutter != 'stable'
+        shell: bash
+        run: dart --suppress-analytics format --output=none --set-exit-if-changed adapters/dart examples/flutter_fixture
+      - name: Dart analysis and tests
         env:
           FAILFORGE_OPERATOR_SCALING_PROBE: ${{ runner.temp }}/operator-scaling.json
         shell: bash
         run: |
-          dart --suppress-analytics format --output=none --set-exit-if-changed adapters/dart examples/flutter_fixture
           (cd adapters/dart && dart --suppress-analytics analyze && dart --suppress-analytics test --concurrency 1)
       - name: Build Rust tools and check adapter integration
         shell: bash
@@ -192,3 +204,54 @@ jobs:
             --installation "$RUNNER_TEMP/moved beta installation" \
             --dart-sdk "$RUNNER_TEMP/flutter/bin/cache/dart-sdk" \
             --output "$RUNNER_TEMP/beta-package-smoke"
+
+  dart-minimum:
+    name: Dart 3.13.0 minimum / ubuntu-latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the exact public revision without authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init --quiet "$GITHUB_WORKSPACE"
+          GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+            GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false \
+            git -c credential.helper= -c http.extraHeader= fetch --quiet --no-tags --depth=1 \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git checkout --quiet --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.13.0'
+      - name: Prepare adapter dependencies
+        env:
+          PUB_CACHE: ${{ runner.temp }}/pub-cache
+        shell: bash
+        run: |
+          echo "PUB_CACHE=$PUB_CACHE" >> "$GITHUB_ENV"
+          dart --version
+          dart --suppress-analytics pub get --enforce-lockfile --directory adapters/dart
+      - name: Analyze and run Dart-only adapter tests on the minimum SDK
+        working-directory: adapters/dart
+        shell: bash
+        run: |
+          dart --suppress-analytics analyze
+          # These two files need resolved Flutter dependencies and run in the Flutter matrix.
+          mapfile -t dart_tests < <(find test -name '*_test.dart' \
+            ! -path 'test/unit/operators_test.dart' \
+            ! -path 'test/integration/failure_mode_adversarial_test.dart' | sort)
+          test "${#dart_tests[@]}" -gt 0
+          dart --suppress-analytics test --concurrency 1 "${dart_tests[@]}"
+      - name: Build Rust tools and check adapter integration
+        shell: bash
+        run: |
+          cargo build --workspace --examples --locked
+          cargo build --workspace --locked
+          cargo test -p failforge-dart --all-targets --locked -- --test-threads=1
+      - name: All 19 Dart semantic operators on the minimum SDK
+        shell: bash
+        run: |
+          dart_sdk=$(dirname "$(dirname "$(command -v dart)")")
+          target/debug/failforge-tools semantic-e2e --output "$RUNNER_TEMP/dart-semantic-e2e" --dart-sdk "$dart_sdk"

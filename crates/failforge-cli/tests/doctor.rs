@@ -59,7 +59,7 @@ impl Fixture {
         prepare_sdk(&fixture.sdk());
         put(
             fixture.adapter().join("pubspec.yaml"),
-            "name: failforge_dart_adapter\nenvironment:\n  sdk: '>=3.13.0 <3.14.0'\ndependencies:\n  analyzer: ^14.5.0\n",
+            "name: failforge_dart_adapter\nenvironment:\n  sdk: '>=3.13.0 <4.0.0'\ndependencies:\n  analyzer: ^14.5.0\n",
         );
         put(
             fixture.adapter().join("bin/failforge_dart_adapter.dart"),
@@ -80,7 +80,7 @@ impl Fixture {
         put(fixture.adapter().join("lib/adapter.dart"), "// adapter\n");
         put(
             fixture.project().join("pubspec.yaml"),
-            "name: subject\nenvironment:\n  sdk: '>=3.13.0 <3.14.0'\ndev_dependencies:\n  test: ^1.26.3\n",
+            "name: subject\nenvironment:\n  sdk: '>=3.13.0 <4.0.0'\ndev_dependencies:\n  test: ^1.26.3\n",
         );
         put(fixture.project().join("pubspec.lock"), "packages: {}\n");
         put(
@@ -313,7 +313,7 @@ fn path_sdk_overrides_installation_fallback_and_explicit_sdk_overrides_path() {
     );
     check(&text, "OK", "Dart SDK version");
     assert!(text.contains(path_sdk.to_str().unwrap()), "{text}");
-    put(path_sdk.join("version"), "3.14.0\n");
+    put(path_sdk.join("version"), "4.0.0\n");
     put(fixture.sdk().join("version"), "3.13.5\n");
     let arguments = ["--dart-sdk".into(), fixture.sdk().into_os_string()];
     let text = status(
@@ -359,8 +359,9 @@ fn unsupported_or_malformed_sdk_versions_fail_without_running_version_command() 
     let mut fixture = Fixture::new();
     for version in [
         "3.12.9\n",
-        "3.14.0\n",
+        "4.0.0\n",
         "3.13.5-dev.1\n",
+        "3.14.0-dev.1\n",
         "not-a-version\n",
         "",
     ] {
@@ -368,6 +369,19 @@ fn unsupported_or_malformed_sdk_versions_fail_without_running_version_command() 
         let text = status(&fixture.run(&[]), 1);
         check(&text, "FAIL", "Dart SDK version");
         check(&text, "OK", "Project");
+    }
+}
+
+#[test]
+fn later_stable_dart_3_versions_warn_and_keep_a_successful_exit() {
+    let mut fixture = Fixture::new();
+    for version in ["3.14.0\n", "3.99.1\n"] {
+        put(fixture.sdk().join("version"), version);
+        let text = status(&fixture.run(&[]), 0);
+        check(&text, "OK", "Dart SDK version");
+        check(&text, "WARN", "Dart SDK compatibility");
+        assert!(text.contains(version.trim()), "{text}");
+        assert!(text.contains("3.13.5"), "{text}");
     }
 }
 

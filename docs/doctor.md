@@ -52,8 +52,9 @@ rules.
 
 ## Read the checks
 
-The report uses `[OK]`, `[FAIL]` and `[SKIP]`. Independent checks continue after
-a failure; checks that cannot be evaluated explain why they were skipped.
+The report uses `[OK]`, `[WARN]`, `[FAIL]` and `[SKIP]`. Independent checks
+continue after a failure; checks that cannot be evaluated explain why they were
+skipped.
 Failures include a suggested next step, such as preparing adapter dependencies
 or running the target package's `pub get`.
 
@@ -62,7 +63,9 @@ The checks cover:
 - Installation directory and the native analysis helper beside the executable.
 - Effective configuration and literal source selections in a profile.
 - Dart executable, SDK layout and the bounded local SDK `version` file. The
-  adapter currently requires a stable Dart version `>=3.13.0 <3.14.0`.
+  adapter accepts a stable Dart version `>=3.13.0 <4.0.0`. Dart minor versions
+  above 3.13 produce `[WARN]`: the SDK is in range, but compatibility with the
+  pinned analyzer `14.5.0` and newer language features needs separate validation.
 - Adapter entry point and prepared dependency roots, including its declared
   dependencies and its own package identity.
 - Target package metadata, dependency graph, supported test framework and source
@@ -79,11 +82,15 @@ the check. A read-only dependency check cannot prove that prepared package
 metadata is current with every constraint in `pubspec.yaml`; if dependencies
 were changed, prepare them again.
 
+Local verification used Flutter 3.47.7 with Dart 3.13.5. A version in the
+accepted range, including one without a warning, does not establish that your
+SDK, package and language features have been exercised successfully.
+
 ## Exit codes
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Static checks passed. Review any skipped checks. |
+| `0` | No static check failed. Review warnings and skipped checks. Warnings alone do not change the exit code. |
 | `1` | A prerequisite is missing, inaccessible or unsupported. |
 | `2` | Invalid command arguments, configuration or profile source selection. |
 | `125` | The command could not complete or write its report. |

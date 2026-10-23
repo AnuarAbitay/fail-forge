@@ -12,9 +12,12 @@ patch to an isolated copy.
 
 The recorded environment is Flutter **3.47.7**, Dart **3.13.5**, analyzer **14.5.0**,
 macOS arm64, Rust stable **1.99.0** and verification MSRV **1.85.1**. The adapter's
-SDK constraint is `>=3.13.0 <3.14.0`; only 3.13.5 has been executed locally. Older
-package language versions are determined by the selected package configuration
-and per-file language directives. Other SDK combinations need their own checks.
+SDK constraint accepts stable Dart `>=3.13.0 <4.0.0`; only 3.13.5 has been executed
+locally. Older package language versions are determined by the selected package
+configuration and per-file language directives. Analyzer remains pinned to
+`14.5.0`; other SDK combinations and newer language features need their own
+checks. A broader SDK constraint does not establish that the pinned analyzer
+supports future syntax.
 
 Use your installed compatible tooling SDK; do not upgrade a target application's
 SDK to match this example. The local `.toolchain/flutter` installation is ignored
@@ -27,9 +30,14 @@ There are no direct imports of `package:analyzer/src/...`.
 # Prepare the adapter's own dependencies, separately from the target package.
 dart --suppress-analytics pub get --enforce-lockfile --directory adapters/dart
 # Explicitly prepare only the example; the adapter never does this operation.
-(cd examples/flutter_fixture && flutter --suppress-analytics pub get --enforce-lockfile)
+(cd examples/flutter_fixture && flutter --suppress-analytics pub get)
 cargo build --workspace --bins --examples --locked
 ```
+
+The Flutter fixture resolves dependencies for the selected Flutter SDK's package
+pins. CI enforces its checked-in lockfile on the recorded Flutter version; the
+latest stable job allows that fixture lockfile to change. Adapter dependencies
+remain locked in both jobs.
 
 A target must already have a readable `pubspec.yaml` and valid version-2
 `.dart_tool/package_config.json` (in the package or an ancestor inside the supplied

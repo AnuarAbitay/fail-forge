@@ -5,7 +5,7 @@ use std::fs;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path};
 use std::time::Duration;
-const VERSION: &str = "3.47.7";
+pub const VERSION: &str = "3.47.7";
 const DOWNLOAD_BASE: &str = "https://storage.googleapis.com/flutter_infra_release/releases";
 
 fn publish_directory(source: &Path, destination: &Path) -> Result<()> {
@@ -47,23 +47,39 @@ fn platform(os: &str, arch: &str) -> Result<(&'static str, &'static str)> {
     };
     Ok((os, arch))
 }
-fn select<'a>(manifest: &'a Value, arch: &str) -> Result<&'a Value> {
+fn select<'a>(manifest: &'a Value, arch: &str, version: &str) -> Result<&'a Value> {
+    ensure(
+        version == VERSION || version == "stable",
+        "test SDK version must be the CI pin or stable",
+    )?;
     ensure(
         manifest["base_url"].as_str() == Some(DOWNLOAD_BASE),
         "unexpected Flutter download host",
     )?;
+    let stable_hash = if version == "stable" {
+        Some(
+            manifest["current_release"]["stable"]
+                .as_str()
+                .filter(|hash| !hash.is_empty())
+                .ok_or("missing current stable Flutter release")?,
+        )
+    } else {
+        None
+    };
     let releases = manifest["releases"].as_array().ok_or("missing releases")?;
     let entries: Vec<_> = releases
         .iter()
         .filter(|r| {
-            r["version"] == VERSION
-                && r["channel"] == "stable"
+            stable_hash.map_or_else(
+                || r["version"] == VERSION,
+                |hash| r["hash"].as_str() == Some(hash),
+            ) && r["channel"] == "stable"
                 && r["dart_sdk_arch"].as_str().unwrap_or("x64") == arch
         })
         .collect();
     ensure(
         entries.len() == 1,
-        "pinned test SDK unavailable or ambiguous",
+        "requested test SDK unavailable or ambiguous",
     )?;
     let entry = entries[0];
     let archive = entry["archive"].as_str().ok_or("missing archive")?;
@@ -93,7 +109,7 @@ fn select<'a>(manifest: &'a Value, arch: &str) -> Result<&'a Value> {
     )?;
     Ok(entry)
 }
-pub fn install(destination: &Path) -> Result<()> {
+pub fn install(destination: &Path, version: &str) -> Result<()> {
     let (os, arch) = platform(std::env::consts::OS, std::env::consts::ARCH)?;
     fs::create_dir_all(destination)?;
     ensure(
@@ -124,7 +140,7 @@ pub fn install(destination: &Path) -> Result<()> {
         0,
     )?;
     let manifest = common::read_json(&manifest_file)?;
-    let entry = select(&manifest, arch)?;
+    let entry = select(&manifest, arch, version)?;
     let name = entry["archive"].as_str().unwrap();
     let archive = temp.0.join(Path::new(name).file_name().unwrap());
     let mut download = common::command(Path::new("curl"));
@@ -212,12 +228,12 @@ mod tests {
     }
     #[test]
     fn pin_arch_channel_are_exact() {
-        assert!(select(&manifest(), "arm64").is_ok());
-        assert!(select(&manifest(), "x64").is_err());
+        assert!(select(&manifest(), "arm64", VERSION).is_ok());
+        assert!(select(&manifest(), "x64", VERSION).is_err());
         for field in ["version", "channel"] {
             let mut m = manifest();
             m["releases"][0][field] = "other".into();
-            assert!(select(&m, "arm64").is_err());
+            assert!(select(&m, "arm64", VERSION).is_err());
         }
     }
     #[test]
@@ -225,7 +241,45 @@ mod tests {
         let mut m = manifest();
         let row = m["releases"][0].clone();
         m["releases"].as_array_mut().unwrap().push(row);
-        assert!(select(&m, "arm64").is_err());
+        assert!(select(&m, "arm64", VERSION).is_err());
+    }
+    #[test]
+    fn stable_follows_current_release_hash_instead_of_version_or_order() {
+        let mut m = manifest();
+        let mut latest = m["releases"][0].clone();
+        latest["version"] = "3.50.0".into();
+        latest["hash"] = "current-stable-hash".into();
+        m["current_release"] = json!({"stable": "current-stable-hash"});
+        m["releases"].as_array_mut().unwrap().push(latest);
+        assert_eq!(select(&m, "arm64", "stable").unwrap()["version"], "3.50.0");
+        assert_eq!(select(&m, "arm64", VERSION).unwrap()["version"], VERSION);
+        m["releases"].as_array_mut().unwrap().reverse();
+        assert_eq!(select(&m, "arm64", "stable").unwrap()["version"], "3.50.0");
+    }
+    #[test]
+    fn stable_requires_one_matching_hash_channel_and_architecture() {
+        let mut m = manifest();
+        m["current_release"] = json!({"stable": "current-stable-hash"});
+        m["releases"][0]["hash"] = "current-stable-hash".into();
+        assert!(select(&m, "arm64", "stable").is_ok());
+        assert!(select(&m, "x64", "stable").is_err());
+        for field in ["hash", "channel", "dart_sdk_arch"] {
+            let mut mismatch = m.clone();
+            mismatch["releases"][0][field] = "other".into();
+            assert!(select(&mismatch, "arm64", "stable").is_err(), "{field}");
+        }
+        let row = m["releases"][0].clone();
+        m["releases"].as_array_mut().unwrap().push(row);
+        assert!(select(&m, "arm64", "stable").is_err());
+    }
+    #[test]
+    fn stable_does_not_fall_back_when_current_release_is_missing() {
+        for pointer in [Value::Null, json!({}), json!({"stable": ""})] {
+            let mut m = manifest();
+            m["current_release"] = pointer;
+            assert!(select(&m, "arm64", "stable").is_err());
+        }
+        assert!(select(&manifest(), "arm64", "beta").is_err());
     }
     #[test]
     fn official_linux_manifest_selects_the_pinned_archive_url() {
@@ -238,7 +292,7 @@ mod tests {
                 "dart_sdk_version":"3.13.5"
             }]
         });
-        let entry = select(&m, "x64").unwrap();
+        let entry = select(&m, "x64", VERSION).unwrap();
         assert_eq!(
             format!(
                 "{}/{}",
@@ -260,14 +314,14 @@ mod tests {
         ] {
             let mut m = manifest();
             m["releases"][0]["archive"] = path.into();
-            assert!(select(&m, "arm64").is_err());
+            assert!(select(&m, "arm64", VERSION).is_err());
         }
         let mut m = manifest();
         m["base_url"] = "https://other.example".into();
-        assert!(select(&m, "arm64").is_err());
+        assert!(select(&m, "arm64", VERSION).is_err());
         let mut m = manifest();
         m["releases"][0]["sha256"] = "invalid".into();
-        assert!(select(&m, "arm64").is_err());
+        assert!(select(&m, "arm64", VERSION).is_err());
     }
     #[test]
     fn concurrent_destination_cannot_be_replaced_even_when_empty() {

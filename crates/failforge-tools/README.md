@@ -125,7 +125,7 @@ the measurement. Captured byte counts, native cause/status and cleanup are
 verified before accepting a sample. This command measures latency, not RSS or
 CPU consumption.
 
-## Pinned CI SDK
+## CI SDK installer
 
 ```sh
 target/debug/failforge-tools install-test-flutter --destination /absolute/sdk-parent
@@ -134,8 +134,22 @@ target/debug/failforge-tools install-test-flutter --destination /absolute/sdk-pa
 This command downloads the test SDK. It selects Flutter 3.47.7 for
 the current supported macOS/Linux architecture from the official release
 manifest, verifies the complete archive SHA-256, extracts into staging and
-publishes without replacing any existing destination. The installer unit tests
-are offline; they cover pin/architecture/channel selection, manifest ambiguity,
+publishes without replacing any existing destination.
+
+Pass `--version stable` to select the current stable Flutter release recorded
+in that manifest instead of the default pin:
+
+```sh
+target/debug/failforge-tools install-test-flutter \
+  --version stable --destination /absolute/stable-sdk-parent
+```
+
+This selection follows future stable releases and requires a new destination;
+it uses the same archive verification and publication checks. It does not
+establish compatibility with the selected SDK before the tests run.
+
+The installer unit tests are offline; they cover pin/architecture/channel
+selection, manifest ambiguity,
 archive path/hash validation and a concurrently created destination.
 
 ## Replaced Python workflows and retained checks

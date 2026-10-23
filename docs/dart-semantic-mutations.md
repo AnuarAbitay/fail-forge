@@ -228,9 +228,11 @@ is not emitted without coverage evidence: neither a survivor nor `NO_TESTS`
 establishes that a mutated expression was unexecuted. All original author tests
 are selected, using the baseline catalogue checks.
 
-Tooling SDK support remains the pinned Dart `>=3.13.0 <3.14.0`, locally checked
-with Dart 3.13.5. Supporting Dart 3 syntax does not establish compatibility with
-every Dart 3 SDK. Pub workspaces remain outside the campaign's supported scope.
+The tooling accepts stable Dart SDKs `>=3.13.0 <4.0.0`; local checks used Flutter
+3.47.7 with Dart 3.13.5. Analyzer stays pinned to `14.5.0`. Supporting Dart 3
+syntax and accepting a broader SDK range do not establish compatibility with
+every newer SDK or language feature; those require separate checks. Pub
+workspaces remain outside the campaign's supported scope.
 
 Discovery reuses resolved original libraries across operators and materializes
 no filesystem copy per candidate. Exact duplicate resulting bytes are removed

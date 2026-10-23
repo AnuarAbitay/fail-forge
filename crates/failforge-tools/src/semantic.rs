@@ -177,7 +177,7 @@ pub fn run(options: Options) -> Result<()> {
     fs::create_dir(project.join(".dart_tool"))?;
     fs::write(
         project.join("pubspec.yaml"),
-        "name: semantic_fixture\nenvironment:\n  sdk: '>=3.13.0 <3.14.0'\n",
+        "name: semantic_fixture\nenvironment:\n  sdk: '>=3.13.0 <4.0.0'\n",
     )?;
     common::write_json(
         &project.join(".dart_tool/package_config.json"),

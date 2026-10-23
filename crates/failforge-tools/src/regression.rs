@@ -76,7 +76,7 @@ fn fixture(root: &Path, path: &Path, source: &str, tests: &str) -> Result<PathBu
     common::write_json(&path.join(".dart_tool/package_graph.json"), &graph)?;
     fs::write(
         path.join("pubspec.yaml"),
-        "name: campaign_sample\nenvironment:\n  sdk: '>=3.13.0 <3.14.0'\ndev_dependencies:\n  test: any\n",
+        "name: campaign_sample\nenvironment:\n  sdk: '>=3.13.0 <4.0.0'\ndev_dependencies:\n  test: any\n",
     )?;
     fs::copy(adapter.join("pubspec.lock"), path.join("pubspec.lock"))?;
     fs::write(path.join("lib/value.dart"), source)?;

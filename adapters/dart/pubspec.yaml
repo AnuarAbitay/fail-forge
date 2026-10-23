@@ -3,7 +3,7 @@ version: 0.1.0
 publish_to: none
 description: Read-only AST mutation tooling adapter for FailForge.
 environment:
-  sdk: '>=3.13.0 <3.14.0'
+  sdk: '>=3.13.0 <4.0.0'
 dependencies:
   analyzer: 14.5.0
   crypto: ^3.0.6

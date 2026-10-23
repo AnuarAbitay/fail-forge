@@ -86,9 +86,15 @@ transformation and family. Scores are reported separately for each family.
 ## Get started
 
 The current beta targets **Linux and macOS**. Windows is unsupported.
-Mutation analysis requires a compatible **Dart SDK `>=3.13.0 <3.14.0`**,
+Mutation analysis accepts a stable **Dart SDK `>=3.13.0 <4.0.0`**,
 or Flutter with a Dart SDK in that range. Building from source requires
 **Rust 1.85.1 or newer** and a C linker.
+
+The broader SDK range is an unreleased source change; published beta releases
+retain their original constraints. Local verification used Flutter **3.47.7**
+with Dart **3.13.5**. The adapter pins `analyzer` to **14.5.0**; newer SDKs and
+language features need separate validation. `doctor` warns for Dart minor
+versions above 3.13 without failing the check solely for that warning.
 
 Follow the [installation guide](docs/installation.md) to extract a prepared
 archive or build FailForge, prepare its adapter and prepare your target package's

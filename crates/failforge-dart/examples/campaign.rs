@@ -645,7 +645,7 @@ mod tests {
             std::fs::write(path.join("lib/source.dart"), source).unwrap();
             std::fs::write(
                 path.join("pubspec.yaml"),
-                "name: campaign_fixture\nenvironment:\n  sdk: '>=3.13.0 <3.14.0'\n",
+                "name: campaign_fixture\nenvironment:\n  sdk: '>=3.13.0 <4.0.0'\n",
             )
             .unwrap();
             std::fs::write(path.join(".dart_tool/package_config.json"), json!({"configVersion":2,"packages":[{"name":"campaign_fixture","rootUri":"../","packageUri":"lib/","languageVersion":"3.13"}]}).to_string()).unwrap();

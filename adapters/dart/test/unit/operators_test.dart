@@ -1074,7 +1074,7 @@ class _Fixture {
     await File(path).parent.create(recursive: true);
     await File(path).writeAsBytes(utf8.encode(source));
     await File(p.join(directory.path, 'pubspec.yaml')).writeAsString(
-      'name: operator_fixture\nenvironment:\n  sdk: ">=3.13.0 <3.14.0"\n',
+      'name: operator_fixture\nenvironment:\n  sdk: ">=3.13.0 <4.0.0"\n',
     );
     final config = File(
       p.join(directory.path, '.dart_tool', 'package_config.json'),

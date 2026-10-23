@@ -4,6 +4,17 @@ User-visible changes are recorded by version. Check
 [GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for published
 downloads and their verification results.
 
+## Unreleased
+
+### Changed
+
+- Accept stable Dart SDKs `>=3.13.0 <4.0.0`; `doctor` warns for minor versions
+  above 3.13 without changing the exit code. Keep analyzer pinned to `14.5.0`
+  and distinguish accepted SDKs from the locally checked Flutter 3.47.7 / Dart
+  3.13.5 environment.
+- Check the pinned Flutter SDK, latest stable Flutter and minimum Dart 3.13.0
+  in CI. A wider accepted range does not establish future SDK compatibility.
+
 ## 0.1.0-beta.2 — 2026-10-21
 
 ### Added

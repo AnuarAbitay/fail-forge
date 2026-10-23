@@ -22,10 +22,12 @@ struct Cli {
 enum Commands {
     /// Compare repeated Runner calls with fresh CLI processes.
     Benchmark(benchmark::Options),
-    /// Install the exact CI Flutter SDK after SHA-256 verification.
+    /// Install the pinned or latest stable Flutter SDK after SHA-256 verification.
     InstallTestFlutter {
         #[arg(long)]
         destination: PathBuf,
+        #[arg(long, default_value = installer::VERSION, value_parser = [installer::VERSION, "stable"])]
+        version: String,
     },
     /// Exercise all 19 Dart semantic operators with real VM observations.
     SemanticE2e(semantic::Options),
@@ -49,7 +51,10 @@ fn main() -> std::process::ExitCode {
     };
     let outcome = match Cli::parse().command {
         Commands::Benchmark(options) => benchmark::run(options),
-        Commands::InstallTestFlutter { destination } => installer::install(&destination),
+        Commands::InstallTestFlutter {
+            destination,
+            version,
+        } => installer::install(&destination, &version),
         Commands::SemanticE2e(options) => semantic::run(options),
         Commands::Regression(options) => regression::run(options),
         Commands::PublicRegression(options) => public_regression::run(options),

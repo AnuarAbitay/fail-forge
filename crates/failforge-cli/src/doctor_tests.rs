@@ -145,19 +145,20 @@ fn snapshot(root: &Path) -> Vec<(PathBuf, Vec<u8>, u32)> {
 }
 
 #[test]
-fn stable_sdk_version_range_is_exact_and_bounded() {
-    for version in ["3.13.0", "3.13.5\n", "3.13.99999"] {
+fn stable_sdk_version_range_accepts_later_dart_3_releases_and_is_bounded() {
+    for version in ["3.13.0", "3.13.5\n", "3.13.99999", "3.14.0", "3.99.1"] {
         assert!(supported_version(version.as_bytes()).is_some(), "{version}");
     }
     for version in [
         "",
         "3.12.99",
-        "3.14.0",
+        "4.0.0",
         "4.13.0",
         "3.13",
         "3.13.1.2",
         "3.13.-1",
         "3.13.0-beta.1",
+        "3.14.0-dev.1",
         "3.13.0 (stable)",
         "v3.13.1",
         "٣.13.1",
@@ -172,6 +173,33 @@ fn stable_sdk_version_range_is_exact_and_bounded() {
     let fixture = Fixture::new();
     fixture.put("sdk/version", &vec![b'1'; 4097]);
     assert_eq!(fixture.status("Dart SDK version"), Status::Fail);
+}
+
+#[test]
+fn later_sdk_minors_warn_without_failing_or_executing_programs() {
+    let fixture = Fixture::new();
+    for version in ["3.14.0\n", "3.99.1\n"] {
+        fixture.put("sdk/version", version.as_bytes());
+        let before = snapshot(&fixture.root);
+        let report = fixture.inspect();
+        assert_eq!(report.status(), 0, "{report:?}");
+        assert_eq!(fixture.status("Dart SDK version"), Status::Ok);
+        assert_eq!(fixture.status("Dart SDK compatibility"), Status::Warn);
+        assert_eq!(snapshot(&fixture.root), before);
+        let mut output = Vec::new();
+        report.write(&mut output).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("[WARN] Dart SDK compatibility"), "{output}");
+        assert!(output.contains("3.13.5"), "{output}");
+    }
+    fixture.put("sdk/version", b"3.13.5\n");
+    assert!(
+        fixture
+            .inspect()
+            .0
+            .iter()
+            .all(|check| check.status != Status::Warn)
+    );
 }
 
 #[test]

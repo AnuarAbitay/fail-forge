@@ -45,7 +45,7 @@ pub(super) fn supported_version(bytes: &[u8]) -> Option<String> {
         .map(|part| part.parse::<u64>())
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
-    (numbers[0] == 3 && numbers[1] == 13).then(|| text.to_owned())
+    (numbers[0] == 3 && numbers[1] >= 13).then(|| text.to_owned())
 }
 
 pub(super) fn adapter_dependencies(adapter: &Path) -> Result<usize, ()> {

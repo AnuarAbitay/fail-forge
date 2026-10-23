@@ -8,6 +8,8 @@ downloads, or build the new version from source. Linux and macOS Intel use
 native source builds. Developers can also
 produce a local archive with the [packaging command](packaging.md).
 Read the [beta limitations](beta-limitations.md) before running a campaign.
+The broader Dart SDK range below is an unreleased source change; published beta
+releases retain their original SDK constraints.
 
 ## Requirements
 
@@ -15,13 +17,19 @@ Read the [beta limitations](beta-limitations.md) before running a campaign.
 | --- | --- |
 | Operating system | Linux or macOS. Windows is unsupported. Platform support does not imply that every distribution or architecture has been tested. |
 | Rust for source builds | Rust and Cargo 1.85.1 or newer, with the platform's C linker. Not required when using a prepared native archive. |
-| Dart adapter SDK | Dart `>=3.13.0 <3.14.0`. A Flutter installation may supply this Dart SDK. |
+| Dart adapter SDK | Stable Dart `>=3.13.0 <4.0.0`. A Flutter installation may supply this Dart SDK. |
 | Target package | One standalone Dart or Flutter package with a passing `test` or `flutter_test` suite and prepared dependencies. |
 | Disk space | Space for the original package, temporary working copies and retained reports. Larger packages and more workers require more space. |
 
 The adapter pins `analyzer` to `14.5.0`. Use the checked-in
 `adapters/dart/pubspec.lock`; do not upgrade adapter dependencies as part of
 installation. Python is not required.
+
+The locally checked environment is Flutter 3.47.7 with Dart 3.13.5. The accepted
+SDK range does not establish compatibility with every newer SDK or language
+feature; those need separate validation with the pinned analyzer. CI is
+configured to check pinned Flutter, latest stable Flutter and the minimum Dart
+3.13.0. Review the results for the revision you install.
 
 Use projects and tests you trust. FailForge runs their code with your account's
 permissions; working-copy isolation is not a security sandbox.
@@ -131,7 +139,7 @@ export DART_SDK="/absolute/path/to/dart-sdk"
   --enforce-lockfile --directory "$FAILFORGE_HOME/adapters/dart"
 ```
 
-The version must satisfy `>=3.13.0 <3.14.0`. Preparing the adapter may download
+The stable version must satisfy `>=3.13.0 <4.0.0`. Preparing the adapter may download
 its dependencies.
 
 For Flutter, use the Dart SDK bundled with your chosen Flutter installation:
@@ -390,7 +398,7 @@ files in the installation.
 | --- | --- |
 | Archive checksum fails | Stop and obtain the matching, unmodified archive and checksum files before extracting. |
 | Executable cannot run on this machine | Check the archive's operating system and architecture. Packaging does not produce a universal executable. |
-| Adapter dependency resolution fails | Confirm the SDK is Dart 3.13.x and use the checked-in adapter lockfile. |
+| Adapter dependency resolution fails | Confirm the SDK is stable Dart `>=3.13.0 <4.0.0` and use the checked-in adapter lockfile. Check the resolver's dependency constraints if it still fails. |
 | Installation cannot be determined | Use the installed `bin/` layout or pass `--installation` pointing to the installation root. Custom Cargo output locations need an explicit root. |
 | Adapter cannot be found | Prepare `<installation>/adapters/dart`, or select a prepared adapter with `--adapter-root` or the profile's `adapter_root`. |
 | Native analysis helper cannot be found | Keep `failforge-adapter-campaign` beside `failforge`; extract the complete archive or build both executables from source. |

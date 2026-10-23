@@ -23,7 +23,7 @@ class AlgebraFixture {
     await file.parent.create(recursive: true);
     await file.writeAsString(source);
     await File(p.join(directory.path, 'pubspec.yaml')).writeAsString(
-      'name: algebra_fixture\nenvironment:\n  sdk: ">=3.13.0 <3.14.0"\n',
+      'name: algebra_fixture\nenvironment:\n  sdk: ">=3.13.0 <4.0.0"\n',
     );
     final config = File(
       p.join(directory.path, '.dart_tool', 'package_config.json'),
