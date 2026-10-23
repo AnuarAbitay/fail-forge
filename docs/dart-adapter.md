@@ -12,8 +12,9 @@ patch to an isolated copy.
 
 The recorded environment is Flutter **3.47.7**, Dart **3.13.5**, analyzer **14.5.0**,
 macOS arm64, Rust stable **1.99.0** and verification MSRV **1.85.1**. The adapter's
-SDK constraint accepts stable Dart `>=3.13.0 <4.0.0`; only 3.13.5 has been executed
-locally. Older package language versions are determined by the selected package
+SDK constraint accepts stable Dart `>=3.13.0 <4.0.0`. Local checks also exercised
+Dart 3.13.0 with analysis, standalone adapter tests and semantic mutation tests.
+Older package language versions are determined by the selected package
 configuration and per-file language directives. Analyzer remains pinned to
 `14.5.0`; other SDK combinations and newer language features need their own
 checks. A broader SDK constraint does not establish that the pinned analyzer

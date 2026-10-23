@@ -13,7 +13,7 @@ Beta interfaces and report formats may change between releases.
 | CI history | All seven jobs passed for the `0.1.0-beta.1` release commit `9551288`: stable and minimum-version Rust checks, documentation, and Dart/Flutter SDK regression and packaging checks on Linux/macOS. See the [beta.1 CI run](https://github.com/AnuarAbitay/fail-forge/actions/runs/39541608683). This is historical evidence for beta.1, not a beta.2 CI result. |
 | Beta.2 preparation | Local verification recorded 1,381 passing tests and seven ignored tests, formatting, checks, Clippy, Rust 1.85.1, and focused real-SDK checks of the new commands/defaults. These do not replace final CI and packaged-release verification. |
 | Rust source builds | Rust 1.85 or newer is declared; the recorded minimum-version checks use 1.85.1. Build with the committed `Cargo.lock`. |
-| Dart tooling SDK | Current source accepts stable Dart `>=3.13.0 <4.0.0`; the locally exercised version is 3.13.5. Published beta releases retain their original constraints. |
+| Dart tooling SDK | Current source accepts stable Dart `>=3.13.0 <4.0.0`; local checks exercised 3.13.0 and 3.13.5. Published beta releases retain their original constraints. |
 | Flutter | The recorded SDK is Flutter 3.47.7 with Dart 3.13.5. Other Flutter/SDK combinations need their own validation. |
 | SDK CI coverage | CI is configured for pinned Flutter, latest stable Flutter and minimum Dart 3.13.0. Configuration is not evidence that a particular revision passed those checks. |
 
