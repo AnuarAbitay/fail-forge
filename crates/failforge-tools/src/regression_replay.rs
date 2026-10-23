@@ -236,7 +236,9 @@ impl Harness {
                 "--test-timeout",
                 "1s",
                 "--command-timeout",
-                "10s",
+                // Allow compiler/test startup separately from the per-test timeout;
+                // the synchronous mutant loop still requires the outer timeout.
+                "30s",
             ],
             0,
         )?;
