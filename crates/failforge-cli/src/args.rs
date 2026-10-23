@@ -156,7 +156,7 @@ pub(crate) struct ProfileGenerateArgs {
     /// Restrict analysis or template selection to one operator ID; repeat as needed.
     #[arg(long, value_name = "ID", action = clap::ArgAction::Append)]
     operator: Vec<String>,
-    /// Destination YAML; defaults to profiles/<source-relative-path>.yml in its package.
+    /// Destination YAML; defaults to `profiles/<source-relative-path>.yml` in its package.
     #[arg(long, value_name = "PATH")]
     output: Option<PathBuf>,
     /// Replace an existing profile file.
