@@ -7,11 +7,11 @@
     },
     {
       "path": "adapters/dart/pubspec.yaml",
-      "sha256": "d85fbc9c24def973281bfe0884a672656cb0801766abf5a5a20c1b587e4852be"
+      "sha256": "23e7777c0dd296e6b147fab58e30cef90412c819984ca29a6b9aebf6ed36314c"
     },
     {
       "path": "adapters/dart/pubspec.lock",
-      "sha256": "6c506b208105efaf48a0c10d3b9792682f4c99097ba1ff4399709a6a6996e701"
+      "sha256": "a46abccc1f9c7e4ecc3670da74dd2840f29e674a7b5289f4bd9befe49c046cef"
     }
   ],
   "packageCounts": {

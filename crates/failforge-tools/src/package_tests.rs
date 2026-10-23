@@ -208,6 +208,21 @@ fn license_fixture(root: &Path) -> BTreeSet<String> {
 }
 
 #[test]
+fn checked_in_dependency_notices_match_current_package_inputs() {
+    let root = common::root();
+    let mut selected = BTreeSet::from([
+        "THIRD_PARTY_NOTICES.md".to_owned(),
+        "third-party/inventory.json".to_owned(),
+    ]);
+    for entry in fs::read_dir(root.join("third-party/licenses")).unwrap() {
+        let name = entry.unwrap().file_name();
+        selected.insert(format!("third-party/licenses/{}", name.to_str().unwrap()));
+    }
+    assets::validate_notices(&root, &selected)
+        .expect("checked-in dependency notices must match current package inputs");
+}
+
+#[test]
 fn notice_inventory_binds_all_lockfiles_and_every_retained_notice() {
     let root = Temporary::new("ff-package-notices").unwrap();
     let selected = license_fixture(&root.0);
