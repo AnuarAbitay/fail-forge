@@ -1,0 +1,120 @@
+name: Native release packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact beta version already present in the source and draft release
+        required: true
+        default: '0.1.0-beta.3'
+        type: string
+      source_ref:
+        description: Full immutable commit SHA referenced by the version tag
+        required: true
+        type: string
+
+# Checkout is anonymous. Uploads use only the explicitly verified personal secret.
+permissions: {}
+
+concurrency:
+  group: native-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Native package / ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_SOURCE_SHA: ${{ inputs.source_ref }}
+      EXPECTED_TARGET: ${{ matrix.target }}
+      CARGO_TERM_COLOR: always
+      FLUTTER_SUPPRESS_ANALYTICS: 'true'
+    steps:
+      - name: Validate release inputs and check out the exact public tag revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          version = os.environ['RELEASE_VERSION']
+          number = r'(?:0|[1-9][0-9]*)'
+          if not re.fullmatch(rf'{number}\.{number}\.{number}-beta\.{number}', version):
+              raise SystemExit('Expected an exact SemVer beta version.')
+          if not re.fullmatch(r'[0-9a-f]{40}', os.environ['RELEASE_SOURCE_SHA']):
+              raise SystemExit('Expected a full immutable commit SHA.')
+          if os.environ['GITHUB_REPOSITORY'] != 'AnuarAbitay/fail-forge':
+              raise SystemExit('Unexpected repository.')
+          if (os.environ['GITHUB_ACTOR'] != 'AnuarAbitay'
+                  or os.environ['GITHUB_TRIGGERING_ACTOR'] != 'AnuarAbitay'):
+              raise SystemExit('Only AnuarAbitay may dispatch native release uploads.')
+          if os.environ['GITHUB_REF'] not in ('refs/heads/main', f'refs/tags/v{version}'):
+              raise SystemExit('Dispatch must use main or the expected release tag.')
+          PY
+          public_git() {
+            GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+              GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false \
+              git -c credential.helper= -c http.extraHeader= "$@"
+          }
+          git init --quiet "$GITHUB_WORKSPACE"
+          public_git fetch --quiet --no-tags --depth=1 \
+            "https://github.com/AnuarAbitay/fail-forge.git" "$RELEASE_SOURCE_SHA"
+          git checkout --quiet --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$RELEASE_SOURCE_SHA"
+          public_git fetch --quiet --no-tags --depth=1 \
+            "https://github.com/AnuarAbitay/fail-forge.git" "refs/tags/v$RELEASE_VERSION"
+          test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$RELEASE_SOURCE_SHA"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-src, rust-docs
+      - name: Install the pinned Flutter SDK and verify its archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run -p failforge-tools --locked -- install-test-flutter \
+            --version 3.47.7 --destination "$RUNNER_TEMP"
+          echo "PUB_CACHE=$RUNNER_TEMP/pub-cache" >> "$GITHUB_ENV"
+      - name: Build the native archive with the exact embedded version
+        shell: bash
+        run: |
+          set -euo pipefail
+          target/debug/failforge-tools package \
+            --installation "$GITHUB_WORKSPACE" \
+            --expected-version "$RELEASE_VERSION" \
+            --output "$RUNNER_TEMP/release-package"
+      - name: Verify checksums and smoke-test the relocated archive with a fresh cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd "$RUNNER_TEMP/release-package" && shasum -a 256 -c SHA256SUMS)
+          archive=$(jq -er '.archive' "$RUNNER_TEMP/release-package/package-manifest.json")
+          archive_root=$(jq -er '.archiveRoot' "$RUNNER_TEMP/release-package/package-manifest.json")
+          mkdir "$RUNNER_TEMP/extracted release"
+          tar -xzf "$RUNNER_TEMP/release-package/$archive" -C "$RUNNER_TEMP/extracted release"
+          mv "$RUNNER_TEMP/extracted release/$archive_root" "$RUNNER_TEMP/moved release installation"
+          target/debug/failforge-tools package-smoke \
+            --installation "$RUNNER_TEMP/moved release installation" \
+            --dart-sdk "$RUNNER_TEMP/flutter/bin/cache/dart-sdk" \
+            --output "$RUNNER_TEMP/release-smoke"
+      - name: Verify the personal account and upload only to the existing draft release
+        env:
+          RELEASE_UPLOAD_TOKEN: ${{ secrets.RELEASE_UPLOAD_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/release_upload.py \
+            --version "$RELEASE_VERSION" \
+            --source-sha "$RELEASE_SOURCE_SHA" \
+            --target "$EXPECTED_TARGET" \
+            --package-dir "$RUNNER_TEMP/release-package" \
+            --smoke-summary "$RUNNER_TEMP/release-smoke/summary.json"

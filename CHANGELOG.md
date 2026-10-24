@@ -4,16 +4,24 @@ User-visible changes are recorded by version. Check
 [GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for published
 downloads and their verification results.
 
-## Unreleased
+## 0.1.0-beta.3 — 2026-10-24
 
 ### Changed
 
 - Accept stable Dart SDKs `>=3.13.0 <4.0.0`; `doctor` warns for minor versions
   above 3.13 without changing the exit code. Keep analyzer pinned to `14.5.0`
   and distinguish accepted SDKs from the locally checked Flutter 3.47.7 / Dart
-  3.13.5 environment.
+  3.13.5 and standalone Dart 3.13.0 environments.
 - Check the pinned Flutter SDK, latest stable Flutter and minimum Dart 3.13.0
   in CI. A wider accepted range does not establish future SDK compatibility.
+
+### Fixed
+
+- Keep the replay cancellation regression's command budget large enough for
+  Dart compiler and test startup while preserving timeout and cancellation
+  verdict checks.
+- Refresh dependency notice fingerprints after the SDK constraint update and
+  verify the checked-in inventory before packaging.
 
 ## 0.1.0-beta.2 — 2026-10-21
 

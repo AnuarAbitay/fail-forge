@@ -11,7 +11,7 @@ these commands invokes Python. Regression workflows use prepared targets;
 rustup component add rust-src rust-docs
 cargo run -p failforge-tools --locked -- package \
   --output /absolute/new-beta-output \
-  --expected-version 0.1.0-beta.1
+  --expected-version 0.1.0-beta.3
 ```
 
 The matching `rust-src` and `rust-docs` components supply the Rust runtime notices

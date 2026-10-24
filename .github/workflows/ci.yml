@@ -95,6 +95,8 @@ jobs:
               "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
           git checkout --quiet --detach FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Release uploader guards
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s .github/scripts -p 'test_*.py'
       - uses: dtolnay/rust-toolchain@stable
       - name: Doctests
         run: cargo test --workspace --doc --locked

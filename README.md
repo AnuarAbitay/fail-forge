@@ -1,7 +1,7 @@
 # FailForge
 
 [![CI](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml)
-[![Beta](https://img.shields.io/badge/beta-0.1.0--beta.2-blue)](https://github.com/AnuarAbitay/fail-forge/tree/v0.1.0-beta.2)
+[![Beta](https://img.shields.io/badge/beta-0.1.0--beta.3-blue)](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.3)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **Find the bugs your Dart and Flutter tests would miss.**
@@ -11,16 +11,20 @@ When a test catches a change, the mutant is **killed**. When the tests still
 pass, the mutant **survives** and gives you a concrete place to review your
 assertions, edge cases or requirements.
 
-This documentation covers **FailForge `0.1.0-beta.2`**, available as a source
-tag. The latest published native archive is **`0.1.0-beta.1` for macOS arm64**;
-`beta.2` binary assets have not been published. Build from source for the new
-features or on Linux and macOS Intel. Check
-[GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for published
-downloads. Read the
+This documentation covers **FailForge `0.1.0-beta.3`**. Download a native archive
+and its verification files from the
+[beta.3 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.3),
+or build the tagged source. Choose an archive for your operating system and
+architecture. Read the
 [installation guide](docs/installation.md) and
 [beta limitations](docs/beta-limitations.md) before your first run.
 
-[Download beta.1](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.1) ·
+Native archives: [Linux x86_64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.1.0-beta.3/failforge-0.1.0-beta.3-x86_64-unknown-linux-gnu.tar.gz)
+and [macOS arm64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.1.0-beta.3/failforge-0.1.0-beta.3-aarch64-apple-darwin.tar.gz).
+Download the matching manifest and checksum file as described in the
+[installation guide](docs/installation.md#install-from-an-archive).
+
+[Download beta.3](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.3) ·
 [Installation](docs/installation.md) ·
 [Operators](docs/mutation-operators.md) ·
 [Profiles](#yaml-profiles) ·
@@ -90,11 +94,17 @@ Mutation analysis accepts a stable **Dart SDK `>=3.13.0 <4.0.0`**,
 or Flutter with a Dart SDK in that range. Building from source requires
 **Rust 1.85.1 or newer** and a C linker.
 
-The broader SDK range is an unreleased source change; published beta releases
-retain their original constraints. Local verification used Flutter **3.47.7**
-with Dart **3.13.5**. The adapter pins `analyzer` to **14.5.0**; newer SDKs and
-language features need separate validation. `doctor` warns for Dart minor
-versions above 3.13 without failing the check solely for that warning.
+The broader SDK range is included in beta.3; earlier releases retain their
+original constraints. Local verification used Flutter **3.47.7** with Dart
+**3.13.5**, plus standalone Dart **3.13.0**. The adapter pins `analyzer` to
+**14.5.0**; newer SDKs and language features need separate validation. `doctor`
+warns for Dart minor versions above 3.13 without failing the check solely for
+that warning.
+
+The SDK compatibility baseline at `e8b850d` passed all **10 CI jobs**:
+[verification run](https://github.com/AnuarAbitay/fail-forge/actions/runs/39950688183).
+This records the SDK changes before beta.3 release preparation; see the release
+for verification of the tagged revision.
 
 Follow the [installation guide](docs/installation.md) to extract a prepared
 archive or build FailForge, prepare its adapter and prepare your target package's
@@ -102,8 +112,8 @@ dependencies. A native archive needs no Rust installation. A compatible SDK and
 prepared adapter dependencies are still required. See
 [beta limitations](docs/beta-limitations.md) for verification scope.
 
-The `doctor` command and automatic SDK/profile-path defaults below were added
-in `0.1.0-beta.2`. The published `0.1.0-beta.1` archive has no `doctor`;
+Historical note: `doctor` and automatic SDK/profile-path defaults were added
+in `0.1.0-beta.2`. The `0.1.0-beta.1` archive has no `doctor`;
 supply `--dart-sdk` or `--flutter-sdk` and `profile generate --output` explicitly
 when using that archive.
 

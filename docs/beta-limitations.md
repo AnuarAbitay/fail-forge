@@ -1,6 +1,6 @@
 # Beta support and limitations
 
-This document describes source version `0.1.0-beta.2`, not a promise of support
+This document describes release version `0.1.0-beta.3`, not a promise of support
 for every Dart project. Use it with the [mutation command guide](mutation-cli.md).
 Beta interfaces and report formats may change between releases.
 
@@ -9,13 +9,16 @@ Beta interfaces and report formats may change between releases.
 | Area | Current boundary |
 | --- | --- |
 | Host operating systems | Linux and macOS have process backends. Windows is unsupported. |
+| Release archives | Linux x86_64 (`x86_64-unknown-linux-gnu`) and macOS arm64 (`aarch64-apple-darwin`). |
 | Local verification | Recorded native and real Dart/Flutter regression runs were performed on macOS arm64. |
-| CI history | All seven jobs passed for the `0.1.0-beta.1` release commit `9551288`: stable and minimum-version Rust checks, documentation, and Dart/Flutter SDK regression and packaging checks on Linux/macOS. See the [beta.1 CI run](https://github.com/AnuarAbitay/fail-forge/actions/runs/39541608683). This is historical evidence for beta.1, not a beta.2 CI result. |
-| Beta.2 preparation | Local verification recorded 1,381 passing tests and seven ignored tests, formatting, checks, Clippy, Rust 1.85.1, and focused real-SDK checks of the new commands/defaults. These do not replace final CI and packaged-release verification. |
+| SDK compatibility baseline | All 10 jobs passed at `e8b850d` in the [SDK compatibility CI run](https://github.com/AnuarAbitay/fail-forge/actions/runs/39950688183): stable/minimum Rust, documentation, minimum Dart 3.13.0 and pinned/latest stable Flutter checks on Linux/macOS. This is evidence before beta.3 release preparation; see the release for the tagged revision's checks. |
+| Historical beta.1 CI | All seven jobs passed for release commit `9551288`: stable and minimum-version Rust checks, documentation, and Dart/Flutter SDK regression and packaging checks on Linux/macOS. See the [beta.1 CI run](https://github.com/AnuarAbitay/fail-forge/actions/runs/39541608683). This is evidence for beta.1 only. |
+| Historical beta.2 preparation | Local verification recorded 1,381 passing tests and seven ignored tests, formatting, checks, Clippy, Rust 1.85.1, and focused real-SDK checks of the new commands/defaults. These are historical beta.2 results. |
 | Rust source builds | Rust 1.85 or newer is declared; the recorded minimum-version checks use 1.85.1. Build with the committed `Cargo.lock`. |
-| Dart tooling SDK | Current source accepts stable Dart `>=3.13.0 <4.0.0`; local checks exercised 3.13.0 and 3.13.5. Published beta releases retain their original constraints. |
+| Dart tooling SDK | Beta.3 accepts stable Dart `>=3.13.0 <4.0.0`; local checks exercised 3.13.0 and 3.13.5. Earlier beta releases retain their original constraints. |
 | Flutter | The recorded SDK is Flutter 3.47.7 with Dart 3.13.5. Other Flutter/SDK combinations need their own validation. |
-| SDK CI coverage | CI is configured for pinned Flutter, latest stable Flutter and minimum Dart 3.13.0. Configuration is not evidence that a particular revision passed those checks. |
+| SDK CI coverage | CI checks pinned Flutter, latest stable Flutter and minimum Dart 3.13.0. Results apply to the revisions and SDKs recorded in each run. |
+| macOS Intel | No release verification is recorded for macOS x86_64. |
 
 Support for Dart language constructs does not imply compatibility with every
 Dart 3 SDK. The adapter keeps `analyzer` pinned to `14.5.0`; newer SDKs and
@@ -47,13 +50,14 @@ the adapter at its final location.
 
 The [local packaging command](packaging.md) builds a host-specific `.tar.gz`
 with both executables, adapter sources, user documentation and license material.
-It does not publish a GitHub release. The published
-[beta `0.1.0-beta.1`](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.1)
-provides a **macOS arm64** archive, its SHA-256 checksums and package manifest.
-Version `0.1.0-beta.2` is currently available as a source tag; its native release
-assets have not been published. Build from source for beta.2, Linux or macOS
-Intel. Archives are not universal executables, signed
-installers or notarized macOS applications.
+It does not publish a GitHub release. Obtain the versioned archive, checksums
+and matching package manifest from the
+[beta.3 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.3),
+selecting Linux x86_64 or macOS arm64. Each target has its own
+`SHA256SUMS-<target>` and `package-manifest-<target>.json` beside the archive.
+Archives are not universal executables, signed installers or notarized macOS
+applications. Historically, beta.1 supplied a macOS arm64 archive and beta.2 was
+available as a source tag; those releases do not establish beta.3 verification.
 
 If arranging a relocated installation, preserve these relationships:
 

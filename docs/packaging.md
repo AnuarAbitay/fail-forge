@@ -1,9 +1,11 @@
 # Build a local beta archive
 
 `failforge-tools package` builds a native FailForge archive for the machine on
-which it runs. The examples package source version `0.1.0-beta.2`; its native
-release assets have not been published. Creating an archive does not publish a
-GitHub release or establish that other platforms have passed.
+which it runs. The examples package source version `0.1.0-beta.3`. Published
+archives and verification files belong to the
+[beta.3 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.3).
+Creating a local archive does not publish a GitHub release or establish that
+other platforms have passed.
 
 To use an archive, follow the [installation guide](installation.md#install-from-an-archive).
 This page is for preparing and checking the archive.
@@ -42,7 +44,7 @@ From the source checkout:
 rustup component add rust-src rust-docs
 cargo run -p failforge-tools --locked -- package \
   --output /absolute/new-beta-output \
-  --expected-version 0.1.0-beta.2
+  --expected-version 0.1.0-beta.3
 ```
 
 If the tool is already built, select the source checkout explicitly:
@@ -51,7 +53,7 @@ If the tool is already built, select the source checkout explicitly:
 target/debug/failforge-tools package \
   --installation /absolute/path/to/fail-forge-source \
   --output /absolute/another-new-beta-output \
-  --expected-version 0.1.0-beta.2
+  --expected-version 0.1.0-beta.3
 ```
 
 For this developer command, `--installation` identifies the source checkout to
@@ -76,7 +78,7 @@ A successful macOS arm64 package of this version produces:
 
 ```text
 new-beta-output/
-  failforge-0.1.0-beta.2-aarch64-apple-darwin.tar.gz
+  failforge-0.1.0-beta.3-aarch64-apple-darwin.tar.gz
   SHA256SUMS
   package-manifest.json
 ```
@@ -84,10 +86,19 @@ new-beta-output/
 The target component changes for other native hosts. Keep the checksum file and
 manifest with the corresponding archive.
 
+Beta.3 release assets use the verified targets `x86_64-unknown-linux-gnu`
+(Linux x86_64) and `aarch64-apple-darwin` (macOS arm64). For each target, the
+release keeps the archive name above and names the external manifest
+`package-manifest-<target>.json`. Its bytes match the packager's
+`package-manifest.json`. A release checksum file named `SHA256SUMS-<target>`
+contains two entries: that target's archive and renamed external manifest.
+These names let users download and verify one platform's files independently.
+The local packager continues to emit `SHA256SUMS` and `package-manifest.json`.
+
 The archive has one top-level directory:
 
 ```text
-failforge-0.1.0-beta.2-aarch64-apple-darwin/
+failforge-0.1.0-beta.3-aarch64-apple-darwin/
   bin/
     failforge
     failforge-adapter-campaign
@@ -129,7 +140,7 @@ Run the generated checksum check from its output directory:
 ```sh
 cd /absolute/new-beta-output
 shasum -a 256 -c SHA256SUMS
-tar -tzf failforge-0.1.0-beta.2-aarch64-apple-darwin.tar.gz
+tar -tzf failforge-0.1.0-beta.3-aarch64-apple-darwin.tar.gz
 ```
 
 On systems providing `sha256sum`, `sha256sum -c SHA256SUMS` is an alternative.
@@ -149,7 +160,9 @@ target/debug/failforge-tools package-smoke \
 ```
 
 `--installation`, `--dart-sdk` and `--output` are required. The output must be a
-new directory outside the installation and SDK. The command prepares
+new directory outside the installation and SDK. Supply a stable Dart SDK
+`>=3.13.0 <4.0.0`; the adapter keeps analyzer pinned to `14.5.0` and the selected
+SDK still needs its own compatibility checks. The command prepares
 the adapter and its own small Dart test fixture with `pub get --enforce-lockfile`,
 using a fresh Pub cache in its output directory. It invokes the installed CLI
 through a symlink from another working directory, checks help/version, generates
@@ -212,6 +225,14 @@ not a successful regression run or a completed license review of the binary.
 - Rust/Cargo are build-time requirements for the packager. Users running an
   archive built for their platform do not need Rust.
 - The CI workflow is configured to package, verify, extract, relocate and
-  smoke-test archives in its Linux/macOS Dart jobs. Those settings do not establish
-  that either platform has passed; inspect actual runs, including source download.
-  CI does not publish release assets.
+  smoke-test archives in its Linux/macOS Dart jobs. The SDK compatibility
+  baseline `e8b850d` passed all
+  [10 CI jobs](https://github.com/AnuarAbitay/fail-forge/actions/runs/39950688183),
+  including those archive checks. This run predates beta.3 release preparation;
+  inspect the release's verification for the tagged revision.
+  `ci.yml` does not publish release assets. The separate manual
+  `release.yml` workflow builds the exact tagged revision, verifies its native
+  archive with a fresh-cache smoke check, and uploads only to a pre-created
+  draft release. Uploads require the repository's explicitly verified
+  `AnuarAbitay` personal credential; the workflow does not publish the draft.
+  The final release is published after checking both targets' uploaded files.

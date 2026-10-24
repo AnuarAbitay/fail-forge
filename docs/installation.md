@@ -1,15 +1,14 @@
 # Installation and first run
 
-This guide covers FailForge `0.1.0-beta.2`, available as a source tag. The latest
-published archive is **`0.1.0-beta.1` for macOS arm64**; `beta.2` binary assets
-have not been published. Check
-[GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for published
-downloads, or build the new version from source. Linux and macOS Intel use
-native source builds. Developers can also
+This guide covers FailForge `0.1.0-beta.3`. Obtain a native archive and matching
+verification files from the
+[beta.3 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.3),
+or build the tagged source. Choose the operating system and architecture listed
+for the archive. Developers can also
 produce a local archive with the [packaging command](packaging.md).
 Read the [beta limitations](beta-limitations.md) before running a campaign.
-The broader Dart SDK range below is an unreleased source change; published beta
-releases retain their original SDK constraints.
+The broader Dart SDK range below is included in beta.3; older releases retain
+their original SDK constraints.
 
 ## Requirements
 
@@ -25,11 +24,14 @@ The adapter pins `analyzer` to `14.5.0`. Use the checked-in
 `adapters/dart/pubspec.lock`; do not upgrade adapter dependencies as part of
 installation. Python is not required.
 
-The locally checked environment is Flutter 3.47.7 with Dart 3.13.5. The accepted
-SDK range does not establish compatibility with every newer SDK or language
-feature; those need separate validation with the pinned analyzer. CI is
-configured to check pinned Flutter, latest stable Flutter and the minimum Dart
-3.13.0. Review the results for the revision you install.
+Local checks used Flutter 3.47.7 with Dart 3.13.5 and standalone Dart 3.13.0.
+The SDK compatibility baseline `e8b850d` passed all
+[10 CI jobs](https://github.com/AnuarAbitay/fail-forge/actions/runs/39950688183),
+including pinned Flutter, latest stable Flutter and minimum Dart 3.13.0. This
+run predates beta.3 release preparation. Review the release's verification for
+the tagged revision. The accepted SDK range does not establish compatibility
+with every newer SDK or language feature; those need separate validation with
+the pinned analyzer.
 
 Use projects and tests you trust. FailForge runs their code with your account's
 permissions; working-copy isolation is not a security sandbox.
@@ -38,36 +40,52 @@ permissions; working-copy isolation is not a security sandbox.
 
 ### Install from an archive
 
-On macOS arm64, obtain the `0.1.0-beta.1` archive, `SHA256SUMS` and
-`package-manifest.json` from the same release on
-[GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases).
+Choose one target and obtain its three matching files from the
+[release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.3).
+
+| Platform | Target |
+| --- | --- |
+| Linux x86_64 | `x86_64-unknown-linux-gnu` |
+| macOS arm64 | `aarch64-apple-darwin` |
+
+- `failforge-0.1.0-beta.3-<target>.tar.gz`
+- `package-manifest-<target>.json`
+- `SHA256SUMS-<target>`
+
 Check that the release's version and target match your installation. GitHub's
 automatically generated source archives do not contain the native executables;
-use the named `.tar.gz` asset below or follow [Build from source](#build-from-source).
+use the named `.tar.gz` asset or follow [Build from source](#build-from-source).
 
 Verify the checksum in the directory containing those files, then extract into
 a new parent directory:
 
 ```sh
 cd /absolute/path/to/archive-directory
-shasum -a 256 -c SHA256SUMS
+export FAILFORGE_TARGET=aarch64-apple-darwin
+shasum -a 256 -c "SHA256SUMS-$FAILFORGE_TARGET"
 ```
 
 Continue only when every checksum reports `OK`:
 
 ```sh
 mkdir /absolute/path/to/new-install-parent
-tar -xzf failforge-0.1.0-beta.1-aarch64-apple-darwin.tar.gz \
+tar -xzf "failforge-0.1.0-beta.3-$FAILFORGE_TARGET.tar.gz" \
   -C /absolute/path/to/new-install-parent
-export FAILFORGE_HOME="/absolute/path/to/new-install-parent/failforge-0.1.0-beta.1-aarch64-apple-darwin"
+export FAILFORGE_HOME="/absolute/path/to/new-install-parent/failforge-0.1.0-beta.3-$FAILFORGE_TARGET"
 export PATH="$FAILFORGE_HOME/bin:$PATH"
 failforge --version
 failforge --help
 ```
 
-On Linux, `sha256sum -c SHA256SUMS`
-can be used instead of `shasum`. Obtain the archive and its checksums from the
-same trusted source; a checksum is not a digital signature.
+On Linux, set `FAILFORGE_TARGET=x86_64-unknown-linux-gnu` and use
+`sha256sum -c "SHA256SUMS-$FAILFORGE_TARGET"` instead of `shasum` if preferred.
+Each target's checksum file verifies its archive and manifest, so you do not
+need the other platform's files. Obtain all three from the same trusted source;
+a checksum is not a digital signature.
+
+The extraction example uses the macOS arm64 target; choose the Linux target
+before the checksum and extraction steps when appropriate. macOS Intel has not
+been verified for this release.
 
 The archive contains both native executables, the adapter sources and required
 project documentation/notices. Keep that installation together. The SDK and
@@ -81,7 +99,7 @@ Obtain the versioned source from the
 [FailForge repository](https://github.com/AnuarAbitay/fail-forge):
 
 ```sh
-git clone --branch v0.1.0-beta.2 --depth 1 \
+git clone --branch v0.1.0-beta.3 --depth 1 \
   https://github.com/AnuarAbitay/fail-forge.git
 ```
 
@@ -200,7 +218,7 @@ must contain `pubspec.yaml`, `.dart_tool/package_config.json` and
 Use a standalone package, not a Pub workspace. Source symlinks are unsupported.
 Keep the target source, prepared dependencies and SDK unchanged during a run.
 
-With `0.1.0-beta.2`, check these prerequisites before starting:
+Check these prerequisites before starting:
 
 ```sh
 failforge doctor --project "$FAILFORGE_PROJECT" \
@@ -210,7 +228,7 @@ failforge doctor --project "$FAILFORGE_PROJECT" \
 For Flutter, use `--flutter-sdk "$FLUTTER_SDK"` instead of `--dart-sdk`.
 The command reads local state and suggests manual fixes. It does not install
 dependencies or run tests. See [doctor diagnostics](doctor.md) for its scope,
-profile mode and exit codes. The published `0.1.0-beta.1` archive does not
+profile mode and exit codes. Historical note: the `0.1.0-beta.1` archive does not
 include this command.
 
 ## 4. Run a small campaign without YAML
@@ -252,7 +270,7 @@ reuse its name.
 ## 5. Generate and run a YAML profile
 
 From the prepared target package, generate a profile for one existing library
-source file. With `0.1.0-beta.2` and the SDK on `PATH`:
+source file. With the SDK on `PATH`:
 
 ```sh
 cd "$FAILFORGE_PROJECT"
@@ -265,10 +283,10 @@ failforge profile generate \
 The default output is `profiles/lib/src/calculator.yml`, preserving the
 source's directory structure inside the package. An explicit `--output PATH`
 selects another destination; replacing an existing file requires `--force`.
-For the published `0.1.0-beta.1` archive, add `--output
+Historical note: for the `0.1.0-beta.1` archive, add `--output
 profiles/lib/src/calculator.yml` and `--dart-sdk "$DART_SDK"` (or
 `--flutter-sdk "$FLUTTER_SDK"`). Explicit SDK options remain supported in
-`0.1.0-beta.2` as well.
+`0.1.0-beta.3` as well.
 
 Generation analyzes applicability and writes explicit operator switches. It
 does not run the target's tests. If no selected operator has a statically valid
