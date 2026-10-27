@@ -18,6 +18,7 @@ const GLOBAL: &str = ".global.lock";
 const OWNER: &str = ".owner";
 const LEASE: &str = "lease";
 const METADATA: &str = "metadata.json";
+const CLEANUP: &str = ".cleanup";
 const WORK: &str = "work";
 const GLOBAL_LOCK_BUDGET: Duration = Duration::from_secs(2);
 const GLOBAL_LOCK_RETRY: Duration = Duration::from_millis(10);
@@ -305,25 +306,55 @@ fn known_entries(entries: &[OsString]) -> Result<(), InputError> {
     require(
         entries
             .iter()
-            .all(|name| name == LEASE || name == METADATA || name == WORK),
+            .all(|name| name == LEASE || name == METADATA || name == WORK || name == CLEANUP),
         "unrecognized_campaign_entry",
     )
 }
 fn reap(root: &File, name: &str, cancel: &Cancellation) -> Result<(), InputError> {
+    reap_with_hook(root, name, cancel, &mut |_| Ok(()))
+}
+fn reap_with_hook(
+    root: &File,
+    name: &str,
+    cancel: &Cancellation,
+    hook: &mut impl FnMut(&'static str) -> Result<(), InputError>,
+) -> Result<(), InputError> {
     cancel.check()?;
     let (pending, token) =
         campaign_parts(name).ok_or_else(|| failure("unrecognized_registry_entry"))?;
     let campaign = directory(root, name)?;
     let entries = win::names(&campaign)?;
     known_entries(&entries)?;
+    if entries.is_empty() {
+        // A crash after removing the final control marker can leave only this
+        // empty, private, recognized registry directory. There is no payload.
+        win::same_entry(root, OsStr::new(name), &campaign)?;
+        win::remove_handle(&campaign)?;
+        return Ok(());
+    }
+    let cleaning = entries.iter().any(|name| name == CLEANUP);
+    require(
+        !cleaning || !entries.iter().any(|name| name == METADATA),
+        "conflicting_campaign_metadata",
+    )?;
+    if cleaning {
+        read_marker(
+            &regular(&campaign, CLEANUP, false, false)?,
+            &marker("failforge-campaign-workspace", Some(token))?,
+            false,
+        )?;
+    }
     let missing_lease = !entries.iter().any(|name| name == LEASE);
-    require(!missing_lease || pending, "missing_campaign_lease")?;
+    require(
+        !missing_lease || pending || cleaning,
+        "missing_campaign_lease",
+    )?;
     let lease = regular(&campaign, LEASE, true, missing_lease)?;
     require(
         win::try_lock_at(&lease, false, WORKSPACE_LEASE_LOCK_OFFSET)?,
         "active_lease",
     )?;
-    read_marker(&lease, LEASE_MAGIC, pending)?;
+    read_marker(&lease, LEASE_MAGIC, pending || missing_lease)?;
     if entries.iter().any(|name| name == METADATA) {
         read_marker(
             &regular(&campaign, METADATA, false, false)?,
@@ -331,7 +362,7 @@ fn reap(root: &File, name: &str, cancel: &Cancellation) -> Result<(), InputError
             pending,
         )?;
     } else {
-        require(pending, "missing_campaign_metadata")?;
+        require(pending || cleaning, "missing_campaign_metadata")?;
     }
     if entries.iter().any(|name| name == WORK) {
         let work = directory(&campaign, WORK)?;
@@ -339,41 +370,54 @@ fn reap(root: &File, name: &str, cancel: &Cancellation) -> Result<(), InputError
             require(win::names(&work)?.is_empty(), "nonempty_pending_workspace")?;
         }
         validate_tree(&work, 0, cancel)?;
+    } else {
+        require(pending || cleaning, "missing_campaign_work_directory")?;
+    }
+    if !pending && !cleaning {
+        // NTFS cannot rename a directory containing open descendants. Publish
+        // cleanup intent by atomically renaming its already validated marker;
+        // retain the exclusive lease until every payload and control is gone.
+        let metadata = regular(&campaign, METADATA, false, false)?;
+        win::same_entry(&campaign, OsStr::new(METADATA), &metadata)?;
+        win::rename_handle(&metadata, &campaign, OsStr::new(CLEANUP), false)?;
+        hook("marked")?;
+    }
+    if entries.iter().any(|name| name == WORK) {
+        let work = directory(&campaign, WORK)?;
         if !pending {
             remove_tree(&work, 0, cancel)?;
         }
-    } else {
-        require(pending, "missing_campaign_work_directory")?;
-    }
-    let cleanup_name = if pending {
-        name.to_owned()
-    } else {
-        let next = format!("pending-{token}");
-        win::same_entry(root, OsStr::new(name), &campaign)?;
-        win::rename_handle(&campaign, root, OsStr::new(&next), false)?;
-        next
-    };
-    if entries.iter().any(|name| name == WORK) {
-        let work = directory(&campaign, WORK)?;
         require(win::names(&work)?.is_empty(), "nonempty_pending_workspace")?;
         win::same_entry(&campaign, OsStr::new(WORK), &work)?;
         win::remove_handle(&work)?;
+        hook("work_removed")?;
     }
-    for (child, expected) in [
-        (
-            METADATA,
-            marker("failforge-campaign-workspace", Some(token))?,
-        ),
-        (LEASE, LEASE_MAGIC.to_vec()),
-    ] {
-        if child == LEASE || entries.iter().any(|name| name == child) {
-            let file = regular(&campaign, child, false, false)?;
-            read_marker(&file, &expected, pending)?;
-            win::same_entry(&campaign, OsStr::new(child), &file)?;
-            win::remove_handle(&file)?;
-        }
+    if pending && entries.iter().any(|name| name == METADATA) {
+        let metadata = regular(&campaign, METADATA, false, false)?;
+        read_marker(
+            &metadata,
+            &marker("failforge-campaign-workspace", Some(token))?,
+            true,
+        )?;
+        win::same_entry(&campaign, OsStr::new(METADATA), &metadata)?;
+        win::remove_handle(&metadata)?;
+        hook("metadata_removed")?;
     }
-    win::same_entry(root, OsStr::new(&cleanup_name), &campaign)?;
+    win::same_entry(&campaign, OsStr::new(LEASE), &lease)?;
+    win::remove_handle(&lease)?;
+    hook("lease_removed")?;
+    if !pending || cleaning {
+        let cleanup = regular(&campaign, CLEANUP, false, false)?;
+        read_marker(
+            &cleanup,
+            &marker("failforge-campaign-workspace", Some(token))?,
+            false,
+        )?;
+        win::same_entry(&campaign, OsStr::new(CLEANUP), &cleanup)?;
+        win::remove_handle(&cleanup)?;
+        hook("cleanup_removed")?;
+    }
+    win::same_entry(root, OsStr::new(name), &campaign)?;
     win::remove_handle(&campaign)?;
     Ok(())
 }
@@ -421,14 +465,28 @@ pub fn start(root_path: &Path, cancel: &Cancellation) -> Result<StartResult, Inp
     let campaign = win::create_directory_at(&root, OsStr::new(&pending))?;
     let lease = regular(&campaign, LEASE, true, true)?;
     write_marker(&lease, LEASE_MAGIC)?;
-    let lease = WindowsLease::acquire(lease)?;
     let metadata = regular(&campaign, METADATA, true, true)?;
     write_marker(
         &metadata,
         &marker("failforge-campaign-workspace", Some(&token))?,
     )?;
-    let work = win::create_directory_at(&campaign, OsStr::new(WORK))?;
+    drop(lease);
+    drop(metadata);
+    drop(win::create_directory_at(&campaign, OsStr::new(WORK))?);
+    // No native child handles may remain open during a directory rename. The
+    // registry lock prevents recovery throughout this unpublished transition.
+    win::same_entry(&root, OsStr::new(&pending), &campaign)?;
     win::rename_handle(&campaign, &root, OsStr::new(&name), false)?;
+    win::same_entry(&root, OsStr::new(&name), &campaign)?;
+    let lease = regular(&campaign, LEASE, true, false)?;
+    read_marker(&lease, LEASE_MAGIC, false)?;
+    let lease = WindowsLease::acquire(lease)?;
+    read_marker(
+        &regular(&campaign, METADATA, false, false)?,
+        &marker("failforge-campaign-workspace", Some(&token))?,
+        false,
+    )?;
+    let work = directory(&campaign, WORK)?;
     drop(_guard);
     Ok(StartResult {
         caps: LifecycleCaps {

@@ -160,20 +160,36 @@ impl Fixture {
         }
     }
 }
-fn rename_directory(from: &Path, to: &Path) {
+fn rename_directory(from: &Path, to: &Path) -> bool {
     #[cfg(unix)]
-    fs::rename(from, to).unwrap();
+    {
+        fs::rename(from, to).unwrap();
+        true
+    }
     #[cfg(windows)]
     {
         let directory = failforge_workspace::windows_fs::directory(from).unwrap();
         let parent = failforge_workspace::windows_fs::directory(to.parent().unwrap()).unwrap();
-        failforge_workspace::windows_fs::rename_handle(
+        match failforge_workspace::windows_fs::rename_handle(
             &directory,
             &parent,
             to.file_name().unwrap(),
             false,
-        )
-        .unwrap();
+        ) {
+            Ok(()) => true,
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                // NTFS rejects renaming parents of retained open files. The
+                // failed attack must leave both the identity and name intact.
+                let named = failforge_workspace::windows_fs::directory(from).unwrap();
+                assert_eq!(
+                    failforge_workspace::windows_fs::identity(&directory).unwrap(),
+                    failforge_workspace::windows_fs::identity(&named).unwrap()
+                );
+                assert!(!to.exists());
+                false
+            }
+            Err(error) => panic!("directory substitution failed unexpectedly: {error}"),
+        }
     }
 }
 impl Drop for Fixture {
@@ -664,7 +680,12 @@ fn replacement_report_root_is_never_written() {
     fixture.prepare();
     fixture.discover(1);
     fixture.complete(1);
-    rename_directory(&fixture.output, &fixture.base.join("held-output"));
+    if !rename_directory(&fixture.output, &fixture.base.join("held-output")) {
+        let result = fixture.reports.finish("completed", None).unwrap();
+        assert_eq!(result.summary["complete"], true);
+        assert_eq!(fixture.read("summary.json"), result.summary);
+        return;
+    }
     fs::create_dir(&fixture.output).unwrap();
     fs::write(fixture.output.join("sentinel"), "foreign").unwrap();
     assert!(fixture.reports.finish("completed", None).is_err());
@@ -674,10 +695,20 @@ fn replacement_report_root_is_never_written() {
 fn replacement_family_directory_cannot_receive_metadata_or_final_report() {
     let mut fixture = Fixture::new("profile", &["classic"]);
     fixture.prepare();
-    rename_directory(
+    if !rename_directory(
         &fixture.output.join("families/classic"),
         &fixture.output.join("families/held"),
-    );
+    ) {
+        fixture.discover(0);
+        fixture.complete(0);
+        let summary = fixture.reports.finish("no_mutants", None).unwrap().summary;
+        assert_eq!(summary["complete"], true);
+        assert_eq!(
+            fixture.read("families/classic/summary.json"),
+            summary["families"]["classic"]["summary"]
+        );
+        return;
+    }
     fs::create_dir(fixture.output.join("families/classic")).unwrap();
     assert!(
         fixture

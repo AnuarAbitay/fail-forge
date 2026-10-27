@@ -210,3 +210,98 @@ fn contended_registry_lock_still_observes_cancellation() {
     assert!(began.elapsed() < std::time::Duration::from_secs(1));
     sender.join().unwrap();
 }
+
+#[test]
+fn cleanup_recovers_after_each_committed_control_transition() {
+    for (pending, interrupted) in [
+        (false, "marked"),
+        (false, "work_removed"),
+        (false, "lease_removed"),
+        (false, "cleanup_removed"),
+        (true, "work_removed"),
+        (true, "metadata_removed"),
+        (true, "lease_removed"),
+    ] {
+        let f = Fixture::new();
+        let root = f.0.join("registry");
+        let cancel = Cancellation::default();
+        let mut campaign = start(&root, &cancel).unwrap();
+        let mut name = campaign.campaign_name.clone();
+        let work = root.join(&name).join(WORK);
+        if !pending {
+            std::fs::create_dir(work.join("nested")).unwrap();
+            std::fs::write(work.join("nested").join("payload"), "owned payload").unwrap();
+        }
+        campaign.caps.lease.take();
+        drop(campaign.caps);
+        let directory = win::directory(&root).unwrap();
+        let guard = global_lock(&root, &directory, &cancel).unwrap();
+        if pending {
+            let held = win::directory_at(&directory, OsStr::new(&name)).unwrap();
+            let next = name.replacen("campaign-", "pending-", 1);
+            win::rename_handle(&held, &directory, OsStr::new(&next), false).unwrap();
+            name = next;
+        }
+        let result = reap_with_hook(&directory, &name, &cancel, &mut |stage| {
+            if stage == interrupted {
+                Err(failure("simulated_cleanup_crash"))
+            } else {
+                Ok(())
+            }
+        });
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("simulated_cleanup_crash")
+        );
+        drop(guard);
+
+        let mut recovered = start(&root, &cancel).unwrap();
+        assert!(
+            recovered.recovered.contains(&name),
+            "{interrupted}: {:?}",
+            recovered.skipped
+        );
+        assert!(!root.join(&name).exists(), "{interrupted}");
+        recovered.caps.lease.take();
+        assert!(
+            !close(&root, &recovered.campaign_name, recovered.caps, &cancel)
+                .unwrap()
+                .cleanup_deferred
+        );
+    }
+}
+
+#[test]
+fn missing_controls_and_invalid_cleanup_marker_never_authorize_payload_removal() {
+    for corrupt_marker in [false, true] {
+        let f = Fixture::new();
+        let root = f.0.join("registry");
+        let cancel = Cancellation::default();
+        let mut campaign = start(&root, &cancel).unwrap();
+        let name = campaign.campaign_name.clone();
+        let payload = root.join(&name).join(WORK).join("keep");
+        std::fs::write(&payload, "retained payload").unwrap();
+        campaign.caps.lease.take();
+        if corrupt_marker {
+            let metadata = regular(&campaign.caps.campaign, METADATA, true, false).unwrap();
+            win::rename_handle(
+                &metadata,
+                &campaign.caps.campaign,
+                OsStr::new(CLEANUP),
+                false,
+            )
+            .unwrap();
+            metadata.set_len(0).unwrap();
+            write_marker(&metadata, b"invalid cleanup proof").unwrap();
+        } else {
+            let lease = regular(&campaign.caps.campaign, LEASE, true, false).unwrap();
+            win::remove_handle(&lease).unwrap();
+        }
+        drop(campaign.caps);
+        let observer = start(&root, &cancel).unwrap();
+        assert!(observer.skipped.iter().any(|skip| skip.name == name));
+        assert_eq!(std::fs::read(&payload).unwrap(), b"retained payload");
+    }
+}

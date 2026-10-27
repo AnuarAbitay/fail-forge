@@ -746,7 +746,7 @@ pub fn set_readonly(file: &File, readonly: bool) -> io::Result<()> {
 mod tests {
     use super::*;
     #[test]
-    fn retained_directory_reopens_and_renames_with_its_children_bound() {
+    fn retained_child_blocks_parent_rename_until_its_handle_closes() {
         let root = std::env::temp_dir().join(format!("ff-dir-reopen-{}", random_token().unwrap()));
         std::fs::create_dir(&root).unwrap();
         let parent = directory(&root).unwrap();
@@ -754,12 +754,16 @@ mod tests {
         let payload = regular_at(&child, OsStr::new("payload"), true, true).unwrap();
         assert_eq!(names(&child).unwrap(), vec![OsString::from("payload")]);
         assert_eq!(names(&child).unwrap(), vec![OsString::from("payload")]);
+        let error = rename_handle(&child, &parent, OsStr::new("to"), false).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        same_entry(&parent, OsStr::new("from"), &child).unwrap();
+        same_entry(&child, OsStr::new("payload"), &payload).unwrap();
+        assert!(!root.join("to").exists());
+        drop(payload);
         rename_handle(&child, &parent, OsStr::new("to"), false).unwrap();
         same_entry(&parent, OsStr::new("to"), &child).unwrap();
-        same_entry(&child, OsStr::new("payload"), &payload).unwrap();
         assert!(!root.join("from").exists());
         assert!(root.join("to").join("payload").is_file());
-        drop(payload);
         drop(child);
         drop(parent);
         std::fs::remove_dir_all(root).unwrap();
