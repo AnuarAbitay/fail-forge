@@ -1,5 +1,8 @@
 # Build a local beta archive
 
+For the unreleased native Windows port, use the [Windows source build guide](windows.md).
+The published beta.3 archives remain Linux/macOS only.
+
 `failforge-tools package` builds a native FailForge archive for the machine on
 which it runs. The examples package source version `0.1.0-beta.3`. Published
 archives and verification files belong to the

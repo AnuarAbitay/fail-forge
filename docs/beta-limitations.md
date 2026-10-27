@@ -1,5 +1,8 @@
 # Beta support and limitations
 
+For the unreleased native Windows port, use the [Windows source build guide](windows.md).
+The published beta.3 archives remain Linux/macOS only.
+
 This document describes release version `0.1.0-beta.3`, not a promise of support
 for every Dart project. Use it with the [mutation command guide](mutation-cli.md).
 Beta interfaces and report formats may change between releases.

@@ -89,7 +89,10 @@ transformation and family. Scores are reported separately for each family.
 
 ## Get started
 
-The current beta targets **Linux and macOS**. Windows is unsupported.
+The published beta targets **Linux and macOS**. Native Windows x64 support is
+available for development in `feature/windows-support`; see the
+[Windows source build guide](docs/windows.md). The beta.3 downloads do not
+contain this port.
 Mutation analysis accepts a stable **Dart SDK `>=3.13.0 <4.0.0`**,
 or Flutter with a Dart SDK in that range. Building from source requires
 **Rust 1.85.1 or newer** and a C linker.

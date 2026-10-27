@@ -1,0 +1,171 @@
+name: Windows native
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Fetch only the exact public source revision; no repository token is granted.
+permissions: {}
+
+concurrency:
+  group: windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  FLUTTER_SUPPRESS_ANALYTICS: 'true'
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  rust:
+    name: Native Rust / windows-latest
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out the exact public revision without authentication
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:GIT_CONFIG_NOSYSTEM = '1'
+          $env:GIT_CONFIG_GLOBAL = Join-Path $env:RUNNER_TEMP 'anonymous-gitconfig'
+          [IO.File]::WriteAllText($env:GIT_CONFIG_GLOBAL, '')
+          $env:GIT_TERMINAL_PROMPT = '0'
+          git init --quiet $env:GITHUB_WORKSPACE
+          git -c credential.helper= -c http.extraHeader= fetch --quiet --no-tags --depth=1 "${env:GITHUB_SERVER_URL}/${env:GITHUB_REPOSITORY}.git" $env:GITHUB_SHA
+          git -c core.autocrlf=false checkout --quiet --detach FETCH_HEAD
+          if ((git rev-parse HEAD) -ne $env:GITHUB_SHA) { throw 'Checkout SHA differs from requested revision' }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Check native Windows toolchain, formatting and all targets
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          rustc --version --verbose
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Run native process, IPC, filesystem and CLI tests
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          cargo test --workspace --all-targets --locked -- --test-threads=1
+          cargo run -p failforge-cli --bin failforge --locked -- --version
+
+      - name: Check all native targets on Rust 1.85.1
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          rustup toolchain install 1.85.1 --profile minimal
+          cargo +1.85.1 check --workspace --all-targets --locked
+
+  sdk:
+    name: Flutter ${{ matrix.flutter }} / windows-latest
+    runs-on: windows-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        flutter: ['3.47.7', stable]
+    env:
+      FLUTTER_VERSION: ${{ matrix.flutter }}
+    steps:
+      - name: Check out the exact public revision without authentication
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:GIT_CONFIG_NOSYSTEM = '1'
+          $env:GIT_CONFIG_GLOBAL = Join-Path $env:RUNNER_TEMP 'anonymous-gitconfig'
+          [IO.File]::WriteAllText($env:GIT_CONFIG_GLOBAL, '')
+          $env:GIT_TERMINAL_PROMPT = '0'
+          git init --quiet $env:GITHUB_WORKSPACE
+          git -c credential.helper= -c http.extraHeader= fetch --quiet --no-tags --depth=1 "${env:GITHUB_SERVER_URL}/${env:GITHUB_REPOSITORY}.git" $env:GITHUB_SHA
+          git -c core.autocrlf=false checkout --quiet --detach FETCH_HEAD
+          if ((git rev-parse HEAD) -ne $env:GITHUB_SHA) { throw 'Checkout SHA differs from requested revision' }
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install official Flutter SDK and verify archive digest
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          cargo run -p failforge-tools --locked -- install-test-flutter --version $env:FLUTTER_VERSION --destination $env:RUNNER_TEMP
+          $flutterRoot = Join-Path $env:RUNNER_TEMP 'flutter'
+          $pubCache = Join-Path $env:RUNNER_TEMP 'pub-cache'
+          New-Item -ItemType Directory -Force $pubCache | Out-Null
+          "FLUTTER_ROOT=$flutterRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PUB_CACHE=$pubCache" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          (Join-Path $flutterRoot 'bin') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: Prepare adapter and Flutter example with the native Dart executable
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $dart = Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk/bin/dart.exe'
+          $flutterTools = Join-Path $env:FLUTTER_ROOT 'bin/cache/flutter_tools.snapshot'
+          & $dart --version
+          & $dart --suppress-analytics pub get --enforce-lockfile --directory adapters/dart
+          Push-Location examples/flutter_fixture
+          try {
+            if ($env:FLUTTER_VERSION -eq 'stable') { & $dart $flutterTools --suppress-analytics pub get }
+            else { & $dart $flutterTools --suppress-analytics pub get --enforce-lockfile }
+          } finally { Pop-Location }
+      - name: Check Dart formatting on the pinned SDK
+        if: matrix.flutter != 'stable'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          & (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk/bin/dart.exe') --suppress-analytics format --output=none --set-exit-if-changed adapters/dart examples/flutter_fixture
+      - name: Analyze and test the Dart adapter on Windows
+        working-directory: adapters/dart
+        env:
+          FAILFORGE_OPERATOR_SCALING_PROBE: ${{ runner.temp }}/operator-scaling-windows.json
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $dart = Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk/bin/dart.exe'
+          & $dart --suppress-analytics analyze
+          & $dart --suppress-analytics test --concurrency 1
+      - name: Build native tools and verify the public doctor command
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          cargo build --workspace --bins --examples --locked
+          cargo build --release --workspace --bins --examples --locked
+          $dartSdk = Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk'
+          & target/debug/failforge.exe doctor --installation $env:GITHUB_WORKSPACE --project examples/flutter_fixture --flutter-sdk $env:FLUTTER_ROOT
+      - name: Run all 19 Dart semantic operators through the native CLI and VM
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          & target/debug/failforge-tools.exe semantic-e2e --output (Join-Path $env:RUNNER_TEMP 'dart-semantic-windows') --dart-sdk (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk')
+      - name: Run native CLI, replay, profiles, timeouts and recovery regressions
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          & target/release/failforge-tools.exe regression --binary-dir target/release --output (Join-Path $env:RUNNER_TEMP 'native-regression-windows') --dart-sdk (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk') --flutter-sdk $env:FLUTTER_ROOT
+      - name: Package Windows x64 with matching runtime notices
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          rustup component add rust-docs rust-src
+          & target/debug/failforge-tools.exe package --installation $env:GITHUB_WORKSPACE --output (Join-Path $env:RUNNER_TEMP 'windows-package')
+      - name: Verify checksums and smoke-test the moved archive with a fresh cache
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $package = Join-Path $env:RUNNER_TEMP 'windows-package'
+          foreach ($line in [IO.File]::ReadAllLines((Join-Path $package 'SHA256SUMS'))) {
+            if ($line -notmatch '^([0-9a-f]{64})  ([^/\\]+)$') { throw 'Invalid checksum record' }
+            $actual = (Get-FileHash -Algorithm SHA256 (Join-Path $package $Matches[2])).Hash.ToLowerInvariant()
+            if ($actual -ne $Matches[1]) { throw 'Package checksum mismatch' }
+          }
+          $manifest = Get-Content -Raw (Join-Path $package 'package-manifest.json') | ConvertFrom-Json
+          if ($manifest.target -ne 'x86_64-pc-windows-msvc') { throw 'Package target is not native Windows x64' }
+          $extracted = Join-Path $env:RUNNER_TEMP 'extracted Windows package'
+          New-Item -ItemType Directory $extracted | Out-Null
+          tar.exe -xzf (Join-Path $package $manifest.archive) -C $extracted
+          $moved = Join-Path $env:RUNNER_TEMP 'moved Windows installation'
+          Move-Item (Join-Path $extracted $manifest.archiveRoot) $moved
+          & target/debug/failforge-tools.exe package-smoke --installation $moved --dart-sdk (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk') --output (Join-Path $env:RUNNER_TEMP 'windows-package-smoke')

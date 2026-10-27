@@ -1,5 +1,8 @@
 # Installation and first run
 
+For the unreleased native Windows port, use the [Windows source build guide](windows.md).
+The published beta.3 archives remain Linux/macOS only.
+
 This guide covers FailForge `0.1.0-beta.3`. Obtain a native archive and matching
 verification files from the
 [beta.3 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.3),

@@ -4,6 +4,15 @@ User-visible changes are recorded by version. Check
 [GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for published
 downloads and their verification results.
 
+## Unreleased
+
+### Added
+
+- Native Windows x64 process execution, mutation campaigns, profiles and replay,
+  with Job Object process ownership, private handle-based workspaces, named-pipe
+  cancellation, Windows SDK discovery and native CI coverage. See the Windows
+  source build guide; these changes are not part of the beta.3 downloads.
+
 ## 0.1.0-beta.3 — 2026-10-24
 
 ### Changed

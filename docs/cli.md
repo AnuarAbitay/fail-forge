@@ -4,7 +4,9 @@ The `run` subcommand runs external commands on Linux and macOS. The child can
 access files, the network, and other resources allowed by its OS credentials;
 `run` does not provide a system sandbox or interactive terminal. Mutation campaigns
 and their isolated working copies are handled by [`mutate`](mutation-cli.md).
-Windows has no backend in this stage.
+The unreleased Windows port uses native Job Objects; see the
+[Windows guide](windows.md) for process, argument and cancellation differences.
+The Unix-specific details below describe Linux/macOS behavior.
 
 Build the workspace, then run the `failforge` binary:
 
