@@ -171,6 +171,77 @@ fn null_fallback_requires_narrow_author_and_framework_stack() {
     }
 }
 
+#[cfg(windows)]
+#[test]
+fn native_windows_registration_null_check_retains_strict_author_attribution() {
+    // Captured from the native Windows registration-confirmation regression.
+    let suite = r"test\value_test.dart";
+    let observe = |stack: &str, suite: &str| {
+        let raw = capture(
+            &[(
+                suite,
+                Some(("Null check operator used on a null value", stack, false)),
+            )],
+            false,
+        );
+        let classification = classified(&raw, ReporterMode::Dart);
+        assert_eq!(classification["outcome"], "LOAD_FAILURE");
+        analyze_initialization_evidence(
+            &raw,
+            &crate::test_fs::absolute("/missing/windows-registration"),
+            ReporterMode::Dart,
+            &classification,
+            Some(&json!({"file":"lib/value.dart"})),
+            "subject",
+        )
+        .unwrap()
+    };
+    let actual = observe("test\\value_test.dart 3:35  main\n", suite);
+    assert_eq!(actual.suites, ["test/value_test.dart"]);
+    assert_eq!(actual.failed_suite.as_deref(), Some("test/value_test.dart"));
+    let signature = actual.signature.unwrap();
+    assert_eq!(signature.kind, SignatureKind::AuthorNullCheck);
+    assert_eq!(
+        serde_json::to_value(signature.signature).unwrap(),
+        json!([{
+            "suitePath":r"test\value_test.dart",
+            "testName":r"loading test\value_test.dart",
+            "errors":[{
+                "error":"Failed to load \"test\\value_test.dart\": Null check operator used on a null value",
+                "stackTrace":"test\\value_test.dart 3:35  main\n",
+                "isFailure":false
+            }]
+        }])
+    );
+    let native_root: PathBuf = crate::test_fs::absolute("/missing/windows-registration")
+        .components()
+        .collect();
+    let native_absolute = native_root.join("test").join("value_test.dart");
+    assert!(
+        observe(
+            &format!("{} 3:35  main\n", native_absolute.display()),
+            suite
+        )
+        .signature
+        .is_some()
+    );
+    for stack in [
+        "test\\other_test.dart 3:35  main\n",
+        "other\\test\\value_test.dart 3:35  main\n",
+        "test\\value_test.dart 3:35  main\ndart:io Socket.connect\n",
+    ] {
+        assert!(observe(stack, suite).signature.is_none(), "{stack:?}");
+    }
+    assert!(
+        observe(
+            "test\\value_test.dart 3:35  main\n",
+            r"test\..\test\value_test.dart",
+        )
+        .signature
+        .is_none()
+    );
+}
+
 #[test]
 fn normalization_preserves_error_line_padding_and_replay_identity() {
     let evidence = |cwd: &str, column: u32| {

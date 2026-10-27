@@ -1382,14 +1382,16 @@ pub fn run(options: Options) -> Result<()> {
         TESTS,
     )?;
     let all = options.suite == Suite::All;
+    // Check attribution before the longer profile catalogue so unsupported
+    // native reporter locations fail early without dropping any scenarios.
+    if all || options.suite == Suite::Classification {
+        harness.classification()?;
+    }
     if all || options.suite == Suite::Smoke {
         harness.smoke(&source)?;
     }
     if all || options.suite == Suite::Profiles {
         harness.profiles(&source)?;
-    }
-    if all || options.suite == Suite::Classification {
-        harness.classification()?;
     }
     if all || options.suite == Suite::Timeouts {
         harness.timeouts()?;

@@ -237,6 +237,16 @@ impl Directory {
         }
         #[cfg(windows)]
         {
+            // Suite identities use '/', while native test runner stack frames
+            // use '\\'. Derive only exact path spellings, leaving URIs intact.
+            let native_relative: PathBuf = relative.components().collect();
+            paths.extend([
+                text(&native_relative).ok()?.to_owned(),
+                text(&self.logical.join(&native_relative)).ok()?.to_owned(),
+            ]);
+            if resolved {
+                paths.push(text(&self.resolved.join(&native_relative)).ok()?.to_owned());
+            }
             let variants: Vec<_> = paths
                 .iter()
                 .flat_map(|value| {
@@ -517,7 +527,8 @@ fn null_signature(
     if failure.kind != "unknown"
         || failure.errors.len() != 1
         || failure.suite_path.is_empty()
-        || failure.suite_path.contains(['\\', '\0'])
+        || failure.suite_path.contains('\0')
+        || (!cfg!(windows) && failure.suite_path.contains('\\'))
         || Path::new(&failure.suite_path)
             .components()
             .any(|part| part == Component::ParentDir)

@@ -216,6 +216,105 @@ fn separately_observed_ordinary_failure_preserves_incomplete_catalogue() {
     assert_ne!(result["testIdentities"], json!(context.expected));
 }
 
+fn native_reporter_rows(ordinary: bool) -> Vec<Value> {
+    let mut rows = events(true, ordinary);
+    for row in &mut rows {
+        if row["type"] == "suite" {
+            row["suite"]["path"] = json!(
+                row["suite"]["path"]
+                    .as_str()
+                    .unwrap()
+                    .replace('/', std::path::MAIN_SEPARATOR_STR)
+            );
+        } else if row["type"] == "error" {
+            // Package URIs keep `/`; native reporter author frames use the
+            // platform separator, including `test\a.dart` on Windows.
+            row["stackTrace"] = json!(
+                row["stackTrace"]
+                    .as_str()
+                    .unwrap()
+                    .replace("test/", &format!("test{}", std::path::MAIN_SEPARATOR))
+            );
+        }
+    }
+    rows
+}
+
+#[test]
+fn native_relative_reporter_frames_preserve_setup_classification() {
+    let (_, context) = fixture(false);
+    for ordinary in [false, true] {
+        let current = snapshot(&native_reporter_rows(ordinary));
+        let mut result = json!({"outcome":"KILLED","reason":"user_test_failure"});
+        apply_selection(&mut result, &current, &context).unwrap();
+        assert_eq!(
+            result["outcome"],
+            if ordinary { "KILLED" } else { "UNCLASSIFIED" }
+        );
+        assert_eq!(
+            result["reason"],
+            if ordinary {
+                "ordinary_author_failure_with_setup_suppression"
+            } else {
+                "author_test_catalogue_incomplete_after_setup_failure"
+            }
+        );
+        assert_eq!(
+            result["testCatalogueSuppression"]["catalogueIdentityProven"],
+            false
+        );
+        assert_eq!(result["ordinaryFailureWitness"].is_object(), ordinary);
+    }
+}
+
+#[test]
+fn native_relative_setup_frames_reject_wrong_authors_and_traversal() {
+    let (_, context) = fixture(false);
+    for path in [
+        "test/wrong.dart",
+        "test/sub/../a.dart",
+        "test/../test/a.dart",
+    ] {
+        let mut rows = native_reporter_rows(false);
+        let error = rows
+            .iter_mut()
+            .find(|row| row["type"] == "error" && row["testID"] == 3)
+            .unwrap();
+        error["stackTrace"] = json!(format!(
+            "package:subject/loader.dart 74:12 Loader.load\n{} 25:12 main.<fn>\n",
+            path.replace('/', std::path::MAIN_SEPARATOR_STR)
+        ));
+        let mut result = json!({"outcome":"KILLED","reason":"user_test_failure"});
+        apply_selection(&mut result, &snapshot(&rows), &context).unwrap();
+        assert_eq!(result["outcome"], "INFRA_ERROR", "{path}");
+        assert_eq!(result["reason"], "author_test_selection_changed", "{path}");
+    }
+}
+
+#[test]
+fn native_relative_ordinary_frames_reject_wrong_authors_and_traversal() {
+    let (_, context) = fixture(false);
+    for path in ["test/a.dart", "test/sub/../b.dart", "test/../test/b.dart"] {
+        let mut rows = native_reporter_rows(true);
+        let error = rows
+            .iter_mut()
+            .find(|row| row["type"] == "error" && row["testID"] == 13)
+            .unwrap();
+        error["stackTrace"] = json!(format!(
+            "package:subject/loader.dart 74:12 Loader.load\n{} 11:7 main.<fn>\n",
+            path.replace('/', std::path::MAIN_SEPARATOR_STR)
+        ));
+        let mut result = json!({"outcome":"KILLED","reason":"user_test_failure"});
+        apply_selection(&mut result, &snapshot(&rows), &context).unwrap();
+        assert_eq!(result["outcome"], "UNCLASSIFIED", "{path}");
+        assert_eq!(
+            result["reason"], "author_test_catalogue_incomplete_after_setup_failure",
+            "{path}"
+        );
+        assert!(result["ordinaryFailureWitness"].is_null(), "{path}");
+    }
+}
+
 #[test]
 fn selection_policy_guards_primary_outcome_expected_selection_and_baseline() {
     let (current, context) = fixture(false);

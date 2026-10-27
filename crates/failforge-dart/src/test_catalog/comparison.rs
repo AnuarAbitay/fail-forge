@@ -235,6 +235,10 @@ impl ErrorMatcher {
         let absolute = Path::new(&self.cwd).join(suite);
         let locations = [
             suite.to_owned(),
+            // Catalogue identities use `/`; Dart emits native relative author
+            // frames such as `test\value_test.dart` on Windows.
+            #[cfg(windows)]
+            suite.replace('/', "\\"),
             absolute.to_str()?.to_owned(),
             path_uri(&absolute).ok()?,
         ];
