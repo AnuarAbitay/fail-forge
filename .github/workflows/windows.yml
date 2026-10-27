@@ -111,22 +111,59 @@ jobs:
             if ($env:FLUTTER_VERSION -eq 'stable') { & $dart $flutterTools --suppress-analytics pub get }
             else { & $dart $flutterTools --suppress-analytics pub get --enforce-lockfile }
           } finally { Pop-Location }
+      - name: Verify native Dart adapter startup with file URI arguments
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dart = Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk/bin/dart.exe'
+          $adapter = Join-Path $env:GITHUB_WORKSPACE 'adapters/dart'
+          $packages = ([Uri](Join-Path $adapter '.dart_tool/package_config.json')).AbsoluteUri
+          $script = ([Uri](Join-Path $adapter 'bin/failforge_dart_adapter.dart')).AbsoluteUri
+          $cases = @(
+            @{ Name='ordinary'; Program=$dart; Directory=$adapter; Packages=$packages; Script=$script },
+            @{ Name='verbatim-native-paths'; Program="\\?\$dart"; Directory="\\?\$adapter"; Packages=$packages; Script=$script }
+          )
+          $failed = @()
+          foreach ($case in $cases) {
+            $info = [Diagnostics.ProcessStartInfo]::new()
+            $info.FileName = $case.Program
+            $info.WorkingDirectory = $case.Directory
+            $info.UseShellExecute = $false
+            $info.RedirectStandardInput = $true
+            $info.RedirectStandardOutput = $true
+            $info.RedirectStandardError = $true
+            $info.ArgumentList.Add("--packages=$($case.Packages)")
+            $info.ArgumentList.Add($case.Script)
+            $process = [Diagnostics.Process]::new()
+            $process.StartInfo = $info
+            try {
+              [void]$process.Start()
+              $output = $process.StandardOutput.ReadToEndAsync()
+              $errors = $process.StandardError.ReadToEndAsync()
+              $process.StandardInput.Close()
+              if (-not $process.WaitForExit(30000)) {
+                $process.Kill($true)
+                [void]$process.WaitForExit(5000)
+                $failed += $case.Name
+                Write-Output "Startup $($case.Name): timeout"
+              } else {
+                Write-Output "Startup $($case.Name): exit $($process.ExitCode)"
+                if ($process.ExitCode -ne 0) { $failed += $case.Name }
+              }
+              if ([Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($output, $errors), 5000)) {
+                foreach ($task in @($output, $errors)) {
+                  $value = $task.GetAwaiter().GetResult()
+                  Write-Output ($value.Substring([Math]::Max(0, $value.Length - 8192)))
+                }
+              } else { Write-Output 'Startup capture did not finish' }
+            } finally { $process.Dispose() }
+          }
+          if ($failed.Count) { throw "Adapter startup failed for: $($failed -join ', ')" }
       - name: Check Dart formatting on the pinned SDK
         if: matrix.flutter != 'stable'
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           & (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk/bin/dart.exe') --suppress-analytics format --output=none --set-exit-if-changed adapters/dart examples/flutter_fixture
-      - name: Analyze and test the Dart adapter on Windows
-        working-directory: adapters/dart
-        env:
-          FAILFORGE_OPERATOR_SCALING_PROBE: ${{ runner.temp }}/operator-scaling-windows.json
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          $dart = Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk/bin/dart.exe'
-          & $dart --suppress-analytics analyze
-          & $dart --suppress-analytics test --concurrency 1
       - name: Build native tools and verify the public doctor command
         run: |
           $ErrorActionPreference = 'Stop'
@@ -140,6 +177,16 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           & target/debug/failforge-tools.exe semantic-e2e --output (Join-Path $env:RUNNER_TEMP 'dart-semantic-windows') --dart-sdk (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk')
+      - name: Analyze and test the Dart adapter on Windows
+        working-directory: adapters/dart
+        env:
+          FAILFORGE_OPERATOR_SCALING_PROBE: ${{ runner.temp }}/operator-scaling-windows.json
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $dart = Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk/bin/dart.exe'
+          & $dart --suppress-analytics analyze
+          & $dart --suppress-analytics test --concurrency 1
       - name: Run native CLI, replay, profiles, timeouts and recovery regressions
         run: |
           $ErrorActionPreference = 'Stop'
