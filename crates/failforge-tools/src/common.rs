@@ -699,15 +699,9 @@ pub fn summary(raw: &[u8]) -> Result<BTreeMap<String, String>> {
     Ok(failforge_dart::parse_cli_summary(raw)?)
 }
 
+#[cfg(unix)]
 pub fn account_id() -> Result<String> {
-    #[cfg(unix)]
-    {
-        Ok(unsafe { libc::geteuid() }.to_string())
-    }
-    #[cfg(windows)]
-    {
-        Ok(failforge_workspace::windows_fs::current_sid()?)
-    }
+    Ok(unsafe { libc::geteuid() }.to_string())
 }
 
 #[cfg(test)]

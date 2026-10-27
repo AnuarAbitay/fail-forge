@@ -111,6 +111,41 @@ impl Drop for PrivateSecurity {
 pub fn current_sid() -> io::Result<String> {
     token_sid(false)
 }
+
+fn registry_name(sid: &str, purpose: char) -> String {
+    use sha2::{Digest, Sha256};
+
+    // Reserve path space for runtimes that spawn SDK-relative executables before
+    // normalizing them. This routing index never replaces full SID authority.
+    const ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
+    let digest = Sha256::digest(sid.as_bytes());
+    let mut name = String::with_capacity(21);
+    name.push(purpose);
+    // Encode exactly 96 hash bits, padding the last base32 group with zeroes.
+    for group in 0..20 {
+        let mut value = 0_u8;
+        for bit in 0..5 {
+            let position = group * 5 + bit;
+            value <<= 1;
+            if position < 96 {
+                value |= (digest[position / 8] >> (7 - position % 8)) & 1;
+            }
+        }
+        name.push(char::from(ALPHABET[usize::from(value)]));
+    }
+    name
+}
+
+/// Compact routing name; full SID markers and private ACLs prove ownership.
+pub fn campaign_registry_name() -> io::Result<String> {
+    Ok(registry_name(&current_sid()?, 'c'))
+}
+
+/// Profile scope has a distinct routing prefix and the same full SID authority.
+pub fn profile_registry_name() -> io::Result<String> {
+    Ok(registry_name(&current_sid()?, 'p'))
+}
+
 /// The current token's exact default object owner, which can differ from its
 /// user SID for an elevated account. This never broadens private control ACLs.
 pub fn current_owner_sid() -> io::Result<String> {
@@ -745,6 +780,36 @@ pub fn set_readonly(file: &File, readonly: bool) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn registry_routing_names_are_fixed_lowercase_and_account_scoped() {
+        let sid = "S-1-5-21-3776380004-1005456608-3524014338-500";
+        assert_eq!(registry_name(sid, 'c'), "ctjzawtlaiojefj35d7ua");
+        assert_eq!(registry_name(sid, 'p'), "ptjzawtlaiojefj35d7ua");
+        assert_ne!(registry_name(sid, 'c'), registry_name(sid, 'p'));
+        let other = registry_name("S-1-5-21-3776380004-1005456608-3524014338-501", 'c');
+        assert_eq!(other, "cji2x7e2iwbaqa537yeyq");
+        assert_ne!(registry_name(sid, 'c'), other);
+        for name in [
+            campaign_registry_name().unwrap(),
+            profile_registry_name().unwrap(),
+        ] {
+            assert_eq!(name.len(), 21);
+            assert!(
+                name.bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || (b'2'..=b'7').contains(&byte))
+            );
+        }
+        let current = current_sid().unwrap();
+        assert_eq!(
+            campaign_registry_name().unwrap(),
+            registry_name(&current, 'c')
+        );
+        assert_eq!(
+            profile_registry_name().unwrap(),
+            registry_name(&current, 'p')
+        );
+    }
+
     #[test]
     fn retained_child_blocks_parent_rename_until_its_handle_closes() {
         let root = std::env::temp_dir().join(format!("ff-dir-reopen-{}", random_token().unwrap()));

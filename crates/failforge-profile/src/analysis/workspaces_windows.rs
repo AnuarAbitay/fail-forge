@@ -40,10 +40,9 @@ pub(super) struct Workspace {
 }
 impl Workspace {
     pub fn new(protected: &[PathBuf]) -> Result<Self, ProfileError> {
-        let registry = std::env::temp_dir().canonicalize()?.join(format!(
-            "failforge-profile-workspaces-{}",
-            win::current_sid()?
-        ));
+        let registry = std::env::temp_dir()
+            .canonicalize()?
+            .join(win::profile_registry_name()?);
         Self::at(&registry, protected)
     }
     fn at(registry: &Path, protected: &[PathBuf]) -> Result<Self, ProfileError> {

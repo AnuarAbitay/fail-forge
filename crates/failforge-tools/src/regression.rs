@@ -972,7 +972,7 @@ impl Harness {
         self.temp_root = Some(temporary.0.clone());
         let registry = temporary
             .0
-            .join(format!("failforge-workspaces-{}", common::account_id()?));
+            .join(failforge_workspace::windows_fs::campaign_registry_name()?);
         let cancel = failforge_workspace::Cancellation::default();
         let abandoned = failforge_workspace::lifecycle::start(&registry, &cancel)?;
         let abandoned_name = abandoned.campaign_name.clone();

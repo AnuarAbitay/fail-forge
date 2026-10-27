@@ -95,7 +95,7 @@ fn default_registry() -> Result<PathBuf, NamespaceError> {
 
 #[cfg(windows)]
 fn default_registry() -> Result<PathBuf, NamespaceError> {
-    Ok(std::env::temp_dir().join(format!("failforge-workspaces-{}", win::current_sid()?)))
+    Ok(std::env::temp_dir().join(win::campaign_registry_name()?))
 }
 
 pub(crate) fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
@@ -928,14 +928,9 @@ mod windows_tests {
     fn windows_protected_overlap_is_ordinal_case_insensitive() {
         assert!(overlaps(Path::new(r"C:\SDK\bin"), Path::new(r"c:\sdk")));
         assert!(!overlaps(Path::new(r"C:\SDK-other"), Path::new(r"c:\sdk")));
-        assert!(
-            default_registry()
-                .unwrap()
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .starts_with("failforge-workspaces-S-")
+        assert_eq!(
+            default_registry().unwrap().file_name().unwrap(),
+            std::ffi::OsStr::new(&win::campaign_registry_name().unwrap())
         );
     }
 }

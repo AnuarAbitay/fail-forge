@@ -490,10 +490,21 @@ impl Harness {
         command
     }
     fn registry_clean(&self) -> Result<()> {
-        for prefix in ["failforge-workspaces", "failforge-profile-workspaces"] {
-            let registry = self
-                .temp_root
-                .join(format!("{prefix}-{}", common::account_id()?));
+        #[cfg(unix)]
+        let names = {
+            let account = common::account_id()?;
+            [
+                format!("failforge-workspaces-{account}"),
+                format!("failforge-profile-workspaces-{account}"),
+            ]
+        };
+        #[cfg(windows)]
+        let names = [
+            failforge_workspace::windows_fs::campaign_registry_name()?,
+            failforge_workspace::windows_fs::profile_registry_name()?,
+        ];
+        for name in names {
+            let registry = self.temp_root.join(name);
             if registry.exists() {
                 for entry in fs::read_dir(registry)? {
                     let entry = entry?;
