@@ -156,3 +156,57 @@ fn source_lease_is_shared_with_independent_runner_owner() {
             .cleanup_deferred
     );
 }
+
+#[test]
+fn contended_registry_lock_bounds_recovery_without_removing_another_owner() {
+    let f = Fixture::new();
+    let root = f.0.join("registry");
+    let cancel = Cancellation::default();
+    let mut campaign = start(&root, &cancel).unwrap();
+    campaign.caps.lease.take();
+    let guard = regular(&campaign.caps.root, GLOBAL, true, false).unwrap();
+    assert!(win::try_lock(&guard).unwrap());
+
+    let began = std::time::Instant::now();
+    let error = start(&root, &cancel).unwrap_err();
+    assert!(error.to_string().contains("workspace_registry_busy"));
+    assert!(began.elapsed() >= std::time::Duration::from_secs(2));
+    assert!(began.elapsed() < std::time::Duration::from_secs(5));
+    assert!(root.join(&campaign.campaign_name).exists());
+    // A failed attempt must not release the lock belonging to the other handle.
+    let contender = regular(&campaign.caps.root, GLOBAL, true, false).unwrap();
+    assert!(!win::try_lock(&contender).unwrap());
+    drop(guard);
+    drop(contender);
+
+    let mut recovered = start(&root, &cancel).unwrap();
+    assert!(recovered.recovered.contains(&campaign.campaign_name));
+    recovered.caps.lease.take();
+    assert!(
+        !close(&root, &recovered.campaign_name, recovered.caps, &cancel)
+            .unwrap()
+            .cleanup_deferred
+    );
+}
+
+#[test]
+fn contended_registry_lock_still_observes_cancellation() {
+    let f = Fixture::new();
+    let root = f.0.join("registry");
+    let campaign = start(&root, &Cancellation::default()).unwrap();
+    let guard = regular(&campaign.caps.root, GLOBAL, true, false).unwrap();
+    assert!(win::try_lock(&guard).unwrap());
+    let cancel = Cancellation::default();
+    let request = cancel.clone();
+    let sender = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        request.request(libc::SIGINT);
+    });
+    let began = std::time::Instant::now();
+    assert!(matches!(
+        start(&root, &cancel),
+        Err(InputError::Cancelled(libc::SIGINT))
+    ));
+    assert!(began.elapsed() < std::time::Duration::from_secs(1));
+    sender.join().unwrap();
+}

@@ -419,47 +419,13 @@ pub fn same_entry(parent: &File, name: &OsStr, file: &File) -> io::Result<()> {
     Ok(())
 }
 pub fn names(parent: &File) -> io::Result<Vec<OsString>> {
-    // Open an independent file object so enumeration does not share offsets.
-    let mut text = [b'.' as u16];
-    let mut unicode = UNICODE_STRING {
-        Length: 2,
-        MaximumLength: 2,
-        Buffer: text.as_mut_ptr(),
-    };
-    let mut attrs = ObjectAttributes {
-        length: size_of::<ObjectAttributes>() as u32,
-        root: parent.as_raw_handle(),
-        name: &mut unicode,
-        attributes: 0x40 | 0x1000,
-        security: null_mut(),
-        quality: null_mut(),
-    };
-    let mut handle = null_mut();
-    let mut status = IoStatus {
-        status: 0,
-        information: 0,
-    };
-    let code = unsafe {
-        NtCreateFile(
-            &mut handle,
-            0x0012_0081,
-            &mut attrs,
-            &mut status,
-            null(),
-            0,
-            7,
-            1,
-            0x0020_0021,
-            null(),
-            0,
-        )
-    };
-    if code < 0 {
-        return Err(io::Error::from_raw_os_error(
-            unsafe { RtlNtStatusToDosError(code) } as i32,
-        ));
-    }
-    let file = unsafe { File::from_raw_handle(handle) };
+    // An empty NT name reopens the exact retained object with an independent
+    // enumeration cursor; native names do not normalize the Win32 "." alias.
+    let file = reopen(
+        parent,
+        FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE,
+        Some(true),
+    )?;
     let mut storage = vec![0_u64; 8192];
     let mut result = vec![];
     loop {
@@ -517,7 +483,9 @@ pub fn names(parent: &File) -> io::Result<Vec<OsString>> {
 pub fn rename_handle(file: &File, parent: &File, to: &OsStr, replace: bool) -> io::Result<()> {
     let file = deletion_handle(file)?;
     let name = valid_name(to)?;
-    let length = std::mem::offset_of!(FILE_RENAME_INFO, FileName) + name.len() * 2;
+    // NT requires at least the complete fixed record plus the UTF-16 name,
+    // including the ABI padding after FileName[1] for short entry names.
+    let length = size_of::<FILE_RENAME_INFO>() + name.len() * 2;
     let mut storage = vec![0_usize; length.div_ceil(size_of::<usize>())];
     let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
     unsafe {
@@ -558,18 +526,58 @@ pub fn replace_at(parent: &File, from: &OsStr, to: &OsStr) -> io::Result<()> {
     rename_impl(parent, from, to, true)
 }
 fn deletion_handle(file: &File) -> io::Result<File> {
-    let handle = unsafe {
-        ReOpenFile(
-            file.as_raw_handle(),
-            DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+    reopen(file, DELETE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, None)
+}
+fn reopen(file: &File, access: u32, directory: Option<bool>) -> io::Result<File> {
+    let mut name = UNICODE_STRING {
+        Length: 0,
+        MaximumLength: 0,
+        Buffer: null_mut(),
+    };
+    let mut attributes = ObjectAttributes {
+        length: size_of::<ObjectAttributes>() as u32,
+        root: file.as_raw_handle(),
+        name: &mut name,
+        attributes: 0x40 | 0x1000,
+        security: null_mut(),
+        quality: null_mut(),
+    };
+    let mut handle = null_mut();
+    let mut status = IoStatus {
+        status: 0,
+        information: 0,
+    };
+    let result = unsafe {
+        NtCreateFile(
+            &mut handle,
+            access,
+            &mut attributes,
+            &mut status,
+            null(),
+            0,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            1,
+            0x0020_0020
+                | match directory {
+                    Some(true) => 1,
+                    Some(false) => 0x40,
+                    None => 0,
+                },
+            null(),
+            0,
         )
     };
-    if handle == INVALID_HANDLE_VALUE {
-        return Err(io::Error::last_os_error());
+    if result < 0 {
+        return Err(io::Error::from_raw_os_error(
+            unsafe { RtlNtStatusToDosError(result) } as i32,
+        ));
     }
-    Ok(unsafe { File::from_raw_handle(handle) })
+    let reopened = unsafe { File::from_raw_handle(handle) };
+    require_kind(&reopened, directory)?;
+    if identity(&reopened)? != identity(file)? {
+        return Err(invalid("reopened workspace object changed"));
+    }
+    Ok(reopened)
 }
 /// Mark only this exact retained entry for removal, without a pathname lookup.
 pub fn remove_handle(file: &File) -> io::Result<()> {
@@ -662,7 +670,9 @@ pub fn unlinked(file: &File) -> io::Result<bool> {
 pub fn link_handle(file: &File, parent: &File, to: &OsStr) -> io::Result<()> {
     let file = deletion_handle(file)?;
     let name = valid_name(to)?;
-    let length = std::mem::offset_of!(FILE_RENAME_INFO, FileName) + name.len() * 2;
+    // NT requires at least the complete fixed record plus the UTF-16 name,
+    // including the ABI padding after FileName[1] for short entry names.
+    let length = size_of::<FILE_RENAME_INFO>() + name.len() * 2;
     let mut storage = vec![0_usize; length.div_ceil(size_of::<usize>())];
     let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
     unsafe {
@@ -735,6 +745,52 @@ pub fn set_readonly(file: &File, readonly: bool) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retained_directory_reopens_and_renames_with_its_children_bound() {
+        let root = std::env::temp_dir().join(format!("ff-dir-reopen-{}", random_token().unwrap()));
+        std::fs::create_dir(&root).unwrap();
+        let parent = directory(&root).unwrap();
+        let child = create_directory_at(&parent, OsStr::new("from")).unwrap();
+        let payload = regular_at(&child, OsStr::new("payload"), true, true).unwrap();
+        assert_eq!(names(&child).unwrap(), vec![OsString::from("payload")]);
+        assert_eq!(names(&child).unwrap(), vec![OsString::from("payload")]);
+        rename_handle(&child, &parent, OsStr::new("to"), false).unwrap();
+        same_entry(&parent, OsStr::new("to"), &child).unwrap();
+        same_entry(&child, OsStr::new("payload"), &payload).unwrap();
+        assert!(!root.join("from").exists());
+        assert!(root.join("to").join("payload").is_file());
+        drop(payload);
+        drop(child);
+        drop(parent);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn one_character_rename_and_hard_link_names_preserve_native_identity() {
+        use std::io::Write;
+        let root = std::env::temp_dir().join(format!("ff-short-name-{}", random_token().unwrap()));
+        std::fs::create_dir(&root).unwrap();
+        let parent = directory(&root).unwrap();
+        let mut file = regular_at(&parent, OsStr::new("a"), true, true).unwrap();
+        file.write_all(b"native bytes").unwrap();
+        file.sync_all().unwrap();
+        rename_handle(&file, &parent, OsStr::new("b"), false).unwrap();
+        same_entry(&parent, OsStr::new("b"), &file).unwrap();
+        assert!(!root.join("a").exists());
+        link_handle(&file, &parent, OsStr::new("c")).unwrap();
+        same_entry(&parent, OsStr::new("c"), &file).unwrap();
+        assert_eq!(information(&file).unwrap().nNumberOfLinks, 2);
+        assert_eq!(std::fs::read(root.join("b")).unwrap(), b"native bytes");
+        assert_eq!(std::fs::read(root.join("c")).unwrap(), b"native bytes");
+        assert_eq!(
+            names(&parent).unwrap(),
+            vec![OsString::from("b"), OsString::from("c")]
+        );
+        drop(file);
+        drop(parent);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn payload_default_token_owner_is_accepted_but_control_dacl_stays_private() {
         let root = std::env::temp_dir().join(format!("ff-owner-{}", random_token().unwrap()));

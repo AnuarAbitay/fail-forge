@@ -131,13 +131,28 @@ mod tests {
         ));
         fs::create_dir_all(directory.join("lib")).unwrap();
         fs::create_dir(directory.join("test")).unwrap();
-        fs::write(directory.join("lib/a.dart"), "bool a() => true;\n").unwrap();
-        fs::write(directory.join("test/foo_test.dart"), "void main() {}\n").unwrap();
+        fs::create_dir(directory.join(".dart_tool")).unwrap();
+        let directory = directory.canonicalize().unwrap();
+        fs::write(directory.join("lib").join("a.dart"), "bool a() => true;\n").unwrap();
+        fs::write(
+            directory.join("test").join("foo_test.dart"),
+            "void main() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            directory.join(".dart_tool").join("package_config.json"),
+            "{}",
+        )
+        .unwrap();
+        let metadata_path = directory.join(".dart_tool/package_config.json");
+        assert_eq!(fs::read(&metadata_path).unwrap(), b"{}");
+        assert_eq!(super::read_regular(&metadata_path, 16).unwrap(), b"{}");
         let hashes = super::source_hashes(&directory, &Cancellation::default()).unwrap();
         let wire = serde_json::to_value(hashes).unwrap();
         let files = wire.as_object().unwrap();
         assert!(files.contains_key("lib/a.dart"));
         assert!(files.contains_key("test/foo_test.dart"));
+        assert!(files.contains_key(".dart_tool/package_config.json"));
         assert!(files.keys().all(|key| !key.contains('\\')));
         fs::remove_dir_all(directory).unwrap();
     }

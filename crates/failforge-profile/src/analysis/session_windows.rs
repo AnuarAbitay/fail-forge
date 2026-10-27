@@ -6,10 +6,10 @@ use super::{Cancellation, FamilyApplicability, Runtime, failure};
 use crate::ProfileError;
 use failforge_dart::MAX_LINE_BYTES;
 use failforge_runner::{CapturePolicy, CommandSpec, EnvSpec, OutputMode, Runner, TimeoutPolicy};
-use failforge_workspace::windows_fs::{PrivateSecurity, random_token};
+use failforge_workspace::windows_fs::{self as win, PrivateSecurity, random_token};
 use serde_json::Value;
-use std::fs;
-use std::io;
+use std::ffi::OsStr;
+use std::io::{self, Write};
 use std::path::Path;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -98,12 +98,23 @@ pub(super) async fn discover(
         .and_then(|items| items.first())
         .and_then(Value::as_str)
         .ok_or_else(|| failure("analysis request has no selected file"))?;
-    let output = workspace.path.join(format!("discovery-{family}"));
-    fs::create_dir(&output)?;
+    let output_name = format!("discovery-{family}");
+    let workspace_directory = win::directory(&workspace.path)?;
+    let output_directory =
+        win::create_directory_at(&workspace_directory, OsStr::new(&output_name))?;
+    let output = workspace.path.join(&output_name);
     let payload_path = output.join("payload.json");
-    fs::write(
-        &payload_path,
-        serde_json::to_vec(payload).map_err(|_| failure("cannot serialize analysis request"))?,
+    let payload_raw =
+        serde_json::to_vec(payload).map_err(|_| failure("cannot serialize analysis request"))?;
+    let mut payload_file =
+        win::regular_at(&output_directory, OsStr::new("payload.json"), true, true)?;
+    payload_file.write_all(&payload_raw)?;
+    payload_file.sync_all()?;
+    win::require_private(&payload_file, false)?;
+    win::same_entry(
+        &workspace_directory,
+        OsStr::new(&output_name),
+        &output_directory,
     )?;
     let (name, control) = control_pipe()?;
     let mut env = EnvSpec {
@@ -204,7 +215,16 @@ pub(super) async fn discover(
     {
         error.get_or_insert_with(|| failure("adapter campaign stream lost bytes"));
     }
-    fs::write(output.join("adapter.stderr"), &result.stderr.tail)?;
+    win::same_entry(
+        &workspace_directory,
+        OsStr::new(&output_name),
+        &output_directory,
+    )?;
+    let mut stderr_file =
+        win::regular_at(&output_directory, OsStr::new("adapter.stderr"), true, true)?;
+    stderr_file.write_all(&result.stderr.tail)?;
+    stderr_file.sync_all()?;
+    win::require_private(&stderr_file, false)?;
     owner.handle.take();
     owner
         .runner

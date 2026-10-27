@@ -11,6 +11,7 @@ use std::os::windows::fs::FileExt;
 use std::os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, RawHandle};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 pub const LEASE_MAGIC: &[u8] = WORKSPACE_LEASE_MAGIC;
 const GLOBAL: &str = ".global.lock";
@@ -18,6 +19,8 @@ const OWNER: &str = ".owner";
 const LEASE: &str = "lease";
 const METADATA: &str = "metadata.json";
 const WORK: &str = "work";
+const GLOBAL_LOCK_BUDGET: Duration = Duration::from_secs(2);
+const GLOBAL_LOCK_RETRY: Duration = Duration::from_millis(10);
 
 /// A proven shared kernel lease. All controller clones retain its original
 /// handle; separate worker processes acquire their own shared runner lease.
@@ -191,9 +194,12 @@ fn global_lock(path: &Path, root: &File, cancel: &Cancellation) -> Result<File, 
     cancel.check()?;
     let guard = regular(root, GLOBAL, true, false)?;
     read_marker(&guard, b"", false)?;
+    let deadline = Instant::now() + GLOBAL_LOCK_BUDGET;
     while !win::try_lock(&guard)? {
         cancel.check()?;
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        require(!remaining.is_zero(), "workspace_registry_busy")?;
+        std::thread::sleep(remaining.min(GLOBAL_LOCK_RETRY));
     }
     cancel.check()?;
     win::require_private(root, true)?;

@@ -28,7 +28,8 @@ pub(super) fn accessible(path: &Path, mode: i32) -> bool {
 #[cfg(windows)]
 pub(super) fn accessible(path: &Path, mode: i32) -> bool {
     use failforge_workspace::windows_fs as win;
-    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::FromRawHandle;
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::Storage::FileSystem::*;
     let file = if path.is_dir() {
@@ -49,22 +50,39 @@ pub(super) fn accessible(path: &Path, mode: i32) -> bool {
     if mode & self::ACCESS_EXECUTE != 0 {
         access |= FILE_GENERIC_EXECUTE;
     }
-    // SAFETY: reopening an owned identity checks requested ACL rights without
-    // writing, truncating, creating or executing anything. The native handle is
-    // closed immediately; all ancestor opens reject reparse points.
+    let Ok(path) = std::path::absolute(path) else {
+        return false;
+    };
+    let name: Vec<_> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: OPEN_EXISTING checks requested ACL rights without writing,
+    // truncating, creating or executing anything. All ancestor opens reject
+    // reparse points; identity checks bind this access probe to the held entry.
     let handle = unsafe {
-        ReOpenFile(
-            file.as_raw_handle(),
+        CreateFileW(
+            name.as_ptr(),
             access,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null(),
+            OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            std::ptr::null_mut(),
         )
     };
     if handle == INVALID_HANDLE_VALUE {
         return false;
     }
-    let _handle = unsafe { OwnedHandle::from_raw_handle(handle) };
-    true
+    let probe = unsafe { std::fs::File::from_raw_handle(handle) };
+    let Ok(expected) = win::identity(&file) else {
+        return false;
+    };
+    win::identity(&probe).is_ok_and(|actual| actual == expected)
+        && (if path.is_dir() {
+            win::directory(&path)
+        } else {
+            win::regular(&path, false)
+        })
+        .and_then(|named| win::identity(&named))
+        .is_ok_and(|actual| actual == expected)
 }
 fn alias(metadata: &std::fs::Metadata) -> bool {
     #[cfg(unix)]

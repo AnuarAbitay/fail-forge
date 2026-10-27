@@ -5,6 +5,33 @@ use failforge_workspace::{Cancellation, lifecycle as native, windows_fs as win};
 use std::os::windows::io::AsHandle;
 use std::path::{Path, PathBuf};
 
+fn starts_with(path: &Path, root: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
+    let mut path = path.components();
+    for expected in root.components() {
+        let Some(actual) = path.next() else {
+            return false;
+        };
+        let actual: Vec<_> = actual.as_os_str().encode_wide().collect();
+        let expected: Vec<_> = expected.as_os_str().encode_wide().collect();
+        // SAFETY: both live buffers hold complete UTF-16 path components.
+        if unsafe {
+            CompareStringOrdinal(
+                actual.as_ptr(),
+                actual.len() as i32,
+                expected.as_ptr(),
+                expected.len() as i32,
+                1,
+            )
+        } != CSTR_EQUAL
+        {
+            return false;
+        }
+    }
+    true
+}
+
 pub(super) struct Workspace {
     registry: PathBuf,
     campaign_name: String,
@@ -22,7 +49,7 @@ impl Workspace {
     fn at(registry: &Path, protected: &[PathBuf]) -> Result<Self, ProfileError> {
         if protected
             .iter()
-            .any(|path| registry.starts_with(path) || path.starts_with(registry))
+            .any(|path| starts_with(registry, path) || starts_with(path, registry))
         {
             return Err(failure(
                 "temporary workspace registry must be outside analysis inputs",
@@ -114,6 +141,19 @@ impl Recovery {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn case_aliases_cannot_place_registry_inside_protected_inputs() {
+        let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "failforge-profile-case-{}",
+            win::random_token().unwrap()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let alias = PathBuf::from(root.to_str().unwrap().to_ascii_uppercase());
+        assert!(Workspace::at(&root, std::slice::from_ref(&alias)).is_err());
+        assert!(Workspace::at(&root.join("registry"), &[alias]).is_err());
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
+        std::fs::remove_dir(root).unwrap();
+    }
     #[test]
     fn profile_registry_isolated_and_explicit_close_removes_payload() {
         let root = std::env::temp_dir().canonicalize().unwrap().join(format!(

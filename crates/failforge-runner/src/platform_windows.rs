@@ -242,10 +242,6 @@ impl ManagedChild {
         };
         // SAFETY: job/process handles live; suspended process has executed no code.
         unsafe {
-            check(AssignProcessToJobObject(
-                raw(&child.job),
-                raw(&child.process),
-            ))?;
             if ResumeThread(raw(&thread)) == u32::MAX {
                 return Err(io::Error::last_os_error());
             }

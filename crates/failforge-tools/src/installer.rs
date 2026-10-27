@@ -9,6 +9,9 @@ use std::path::{Component, Path};
 use std::time::Duration;
 pub const VERSION: &str = "3.47.7";
 const DOWNLOAD_BASE: &str = "https://storage.googleapis.com/flutter_infra_release/releases";
+fn stage<T>(result: Result<T>, operation: &str) -> Result<T> {
+    result.map_err(|error| format!("Flutter SDK {operation}: {error}").into())
+}
 
 #[cfg(unix)]
 fn publish_directory(source: &Path, destination: &Path) -> Result<()> {
@@ -141,11 +144,14 @@ pub fn install(destination: &Path, version: &str) -> Result<()> {
     .arg(format!(
         "https://storage.googleapis.com/flutter_infra_release/releases/releases_{os}.json"
     ));
-    common::execute(
-        &mut curl,
-        &temp.0.join("manifest"),
-        Duration::from_secs(240),
-        0,
+    stage(
+        common::execute(
+            &mut curl,
+            &temp.0.join("manifest"),
+            Duration::from_secs(240),
+            0,
+        ),
+        "manifest download",
     )?;
     let manifest = common::read_json(&manifest_file)?;
     let entry = select(&manifest, arch, version)?;
@@ -164,14 +170,17 @@ pub fn install(destination: &Path, version: &str) -> Result<()> {
         ])
         .arg(&archive)
         .arg(format!("{}/{name}", manifest["base_url"].as_str().unwrap()));
-    common::execute(
-        &mut download,
-        &temp.0.join("download"),
-        Duration::from_secs(4800),
-        0,
+    stage(
+        common::execute(
+            &mut download,
+            &temp.0.join("download"),
+            Duration::from_secs(4800),
+            0,
+        ),
+        "archive download",
     )?;
     ensure(
-        common::hash(&archive)? == entry["sha256"],
+        stage(common::hash(&archive), "archive verification")? == entry["sha256"],
         "Flutter archive digest mismatch",
     )?;
     // Extraction happens in a private staging directory; a failed extraction never
@@ -191,11 +200,14 @@ pub fn install(destination: &Path, version: &str) -> Result<()> {
         } else {
             extract.arg("-xf").arg(&archive).arg("-C").arg(&staging);
         }
-        common::execute(
-            &mut extract,
-            &temp.0.join("extract"),
-            Duration::from_secs(600),
-            0,
+        stage(
+            common::execute(
+                &mut extract,
+                &temp.0.join("extract"),
+                Duration::from_secs(600),
+                0,
+            ),
+            "archive extraction",
         )?;
         ensure(
             staging
@@ -212,7 +224,10 @@ pub fn install(destination: &Path, version: &str) -> Result<()> {
                 .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound),
             "destination Flutter appeared during installation",
         )?;
-        publish_directory(&staging.join("flutter"), &destination.join("flutter"))?;
+        stage(
+            publish_directory(&staging.join("flutter"), &destination.join("flutter")),
+            "atomic publication",
+        )?;
         Ok(())
     })();
     let cleanup = if common::cleanup_confirmed() {
@@ -221,7 +236,7 @@ pub fn install(destination: &Path, version: &str) -> Result<()> {
         Ok(())
     };
     result?;
-    cleanup?;
+    stage(cleanup.map_err(Into::into), "staging cleanup")?;
     println!(
         "{}",
         serde_json::json!({"version":entry["version"],"dartVersion":entry["dart_sdk_version"],"archive":entry["archive"],"sha256":entry["sha256"]})
