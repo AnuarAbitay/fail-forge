@@ -237,14 +237,34 @@ fn forged_project_and_patch_bindings_fail_before_mutating_the_copy() {
 fn copied_target_aliases_and_hardlinks_are_rejected_without_original_writes() {
     for hardlink in [false, true] {
         let fixture = Fixture::new();
+        let source = fixture.project.root.join("lib/value.dart");
+        #[cfg(windows)]
+        fs::set_permissions(&source, crate::test_fs::permissions(0o444)).unwrap();
         let mut workspace = fixture.prepare();
-        let original = fs::read(fixture.project.root.join("lib/value.dart")).unwrap();
+        let original = fs::read(&source).unwrap();
+        #[cfg(windows)]
+        let (original_identity, original_attributes) = {
+            let file = failforge_workspace::windows_fs::regular(&source, false).unwrap();
+            let info = failforge_workspace::windows_fs::information(&file).unwrap();
+            assert_eq!(info.nNumberOfLinks, 1);
+            assert!(crate::test_fs::readonly(&source));
+            (
+                failforge_workspace::windows_fs::identity(&file).unwrap(),
+                info.dwFileAttributes,
+            )
+        };
         let target = workspace.copy_path().join("lib/value.dart");
+        #[cfg(unix)]
         fs::remove_file(&target).unwrap();
+        #[cfg(windows)]
+        failforge_workspace::windows_fs::remove_handle(
+            &failforge_workspace::windows_fs::regular(&target, false).unwrap(),
+        )
+        .unwrap();
         if hardlink {
-            fs::hard_link(fixture.project.root.join("lib/value.dart"), &target).unwrap();
+            fs::hard_link(&source, &target).unwrap();
         } else {
-            symlink(fixture.project.root.join("lib/value.dart"), &target).unwrap();
+            symlink(&source, &target).unwrap();
         }
         assert!(
             workspace
@@ -255,24 +275,39 @@ fn copied_target_aliases_and_hardlinks_are_rejected_without_original_writes() {
                 )
                 .is_err()
         );
-        assert_eq!(
-            fs::read(fixture.project.root.join("lib/value.dart")).unwrap(),
-            original
-        );
+        assert_eq!(fs::read(&source).unwrap(), original);
         #[cfg(windows)]
-        {
-            // Native cleanup rejects hostile reparses/hardlinks rather than
-            // following or deleting them. Remove only this test's own alias.
-            assert!(workspace.cleanup().is_err());
-            assert!(fs::symlink_metadata(&target).is_ok());
-            assert_eq!(
-                fs::read(fixture.project.root.join("lib/value.dart")).unwrap(),
-                original
+        if !hardlink {
+            // Reparse traversal is rejected before cleanup removes any entry.
+            // Remove only this test's own alias, then retry ordinary cleanup.
+            assert!(
+                workspace
+                    .cleanup()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("reparse points")
             );
+            assert!(fs::symlink_metadata(&target).is_ok());
+            assert_eq!(fs::read(&source).unwrap(), original);
             fs::remove_file(&target).unwrap();
             workspace.verify_original().unwrap();
         }
+        // A same-owner hardlink is unlinked by its retained entry, without
+        // clearing the readonly attribute shared with the original inode.
         workspace.cleanup().unwrap();
+        assert_eq!(fs::read(&source).unwrap(), original);
+        #[cfg(windows)]
+        {
+            let file = failforge_workspace::windows_fs::regular(&source, false).unwrap();
+            let info = failforge_workspace::windows_fs::information(&file).unwrap();
+            assert_eq!(
+                failforge_workspace::windows_fs::identity(&file).unwrap(),
+                original_identity
+            );
+            assert_eq!(info.nNumberOfLinks, 1);
+            assert_eq!(info.dwFileAttributes, original_attributes);
+            assert!(crate::test_fs::readonly(&source));
+        }
     }
 }
 
