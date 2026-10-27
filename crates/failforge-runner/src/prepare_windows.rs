@@ -4,7 +4,14 @@ use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io;
 use std::os::windows::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+use std::path::{Component, Path, PathBuf, Prefix};
+use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+use windows_sys::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO,
+    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileIdInfo,
+    GetFileInformationByHandleEx, OPEN_EXISTING,
+};
 
 pub(crate) struct PreparedCommand {
     pub(crate) program: PathBuf,
@@ -55,7 +62,8 @@ pub(crate) fn prepare(spec: &CommandSpec, invocation: &Path) -> io::Result<Prepa
         .iter()
         .find(|(key, _)| env_keys_equal(key, OsStr::new("PATH")))
         .map(|(_, value)| value);
-    let program = resolve_program(&spec.program, &cwd, path)?;
+    let canonical_program = resolve_program(&spec.program, &cwd, path)?;
+    let program = launch_spelling(&canonical_program);
     let mut command_line = Vec::new();
     quote_argument(&mut command_line, program.as_os_str());
     for arg in &spec.args {
@@ -179,6 +187,94 @@ fn resolve_program(program: &OsStr, cwd: &Path, path: Option<&OsString>) -> io::
     Err(io::ErrorKind::NotFound.into())
 }
 
+/// Some Windows runtimes reject verbatim module paths returned by
+/// GetModuleFileNameW. Use an ordinary spelling only when native Win32 lookup
+/// proves that it names the same file as the canonical resolution above.
+fn launch_spelling(canonical: &Path) -> PathBuf {
+    let Some(ordinary) = ordinary_spelling(canonical) else {
+        return canonical.into();
+    };
+    match (file_identity(canonical), file_identity(&ordinary)) {
+        (Ok(expected), Ok(actual)) if expected == actual => ordinary,
+        _ => canonical.into(),
+    }
+}
+
+fn ordinary_spelling(canonical: &Path) -> Option<PathBuf> {
+    let has_trimmed_suffix = |name: &OsStr| matches!(name.encode_wide().last(), Some(0x2e | 0x20));
+    let mut parts = canonical.components();
+    let Component::Prefix(prefix) = parts.next()? else {
+        return None;
+    };
+    let mut ordinary = match prefix.kind() {
+        Prefix::VerbatimDisk(drive) => PathBuf::from(format!("{}:\\", char::from(drive))),
+        Prefix::VerbatimUNC(server, share) => {
+            if has_trimmed_suffix(server) || has_trimmed_suffix(share) {
+                return None;
+            }
+            let mut name = OsString::from(r"\\");
+            name.push(server);
+            name.push(r"\");
+            name.push(share);
+            name.push(r"\");
+            PathBuf::from(name)
+        }
+        _ => return None,
+    };
+    if parts.next()? != Component::RootDir {
+        return None;
+    }
+    for part in parts {
+        let Component::Normal(name) = part else {
+            return None;
+        };
+        // Win32 can trim these suffixes after removing the verbatim prefix.
+        // Retain the literal spelling even if an alias currently has the same ID.
+        if has_trimmed_suffix(name) {
+            return None;
+        }
+        ordinary.push(name);
+    }
+    (ordinary.as_os_str().encode_wide().count() < 260).then_some(ordinary)
+}
+
+fn file_identity(path: &Path) -> io::Result<(u64, [u8; 16])> {
+    let name = wide(path.as_os_str());
+    // SAFETY: direct CreateFileW intentionally observes literal Win32 pathname
+    // semantics. Rust's File::open can add a verbatim prefix and conceal an
+    // ordinary spelling that resolves to a different entry.
+    let handle = unsafe {
+        CreateFileW(
+            name.as_ptr(),
+            FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: successful CreateFileW transferred a unique owned handle.
+    let handle = unsafe { OwnedHandle::from_raw_handle(handle) };
+    let mut info = FILE_ID_INFO::default();
+    // SAFETY: retained live handle and ABI-matching writable information record.
+    if unsafe {
+        GetFileInformationByHandleEx(
+            handle.as_raw_handle(),
+            FileIdInfo,
+            (&mut info as *mut FILE_ID_INFO).cast(),
+            size_of::<FILE_ID_INFO>() as u32,
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok((info.VolumeSerialNumber, info.FileId.Identifier))
+}
+
 /// Microsoft C runtime argv encoding, preserving UTF-16 and empty arguments.
 fn quote_argument(output: &mut Vec<u16>, value: &OsStr) {
     output.push(b'"' as u16);
@@ -215,5 +311,47 @@ mod tests {
             quote_argument(&mut output, OsStr::new(input));
             assert_eq!(String::from_utf16(&output).unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn ordinary_launch_alias_keeps_sensitive_names_even_for_the_same_file() {
+        let root = std::env::temp_dir().join(format!(
+            "ff-launch-alias-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let ordinary = root.join("program.exe");
+        std::fs::write(&ordinary, b"ordinary file").unwrap();
+        let ordinary_alias = ordinary_spelling(&ordinary).unwrap();
+        for suffix in [".", " "] {
+            let mut name = ordinary.as_os_str().to_os_string();
+            name.push(suffix);
+            let canonical = PathBuf::from(name);
+            let mut alias = ordinary_alias.as_os_str().to_os_string();
+            alias.push(suffix);
+            let alias = PathBuf::from(alias);
+            std::fs::write(&canonical, b"distinct verbatim file").unwrap();
+            assert_ne!(
+                file_identity(&canonical).unwrap(),
+                file_identity(&alias).unwrap()
+            );
+            assert_eq!(launch_spelling(&canonical), canonical);
+            std::fs::remove_file(&canonical).unwrap();
+
+            std::fs::hard_link(&ordinary, &canonical).unwrap();
+            assert_eq!(
+                file_identity(&canonical).unwrap(),
+                file_identity(&alias).unwrap()
+            );
+            assert_eq!(launch_spelling(&canonical), canonical);
+            std::fs::remove_file(canonical).unwrap();
+        }
+        std::fs::remove_file(ordinary).unwrap();
+        std::fs::remove_dir(root).unwrap();
     }
 }

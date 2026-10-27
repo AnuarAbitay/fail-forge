@@ -24,6 +24,17 @@ fn run() -> io::Result<u8> {
             }
             Ok(0)
         }
+        "module-path" => {
+            let module = std::env::current_exe()?;
+            let argv0 = std::env::args_os().next().unwrap();
+            writeln!(
+                io::stdout(),
+                "{}",
+                hex(module.as_os_str().as_encoded_bytes())
+            )?;
+            writeln!(io::stdout(), "{}", hex(argv0.as_encoded_bytes()))?;
+            Ok(0)
+        }
         "env" if args.len() == 2 => {
             match std::env::var_os(&args[1]) {
                 Some(value) => writeln!(io::stdout(), "{}", hex(value.as_encoded_bytes()))?,

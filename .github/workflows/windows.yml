@@ -120,7 +120,7 @@ jobs:
           $script = ([Uri](Join-Path $adapter 'bin/failforge_dart_adapter.dart')).AbsoluteUri
           $cases = @(
             @{ Name='ordinary'; Program=$dart; Directory=$adapter; Packages=$packages; Script=$script },
-            @{ Name='verbatim-native-paths'; Program="\\?\$dart"; Directory="\\?\$adapter"; Packages=$packages; Script=$script }
+            @{ Name='verbatim-directory'; Program=$dart; Directory="\\?\$adapter"; Packages=$packages; Script=$script }
           )
           $failed = @()
           foreach ($case in $cases) {

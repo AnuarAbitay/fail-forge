@@ -91,6 +91,25 @@ async fn native_argv_preserves_empty_quotes_metacharacters_unicode_and_surrogate
 }
 
 #[tokio::test]
+async fn canonical_program_uses_verified_ordinary_loaded_module_and_argv0_spelling() {
+    let directory = Directory::new();
+    let path = directory.0.join("native module #%.exe");
+    std::fs::copy(env!("CARGO_BIN_EXE_failforge-process-fixture"), &path).unwrap();
+    let canonical = path.canonicalize().unwrap();
+    let ordinary = canonical.to_str().unwrap().strip_prefix(r"\\?\").unwrap();
+    assert!(!ordinary.starts_with("UNC\\"));
+    let mut command = spec(&["module-path"]);
+    command.program = canonical.as_os_str().into();
+    let result = run(command).await;
+    assert!(result.status.unwrap().success());
+    let expected = hex(OsStr::new(ordinary));
+    assert_eq!(
+        result.stdout.tail,
+        format!("{expected}\n{expected}\n").as_bytes()
+    );
+}
+
+#[tokio::test]
 async fn nonzero_exit_is_ordinary_result_and_both_pipes_drain() {
     let result = run(spec(&["exit", "37"])).await;
     assert_eq!(result.cause, CompletionCause::ProcessCompleted);
