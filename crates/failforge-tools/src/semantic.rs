@@ -165,7 +165,7 @@ pub fn run(options: Options) -> Result<()> {
     let helper = root
         .join("target/debug")
         .join(failforge_config::platform::binary_name("failforge-adapter-campaign").as_ref());
-    let dart = sdk.join("bin").join(failforge_config::platform::DART_BIN);
+    let dart = sdk.join(failforge_config::platform::DART_BIN);
     let adapter = root.join("adapters/dart");
     let tools = [
         catalog_file,

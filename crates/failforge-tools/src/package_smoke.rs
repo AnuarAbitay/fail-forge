@@ -312,12 +312,7 @@ impl Harness {
 
     fn pub_get(&mut self, name: &str, directory: &Path) -> Result<()> {
         let lock = common::hash(&directory.join("pubspec.lock"))?;
-        let mut command = self.command(
-            &self
-                .sdk
-                .join("bin")
-                .join(failforge_config::platform::DART_BIN),
-        );
+        let mut command = self.command(&self.sdk.join(failforge_config::platform::DART_BIN));
         command.current_dir(directory).args([
             "--suppress-analytics",
             "pub",
@@ -373,9 +368,7 @@ impl Harness {
             ("help", executable.clone(), vec!["--help"]),
             (
                 "sdk-version",
-                self.sdk
-                    .join("bin")
-                    .join(failforge_config::platform::DART_BIN),
+                self.sdk.join(failforge_config::platform::DART_BIN),
                 vec!["--version"],
             ),
         ] {
@@ -396,12 +389,7 @@ impl Harness {
         fs::write(project.join("lib/value.dart"), SOURCE)?;
         fs::write(project.join("test/value_test.dart"), TEST)?;
         self.pub_get("subject-pub-get", &project)?;
-        let mut baseline = self.command(
-            &self
-                .sdk
-                .join("bin")
-                .join(failforge_config::platform::DART_BIN),
-        );
+        let mut baseline = self.command(&self.sdk.join(failforge_config::platform::DART_BIN));
         baseline
             .current_dir(&project)
             .args(["--suppress-analytics", "test", "--concurrency", "1"]);
@@ -555,7 +543,7 @@ pub fn run(options: Options) -> Result<()> {
         installation
             .join("bin")
             .join(failforge_config::platform::binary_name("failforge-adapter-campaign").as_ref()),
-        sdk.join("bin").join(failforge_config::platform::DART_BIN),
+        sdk.join(failforge_config::platform::DART_BIN),
     ] {
         let metadata = fs::metadata(&path)?;
         ensure(
