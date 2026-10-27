@@ -685,10 +685,14 @@ report is marked incomplete, with no final score.
 ## Recovery of abandoned working copies
 
 Before allocating working copies, each valid `mutate` campaign asks Rust to scan FailForge's
-private per-user registry, `<system-temporary-directory>/failforge-workspaces-<uid>`.
+private per-user registry in the system temporary directory. On Linux and macOS,
+its name is `failforge-workspaces-<uid>`. Windows uses a compact account-scoped
+name; protected metadata and ACLs validate the full account SID. Use the report's
+`workspaceDirectory` to locate the campaign rather than constructing its path.
 Snapshots and attempts are created inside a registered campaign directory. The
 registry must be outside the target project, dependencies, SDK and controller
-inputs; a `TMPDIR` inside those trees is rejected before creating the registry.
+inputs; a system temporary directory inside those trees is rejected before
+creating the registry.
 The Rust campaign owner holds an operating-system lock throughout execution and
 cleanup. A new campaign removes a registered directory only after acquiring that
 lock. Killing the outer launcher closes its liveness channel and cancels the owner;
