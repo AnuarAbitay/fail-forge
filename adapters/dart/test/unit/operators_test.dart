@@ -21,6 +21,8 @@ import 'package:failforge_dart_adapter/src/protocol/adapter_error.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import '../support/semantic_output.dart';
+
 void main() {
   test(
     'classic registry preserves original IDs and adds the complete catalogue',
@@ -1003,7 +1005,7 @@ Future<List<String>> _executeFiniteFixture(
     final result = await Future.wait<Object>([exitCode, output, errors])
         .timeout(const Duration(seconds: 10));
     expect(result[0], 0, reason: result[2] as String);
-    return (result[1] as String).trim().split('\n');
+    return semanticStdout(result[1] as String).trim().split('\n');
   } finally {
     if (!exited) {
       process.kill(ProcessSignal.sigkill);

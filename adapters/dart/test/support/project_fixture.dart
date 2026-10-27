@@ -45,7 +45,7 @@ class ProjectFixture {
     'limits': {'maxMutants': 1000},
   };
   void write(String file, String source) {
-    final target = File(p.join(root, file));
+    final target = File(p.normalize(p.join(root, file)));
     target.parent.createSync(recursive: true);
     target.writeAsStringSync(source);
   }

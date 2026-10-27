@@ -7,6 +7,8 @@ import 'package:analyzer/file_system/overlay_file_system.dart';
 import 'package:analyzer/file_system/physical_file_system.dart';
 import 'package:path/path.dart' as p;
 
+import 'semantic_output.dart';
+
 /// A real analyzer context over an untouched temporary package. No pub get or
 /// global SDK/settings changes are performed by these tests.
 class AlgebraFixture {
@@ -83,7 +85,7 @@ class AlgebraFixture {
           .timeout(const Duration(seconds: 10));
       if (result[0] != 0)
         throw StateError('Finite fixture failed: ${result[2]}');
-      return (result[1] as String).trim().split('\n');
+      return semanticStdout(result[1] as String).trim().split('\n');
     } finally {
       if (!exited) {
         process.kill(ProcessSignal.sigkill);

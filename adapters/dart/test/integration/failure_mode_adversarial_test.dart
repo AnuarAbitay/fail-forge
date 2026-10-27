@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../support/project_fixture.dart';
+import '../support/semantic_output.dart';
 
 void main() {
   test('part files use the parent library SDK exception prefixes for entry failures', () async {
@@ -135,7 +136,7 @@ void main() {
           .timeout(const Duration(seconds: 10));
       expect(result[0], 0, reason: result[2] as String);
       expect(
-        result[1],
+        semanticStdout(result[1] as String),
         'different-error\nDeferred library errors was not loaded.\n',
       );
     } finally {

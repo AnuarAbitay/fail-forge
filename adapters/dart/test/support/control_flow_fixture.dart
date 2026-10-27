@@ -10,6 +10,8 @@ import 'package:failforge_dart_adapter/src/operators/common.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import 'semantic_output.dart';
+
 /// A real resolved SDK-only package, never pub get. Overlay checks do not write
 /// the original file. Finite VM probes execute only test-owned source copies.
 class ControlFlowFixture {
@@ -29,14 +31,14 @@ class ControlFlowFixture {
     final directory = await Directory.systemTemp.createTemp(
       'ff classical flow ',
     );
-    final path = p.join(directory.path, 'lib/source.dart');
+    final path = p.normalize(p.join(directory.path, 'lib/source.dart'));
     await File(path).parent.create(recursive: true);
     await File(path).writeAsBytes(utf8.encode(source));
     await File(p.join(directory.path, 'pubspec.yaml')).writeAsString(
       'name: flow_fixture\nenvironment:\n  sdk: ">=3.13.0 <4.0.0"\n',
     );
     final config = File(
-      p.join(directory.path, '.dart_tool/package_config.json'),
+      p.normalize(p.join(directory.path, '.dart_tool/package_config.json')),
     );
     await config.parent.create(recursive: true);
     await config.writeAsString(
@@ -111,7 +113,7 @@ class ControlFlowFixture {
       final result = await Future.wait<Object>([exitCode, output, errors])
           .timeout(const Duration(seconds: 10));
       expect(result[0], 0, reason: result[2] as String);
-      return (result[1] as String).trim().split('\n');
+      return semanticStdout(result[1] as String).trim().split('\n');
     } finally {
       if (!exited) {
         process.kill(ProcessSignal.sigkill);

@@ -62,7 +62,9 @@ class AnalysisWorkspace {
     for (final unit in library.units)
       for (final diagnostic in unit.diagnostics)
         {
-          'file': p.relative(unit.path, from: project.packageRoot),
+          'file': p
+              .relative(unit.path, from: project.packageRoot)
+              .replaceAll(p.separator, '/'),
           'code': diagnostic.diagnosticCode.lowerCaseUniqueName,
           'severity': diagnostic.severity.name,
           'message': diagnostic.message,

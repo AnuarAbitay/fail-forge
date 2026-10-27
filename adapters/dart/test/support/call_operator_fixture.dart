@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import 'project_fixture.dart';
+import 'semantic_output.dart';
 
 class CallOperatorFixture {
   CallOperatorFixture._(
@@ -29,7 +30,7 @@ class CallOperatorFixture {
 
   static CallOperatorFixture open(String source) {
     final package = ProjectFixture.create({'lib/source.dart': source});
-    final path = p.join(package.root, 'lib/source.dart');
+    final path = p.normalize(p.join(package.root, 'lib/source.dart'));
     final overlay = OverlayResourceProvider(PhysicalResourceProvider.INSTANCE);
     overlay.setOverlay(path, content: source, modificationStamp: 0);
     final collection = AnalysisContextCollection(
@@ -118,7 +119,7 @@ class CallOperatorFixture {
       final values = await Future.wait<Object>([exit, stdout, stderr])
           .timeout(const Duration(seconds: 10));
       expect(values[0], 0, reason: values[2] as String);
-      return values[1] as String;
+      return semanticStdout(values[1] as String);
     } finally {
       if (!exited) {
         process.kill(ProcessSignal.sigkill);
