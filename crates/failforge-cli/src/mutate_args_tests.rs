@@ -313,7 +313,7 @@ fn sdk_options_are_mutually_exclusive() {
 
 #[test]
 fn native_project_path_bytes_reach_explicit_unicode_validation() {
-    let path = OsString::from_vec(b"project-\xff".to_vec());
+    let path = crate::test_support::raw(b"project-\xff");
     let cli = Cli::try_parse_from([
         OsString::from("failforge"),
         OsString::from("mutate"),

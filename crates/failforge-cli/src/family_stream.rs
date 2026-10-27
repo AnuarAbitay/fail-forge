@@ -1,9 +1,15 @@
 //! Framed execution events with a bounded pipe write and a sealed prefix digest.
+#![cfg(any(unix, test))]
+#[cfg(unix)]
 use std::fs::File;
 use std::io::{self, Write};
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+#[cfg(unix)]
 use std::os::unix::fs::FileTypeExt;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(unix)]
+use std::time::Instant;
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -35,12 +41,32 @@ impl<W: Write> FrameWriter for W {
     }
 }
 
+#[cfg(unix)]
 impl Stream<PipeWriter> {
     pub(crate) fn stdout() -> io::Result<Self> {
-        Ok(Self::new(PipeWriter::from_fd(
-            libc::STDOUT_FILENO,
-            WRITE_TIMEOUT,
-        )?))
+        #[cfg(unix)]
+        {
+            Ok(Self::new(PipeWriter::from_fd(
+                libc::STDOUT_FILENO,
+                WRITE_TIMEOUT,
+            )?))
+        }
+        #[cfg(windows)]
+        {
+            Ok(Self::new(PipeWriter {
+                writer: {
+                    use std::os::windows::io::AsRawHandle;
+                    let file = crate::windows_output::duplicate_stdio(false)?;
+                    if unsafe {
+                        windows_sys::Win32::Storage::FileSystem::GetFileType(file.as_raw_handle())
+                    } != windows_sys::Win32::Storage::FileSystem::FILE_TYPE_PIPE
+                    {
+                        return Err(invalid("family stream requires a private write pipe"));
+                    }
+                    crate::windows_output::Writer::from_file(file, WRITE_TIMEOUT)?
+                },
+            }))
+        }
     }
 }
 
@@ -257,10 +283,12 @@ fn encode(event: &Value, limit: usize) -> io::Result<Vec<u8>> {
 
 /// A private FIFO duplicate. Nonblocking writes and one deadline per frame
 /// prevent a stalled controller from keeping owned attempts alive forever.
+#[cfg(unix)]
 pub(crate) struct PipeWriter {
     file: File,
     timeout: Duration,
 }
+#[cfg(unix)]
 impl PipeWriter {
     fn from_fd(source: RawFd, timeout: Duration) -> io::Result<Self> {
         // SAFETY: duplicate the supplied descriptor without taking ownership.
@@ -368,12 +396,27 @@ impl PipeWriter {
         }
     }
 }
+#[cfg(unix)]
 impl FrameWriter for PipeWriter {
     fn write_frame(&mut self, bytes: &[u8]) -> io::Result<()> {
         self.frame(bytes)
     }
     fn flush_frame(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+#[cfg(windows)]
+pub(crate) struct PipeWriter {
+    writer: crate::windows_output::Writer,
+}
+#[cfg(windows)]
+impl FrameWriter for PipeWriter {
+    fn write_frame(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.writer.write_all_with_timeout(bytes, WRITE_TIMEOUT)
+    }
+    fn flush_frame(&mut self) -> io::Result<()> {
+        self.writer.flush()
     }
 }
 

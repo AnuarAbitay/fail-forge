@@ -1,14 +1,22 @@
 //! Compact campaign progress and descriptor-bound atomic checkpoint writes.
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(unix)]
 use std::fs::File;
-use std::io::{self, Write};
+use std::io;
+#[cfg(unix)]
+use std::io::Write;
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd};
+#[cfg(unix)]
 use std::os::unix::fs::{FileExt, MetadataExt};
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(unix)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
+#[cfg(unix)]
 use sha2::{Digest, Sha256};
 
 use crate::campaign_publish_fs as files;
@@ -559,12 +567,14 @@ pub(crate) fn validate_final(
     Ok(())
 }
 
+#[cfg(unix)]
 struct Existing {
     file: File,
     fingerprint: files::Fingerprint,
     hash: String,
 }
 
+#[cfg(unix)]
 fn existing(root: &File) -> io::Result<Option<Existing>> {
     let name = c"progress.json";
     // SAFETY: the held directory and fixed filename cannot escape the output.
@@ -601,6 +611,7 @@ fn existing(root: &File) -> io::Result<Option<Existing>> {
     }))
 }
 
+#[cfg(unix)]
 fn digest(file: &File, bytes: u64) -> io::Result<String> {
     let mut hash = Sha256::new();
     let mut offset = 0;
@@ -622,12 +633,14 @@ fn digest(file: &File, bytes: u64) -> io::Result<String> {
 
 /// Existing files are checked but never opened for mutation. Only fresh private
 /// stages receive bytes, then one rename replaces the fixed public filename.
+#[cfg(unix)]
 pub(crate) struct Writer {
     path: PathBuf,
     root: File,
     current: Option<Existing>,
 }
 
+#[cfg(unix)]
 impl Writer {
     pub(crate) fn new(path: &Path, root: File) -> io::Result<Self> {
         files::path_text(path)?;
@@ -738,6 +751,12 @@ impl Writer {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "campaign_progress_tests.rs"]
 mod tests;
+
+#[cfg(windows)]
+#[path = "campaign_progress_windows.rs"]
+mod native_writer;
+#[cfg(windows)]
+pub(crate) use native_writer::Writer;

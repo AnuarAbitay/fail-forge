@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(unix)]
 use std::io::Read;
 
 fn rows(bytes: &[u8]) -> Vec<Value> {
@@ -245,6 +246,7 @@ fn flush_failure_preserves_emitted_count_but_cannot_authorize_a_terminal() {
     assert_eq!(terminal.writer.bytes.len(), 5);
 }
 
+#[cfg(unix)]
 fn pipe() -> (File, File) {
     let mut descriptors = [-1; 2];
     // SAFETY: pipe initializes exactly two entries in the local array.
@@ -259,6 +261,7 @@ fn pipe() -> (File, File) {
 }
 
 #[test]
+#[cfg(unix)]
 fn production_writer_requires_a_write_pipe_and_prevents_capability_inheritance() {
     let (read, write) = pipe();
     assert!(PipeWriter::from_fd(read.as_raw_fd(), WRITE_TIMEOUT).is_err());
@@ -280,6 +283,7 @@ fn production_writer_requires_a_write_pipe_and_prevents_capability_inheritance()
 }
 
 #[test]
+#[cfg(unix)]
 fn vanished_reader_returns_broken_pipe_and_frozen_reader_has_bounded_deadline() {
     let (read, write) = pipe();
     let writer = PipeWriter::from_fd(write.as_raw_fd(), Duration::from_millis(100)).unwrap();
@@ -304,6 +308,7 @@ fn vanished_reader_returns_broken_pipe_and_frozen_reader_has_bounded_deadline() 
 }
 
 #[test]
+#[cfg(unix)]
 fn real_pipe_retries_after_backpressure_and_preserves_every_frame_byte() {
     let (mut read, write) = pipe();
     let writer = PipeWriter::from_fd(write.as_raw_fd(), Duration::from_secs(10)).unwrap();

@@ -1,13 +1,16 @@
 use crate::common::{self, Result, ensure};
 use serde_json::Value;
+#[cfg(unix)]
 use std::ffi::CString;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path};
 use std::time::Duration;
 pub const VERSION: &str = "3.47.7";
 const DOWNLOAD_BASE: &str = "https://storage.googleapis.com/flutter_infra_release/releases";
 
+#[cfg(unix)]
 fn publish_directory(source: &Path, destination: &Path) -> Result<()> {
     let source = CString::new(source.as_os_str().as_bytes())?;
     let destination = CString::new(destination.as_os_str().as_bytes())?;
@@ -34,11 +37,16 @@ fn publish_directory(source: &Path, destination: &Path) -> Result<()> {
         ),
     )
 }
+#[cfg(windows)]
+fn publish_directory(source: &Path, destination: &Path) -> Result<()> {
+    common::publish_directory(source, destination)
+}
 fn platform(os: &str, arch: &str) -> Result<(&'static str, &'static str)> {
     let os = match os {
         "macos" => "macos",
         "linux" => "linux",
-        _ => return Err("test SDK installer supports macOS and Linux".into()),
+        "windows" => "windows",
+        _ => return Err("test SDK installer supports macOS, Linux and Windows".into()),
     };
     let arch = match arch {
         "aarch64" | "arm64" => "arm64",
@@ -171,12 +179,14 @@ pub fn install(destination: &Path, version: &str) -> Result<()> {
     let staging = destination.join(format!(".ff-sdk-{}", std::process::id()));
     fs::create_dir(&staging)?;
     let result = (|| -> Result<()> {
-        let mut extract = common::command(Path::new(if name.ends_with(".zip") {
+        let mut extract = common::command(Path::new(if cfg!(windows) {
+            "tar.exe"
+        } else if name.ends_with(".zip") {
             "unzip"
         } else {
             "tar"
         }));
-        if name.ends_with(".zip") {
+        if name.ends_with(".zip") && !cfg!(windows) {
             extract.arg("-q").arg(&archive).arg("-d").arg(&staging);
         } else {
             extract.arg("-xf").arg(&archive).arg("-C").arg(&staging);
@@ -188,7 +198,13 @@ pub fn install(destination: &Path, version: &str) -> Result<()> {
             0,
         )?;
         ensure(
-            staging.join("flutter/bin/flutter").is_file(),
+            staging
+                .join(if cfg!(windows) {
+                    "flutter/bin/cache/dart-sdk/bin/dart.exe"
+                } else {
+                    "flutter/bin/flutter"
+                })
+                .is_file(),
             "archive does not contain Flutter executable",
         )?;
         ensure(
@@ -223,7 +239,7 @@ mod tests {
     fn host_mapping() {
         assert_eq!(platform("macos", "aarch64").unwrap(), ("macos", "arm64"));
         assert_eq!(platform("linux", "x86_64").unwrap(), ("linux", "x64"));
-        assert!(platform("windows", "x86_64").is_err());
+        assert_eq!(platform("windows", "x86_64").unwrap(), ("windows", "x64"));
         assert!(platform("linux", "mips").is_err());
     }
     #[test]

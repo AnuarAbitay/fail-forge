@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Adversarial boundaries use a separate fixture control channel and a fresh
 //! observer runtime; neither captured output nor arbitrary sleeps imply READY.
 

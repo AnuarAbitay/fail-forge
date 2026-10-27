@@ -1,9 +1,14 @@
 //! Path normalization and bounded, nonblocking reads of configuration files.
 
+#[cfg(unix)]
 use std::collections::{HashSet, VecDeque};
-use std::ffi::{CStr, CString, OsString};
+#[cfg(unix)]
+use std::ffi::OsString;
+#[cfg(unix)]
+use std::ffi::{CStr, CString};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read};
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
@@ -31,14 +36,29 @@ pub fn resolve_native_path(value: &Path, name: &str, base: &Path) -> Result<Path
             "{name} must be a nonempty path without NUL"
         )));
     }
-    let expanded = if let Some(rest) = text.strip_prefix('~') {
-        let (user, suffix) = rest.split_once('/').unwrap_or((rest, ""));
-        let home = home_directory(user)
-            .ok_or_else(|| ConfigError::new(format!("{name} cannot be resolved")))?;
-        home.join(suffix.trim_start_matches('/'))
-    } else {
-        value.to_path_buf()
-    };
+    let expanded =
+        if let Some(rest) = text.strip_prefix('~') {
+            let (user, suffix) = rest
+                .split_once(|character| character == '/' || cfg!(windows) && character == '\\')
+                .unwrap_or((rest, ""));
+            let home = home_directory(user)
+                .ok_or_else(|| ConfigError::new(format!("{name} cannot be resolved")))?;
+            home.join(suffix.trim_start_matches(|character| {
+                character == '/' || cfg!(windows) && character == '\\'
+            }))
+        } else {
+            value.to_path_buf()
+        };
+    #[cfg(windows)]
+    if matches!(
+        expanded.components().next(),
+        Some(std::path::Component::Prefix(_))
+    ) && !expanded.is_absolute()
+    {
+        return Err(ConfigError::new(format!(
+            "{name} must not use a drive-relative path"
+        )));
+    }
     let absolute = if expanded.is_absolute() {
         expanded
     } else {
@@ -48,6 +68,7 @@ pub fn resolve_native_path(value: &Path, name: &str, base: &Path) -> Result<Path
         .map_err(|_| ConfigError::new(format!("{name} cannot be resolved")))
 }
 
+#[cfg(unix)]
 fn home_directory(user: &str) -> Option<PathBuf> {
     if user.is_empty() {
         if let Some(home) = std::env::var_os("HOME") {
@@ -103,6 +124,17 @@ fn home_directory(user: &str) -> Option<PathBuf> {
     }
 }
 
+#[cfg(windows)]
+fn home_directory(user: &str) -> Option<PathBuf> {
+    if !user.is_empty() {
+        return None;
+    }
+    std::env::var_os("USERPROFILE")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+#[cfg(unix)]
 fn canonicalize_missing(path: &Path) -> io::Result<PathBuf> {
     enum Part {
         Component(OsString),
@@ -165,15 +197,97 @@ fn canonicalize_missing(path: &Path) -> io::Result<PathBuf> {
     Ok(result)
 }
 
-pub fn read_regular_bytes(path: &Path, limit: usize, follow_symlinks: bool) -> io::Result<Vec<u8>> {
-    let mut flags = libc::O_NONBLOCK | libc::O_CLOEXEC;
-    if !follow_symlinks {
-        flags |= libc::O_NOFOLLOW;
+#[cfg(windows)]
+fn canonicalize_missing(path: &Path) -> io::Result<PathBuf> {
+    use std::path::{Component, Prefix};
+
+    let mut result = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix)
+                if matches!(prefix.kind(), Prefix::DeviceNS(_) | Prefix::Verbatim(_)) =>
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "device paths are not configuration paths",
+                ));
+            }
+            Component::Prefix(_) | Component::RootDir => result.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                result.pop();
+            }
+            Component::Normal(name) => {
+                result.push(name);
+                match fs::symlink_metadata(&result) {
+                    Ok(_) => {
+                        result = fs::canonicalize(&result)?;
+                    }
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                        ) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+        }
     }
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(flags)
-        .open(path)?;
+    if result.to_str().is_none() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "non-Unicode resolved path",
+        ));
+    }
+    Ok(result)
+}
+
+pub fn read_regular_bytes(path: &Path, limit: usize, follow_symlinks: bool) -> io::Result<Vec<u8>> {
+    #[cfg(unix)]
+    let file = {
+        let mut flags = libc::O_NONBLOCK | libc::O_CLOEXEC;
+        if !follow_symlinks {
+            flags |= libc::O_NOFOLLOW;
+        }
+        OpenOptions::new()
+            .read(true)
+            .custom_flags(flags)
+            .open(path)?
+    };
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        use std::os::windows::io::AsRawHandle;
+        use std::path::{Component, Prefix};
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_TYPE_DISK, GetFileType,
+        };
+        if path.components().any(|component| matches!(component, Component::Prefix(prefix) if matches!(prefix.kind(), Prefix::DeviceNS(_) | Prefix::Verbatim(_)))) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "device paths are not regular files"));
+        }
+        let flags = FILE_FLAG_BACKUP_SEMANTICS
+            | if follow_symlinks {
+                0
+            } else {
+                FILE_FLAG_OPEN_REPARSE_POINT
+            };
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(flags)
+            .open(path)?;
+        let metadata = file.metadata()?;
+        // SAFETY: the File keeps its native handle alive through this query.
+        if unsafe { GetFileType(file.as_raw_handle()) } != FILE_TYPE_DISK
+            || !follow_symlinks && metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "input is not a regular file",
+            ));
+        }
+        file
+    };
     if !file.metadata()?.is_file() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,

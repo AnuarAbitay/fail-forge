@@ -1,17 +1,28 @@
-//! A small Rust launcher keeps the cleanup owner alive after controller death.
+//! Unix launcher liveness channel. Windows runs the public campaign in one
+//! native process; owned Job Objects terminate its descendants on process exit.
+#[cfg(unix)]
 use std::ffi::OsStr;
+#[cfg(unix)]
 use std::fs::File;
+#[cfg(unix)]
 use std::io::{self, Read};
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd};
+#[cfg(unix)]
 use std::os::unix::fs::FileTypeExt;
+#[cfg(unix)]
 use std::os::unix::process::{CommandExt, ExitStatusExt};
+#[cfg(unix)]
 use std::process::{Command, ExitCode, Stdio};
 
+#[cfg(unix)]
+use crate::signals::{SignalKind, signal};
+#[cfg(unix)]
 use failforge_workspace::Cancellation;
-use tokio::signal::unix::{SignalKind, signal};
 
 pub(crate) const PARENT_ENV: &str = "FAILFORGE_MUTATION_PARENT_FD";
 
+#[cfg(unix)]
 pub(crate) fn inherited_parent(value: &OsStr) -> io::Result<File> {
     let fd = value
         .to_str()
@@ -37,6 +48,7 @@ pub(crate) fn inherited_parent(value: &OsStr) -> io::Result<File> {
     Ok(file)
 }
 
+#[cfg(unix)]
 pub(crate) fn watch_parent(mut parent: File, cancel: Cancellation) -> io::Result<()> {
     std::thread::Builder::new()
         .name("campaign-parent".into())
@@ -57,6 +69,7 @@ pub(crate) fn watch_parent(mut parent: File, cancel: Cancellation) -> io::Result
     Ok(())
 }
 
+#[cfg(unix)]
 fn pipe() -> io::Result<(File, File)> {
     let mut descriptors = [-1; 2];
     // SAFETY: pipe initializes both elements of this local descriptor array.
@@ -77,6 +90,7 @@ fn pipe() -> io::Result<(File, File)> {
     Ok((private(&source)?, private(&sink)?))
 }
 
+#[cfg(unix)]
 async fn launch() -> io::Result<u8> {
     let mut interrupt = signal(SignalKind::interrupt())?;
     let mut terminate = signal(SignalKind::terminate())?;
@@ -124,6 +138,7 @@ async fn launch() -> io::Result<u8> {
         .clamp(0, 255) as u8)
 }
 
+#[cfg(unix)]
 pub(crate) fn execute() -> ExitCode {
     let result = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
@@ -136,7 +151,7 @@ pub(crate) fn execute() -> ExitCode {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};

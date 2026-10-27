@@ -1,5 +1,7 @@
+#[cfg(unix)]
 use std::ffi::CString;
 use std::io::Read;
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::Path;
 
@@ -49,6 +51,31 @@ pub fn validate_relative_target(file: &str) -> Result<(), PatchError> {
         || (file.as_bytes().get(1) == Some(&b':') && file.as_bytes()[0].is_ascii_alphabetic())
     {
         return Err(PatchError::InvalidPath);
+    }
+    #[cfg(windows)]
+    for part in file.split('/') {
+        let stem = part
+            .split('.')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_uppercase();
+        if part
+            .chars()
+            .any(|character| character < ' ' || "<>:\"|?*".contains(character))
+            || part.ends_with(['.', ' '])
+            || matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || stem
+                .strip_prefix("COM")
+                .or_else(|| stem.strip_prefix("LPT"))
+                .is_some_and(|suffix| {
+                    suffix.chars().count() == 1
+                        && suffix
+                            .chars()
+                            .all(|digit| matches!(digit, '1'..='9' | '¹' | '²' | '³'))
+                })
+        {
+            return Err(PatchError::InvalidPath);
+        }
     }
     Ok(())
 }
@@ -115,8 +142,18 @@ pub(crate) fn read_mutant_source(
 ) -> Result<Vec<u8>, PatchError> {
     validate_relative_target(&mutant.file)?;
     mutant.validate_model()?;
+    #[cfg(windows)]
+    let bound_root = failforge_workspace::windows_fs::directory(root)?;
     let root = root.canonicalize()?;
     if !root.is_dir() {
+        return Err(PatchError::InvalidRoot);
+    }
+    #[cfg(windows)]
+    if failforge_workspace::windows_fs::identity(&bound_root)?
+        != failforge_workspace::windows_fs::identity(&failforge_workspace::windows_fs::directory(
+            &root,
+        )?)?
+    {
         return Err(PatchError::InvalidRoot);
     }
     let mut file = open_relative_regular_file(&root, &mutant.file)?;
@@ -134,6 +171,7 @@ pub(crate) fn read_mutant_source(
     Ok(source)
 }
 
+#[cfg(unix)]
 fn open_relative_regular_file(root: &Path, relative: &str) -> Result<std::fs::File, PatchError> {
     let mut directory = std::fs::File::open(root)?;
     if !directory.metadata()?.is_dir() {
@@ -199,10 +237,28 @@ fn open_relative_regular_file(root: &Path, relative: &str) -> Result<std::fs::Fi
     Err(PatchError::InvalidPath)
 }
 
+#[cfg(windows)]
+fn open_relative_regular_file(root: &Path, relative: &str) -> Result<std::fs::File, PatchError> {
+    use failforge_workspace::windows_fs as fs;
+    use std::ffi::OsStr;
+    let mut directory = fs::directory(root)?;
+    let parts: Vec<_> = relative.split('/').collect();
+    for part in &parts[..parts.len() - 1] {
+        directory = fs::directory_at(&directory, OsStr::new(part))?;
+    }
+    Ok(fs::regular_at(
+        &directory,
+        OsStr::new(parts[parts.len() - 1]),
+        false,
+        false,
+    )?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{ByteEdit, MutationFamily, Symbol, ValidationState};
+    #[cfg(unix)]
     use std::path::PathBuf;
     fn candidate(source: &[u8], offset: u64, expected: &str, replacement: &str) -> Mutant {
         let mut mutant = Mutant {
@@ -308,6 +364,30 @@ mod tests {
             validate_relative_target(valid).unwrap();
         }
     }
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_reject_streams_devices_and_win32_aliases() {
+        for path in [
+            "lib/a.dart:stream",
+            "lib/NUL.dart",
+            "lib/COM1.dart",
+            "lib/COM¹.dart",
+            "lib/LPT³",
+            "lib/LPT9",
+            "lib/name?.dart",
+            "lib/space ",
+            "lib/dot.",
+        ] {
+            assert!(
+                matches!(validate_relative_target(path), Err(PatchError::InvalidPath)),
+                "{path}"
+            );
+        }
+        assert!(validate_relative_target("lib/данные 😀.dart").is_ok());
+        assert!(validate_relative_target("lib/com10.dart").is_ok());
+    }
+
+    #[cfg(unix)]
     #[test]
     fn read_helper_rejects_symlinks_and_never_writes_original() {
         use std::os::unix::fs::symlink;

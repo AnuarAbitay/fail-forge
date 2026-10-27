@@ -1,7 +1,9 @@
 //! Bounded filesystem checks shared by the read-only doctor diagnostic.
+#[cfg(unix)]
 use std::ffi::CString;
 use std::fs;
 use std::io;
+#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
@@ -10,6 +12,11 @@ use failforge_workspace::{PreparedProject, dependency_roots};
 
 const MAX_TEST_ENTRIES: usize = 100_000;
 
+pub(super) const ACCESS_READ: i32 = 4;
+pub(super) const ACCESS_WRITE: i32 = 2;
+pub(super) const ACCESS_EXECUTE: i32 = 1;
+
+#[cfg(unix)]
 pub(super) fn accessible(path: &Path, mode: i32) -> bool {
     let Ok(name) = CString::new(path.as_os_str().as_bytes()) else {
         return false;
@@ -18,8 +25,60 @@ pub(super) fn accessible(path: &Path, mode: i32) -> bool {
     unsafe { libc::access(name.as_ptr(), mode) == 0 }
 }
 
+#[cfg(windows)]
+pub(super) fn accessible(path: &Path, mode: i32) -> bool {
+    use failforge_workspace::windows_fs as win;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::Storage::FileSystem::*;
+    let file = if path.is_dir() {
+        win::directory(path)
+    } else {
+        win::regular(path, false)
+    };
+    let Ok(file) = file else {
+        return false;
+    };
+    let mut access = FILE_READ_ATTRIBUTES;
+    if mode & self::ACCESS_READ != 0 {
+        access |= FILE_GENERIC_READ;
+    }
+    if mode & self::ACCESS_WRITE != 0 {
+        access |= FILE_GENERIC_WRITE;
+    }
+    if mode & self::ACCESS_EXECUTE != 0 {
+        access |= FILE_GENERIC_EXECUTE;
+    }
+    // SAFETY: reopening an owned identity checks requested ACL rights without
+    // writing, truncating, creating or executing anything. The native handle is
+    // closed immediately; all ancestor opens reject reparse points.
+    let handle = unsafe {
+        ReOpenFile(
+            file.as_raw_handle(),
+            access,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return false;
+    }
+    let _handle = unsafe { OwnedHandle::from_raw_handle(handle) };
+    true
+}
+fn alias(metadata: &std::fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        metadata.file_type().is_symlink()
+    }
+    #[cfg(windows)]
+    {
+        failforge_workspace::windows_fs::is_reparse(metadata)
+    }
+}
+
 pub(super) fn executable(path: &Path) -> bool {
-    path.is_file() && accessible(path, libc::X_OK)
+    path.is_file() && accessible(path, ACCESS_EXECUTE)
 }
 
 pub(super) fn readable_regular(path: &Path) -> bool {
@@ -81,7 +140,7 @@ pub(super) fn conventional_tests(root: &Path) -> Result<bool, ()> {
     let test = root.join("test");
     match fs::symlink_metadata(&test) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Ok(metadata) if metadata.is_dir() => (),
+        Ok(metadata) if metadata.is_dir() && !alias(&metadata) => (),
         _ => return Err(()),
     }
     let mut pending = vec![test];
@@ -91,7 +150,11 @@ pub(super) fn conventional_tests(root: &Path) -> Result<bool, ()> {
         for entry in fs::read_dir(directory).map_err(|_| ())? {
             remaining = remaining.checked_sub(1).ok_or(())?;
             let entry = entry.map_err(|_| ())?;
-            let kind = entry.file_type().map_err(|_| ())?;
+            let metadata = entry.metadata().map_err(|_| ())?;
+            if alias(&metadata) {
+                return Err(());
+            }
+            let kind = metadata.file_type();
             if kind.is_dir() {
                 pending.push(entry.path());
             } else if !kind.is_file() {
@@ -117,7 +180,11 @@ pub(super) fn flutter_sdk(config: &CampaignConfig) -> Option<PathBuf> {
             .dart_sdk
             .ancestors()
             .nth(3)
-            .filter(|candidate| candidate.join("bin/flutter").is_file())
+            .filter(|candidate| {
+                candidate
+                    .join(failforge_config::platform::FLUTTER_BIN)
+                    .is_file()
+            })
             .map(Path::to_owned)
     })
 }
@@ -125,6 +192,8 @@ pub(super) fn flutter_sdk(config: &CampaignConfig) -> Option<PathBuf> {
 pub(super) fn flutter_ready(sdk: &Path, dart: &Path) -> bool {
     let host = if cfg!(target_os = "macos") {
         "darwin-x64"
+    } else if cfg!(windows) {
+        "windows-x64"
     } else if cfg!(target_os = "linux") && cfg!(target_arch = "aarch64") {
         "linux-arm64"
     } else {
@@ -137,8 +206,12 @@ pub(super) fn flutter_ready(sdk: &Path, dart: &Path) -> bool {
         .zip(dart.canonicalize().ok())
         .is_some_and(|(bundled, selected)| bundled == selected)
         && sdk.join("packages/flutter").is_dir()
-        && executable(&sdk.join("bin/flutter"))
-        && executable(&engine.join(host).join("flutter_tester"))
+        && executable(&sdk.join(failforge_config::platform::FLUTTER_BIN))
+        && executable(
+            &engine
+                .join(host)
+                .join(failforge_config::platform::FLUTTER_TESTER),
+        )
         && [
             sdk.join("bin/cache/flutter_tools.snapshot"),
             engine.join(host).join("icudtl.dat"),
@@ -164,13 +237,13 @@ pub(super) fn report_destination(
     if !automatic && fs::symlink_metadata(&destination).is_ok() {
         return false;
     }
-    if config.project.starts_with(&destination)
-        || destination.starts_with(&config.project)
-            && !destination.starts_with(config.project.join(".failforge"))
+    if starts(&config.project, &destination)
+        || starts(&destination, &config.project)
+            && !starts(&destination, &config.project.join(".failforge"))
     {
         return false;
     }
-    let overlaps = |input: &Path| destination.starts_with(input) || input.starts_with(&destination);
+    let overlaps = |input: &Path| starts(&destination, input) || starts(input, &destination);
     if [&config.dart_sdk, &config.adapter_root, helper]
         .iter()
         .any(|input| overlaps(input))
@@ -197,7 +270,9 @@ pub(super) fn report_destination(
     for ancestor in destination.ancestors() {
         match fs::symlink_metadata(ancestor) {
             Ok(metadata)
-                if !metadata.is_dir() || !accessible(ancestor, libc::R_OK | libc::X_OK) =>
+                if !metadata.is_dir()
+                    || alias(&metadata)
+                    || !accessible(ancestor, ACCESS_READ | ACCESS_EXECUTE) =>
             {
                 return false;
             }
@@ -209,7 +284,7 @@ pub(super) fn report_destination(
     loop {
         match fs::symlink_metadata(nearest) {
             Ok(metadata) => {
-                return metadata.is_dir() && accessible(nearest, libc::W_OK | libc::X_OK);
+                return metadata.is_dir() && accessible(nearest, ACCESS_WRITE | ACCESS_EXECUTE);
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 let Some(parent) = nearest.parent() else {
@@ -219,5 +294,34 @@ pub(super) fn report_destination(
             }
             _ => return false,
         }
+    }
+}
+
+fn starts(path: &Path, root: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        path.starts_with(root)
+    }
+    #[cfg(windows)]
+    {
+        crate::campaign_workspace::path_starts_with(path, root)
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    #[test]
+    fn native_read_only_access_checks_never_create_destinations() {
+        let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "failforge-doctor-native-{}",
+            failforge_workspace::windows_fs::random_token().unwrap()
+        ));
+        fs::create_dir(&root).unwrap();
+        assert!(accessible(&root, ACCESS_READ | ACCESS_EXECUTE));
+        assert!(accessible(&root, ACCESS_WRITE | ACCESS_EXECUTE));
+        assert!(!accessible(&root.join("missing"), ACCESS_WRITE));
+        assert!(!root.join("missing").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 }

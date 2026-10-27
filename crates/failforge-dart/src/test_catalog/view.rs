@@ -2,7 +2,9 @@
 //! Broad identities preserve the existing selection contract; the stricter
 //! structural view is optional and alone can support setup-suppression evidence.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+#[cfg(unix)]
+use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -216,7 +218,10 @@ pub fn analyze_catalogue(
     // Stack traces may retain the caller's symlink spelling. Preserve that
     // logical absolute cwd for later author-frame matching, while all source
     // containment checks below use the separately resolved filesystem path.
+    #[cfg(unix)]
     let logical_cwd = Path::new("/").join(collapse(&lexical_cwd).join("/"));
+    #[cfg(windows)]
+    let logical_cwd = lexical_absolute(&lexical_cwd);
     let normalized_cwd = resolve_existing(&lexical_cwd)?;
     let mut reporter = Reporter::new(match mode {
         ReporterMode::Dart => "dart",
@@ -528,6 +533,7 @@ fn absolute(path: &Path) -> Result<PathBuf, CatalogError> {
 
 /// Resolve every existing prefix while preserving missing components. This
 /// mirrors Path.resolve(strict=False) and remains usable after baseline cleanup.
+#[cfg(unix)]
 pub(crate) fn resolve_existing(path: &Path) -> Result<PathBuf, CatalogError> {
     let mut pending: VecDeque<_> = absolute(path)?
         .components()
@@ -575,6 +581,50 @@ pub(crate) fn resolve_existing(path: &Path) -> Result<PathBuf, CatalogError> {
     Ok(output)
 }
 
+#[cfg(windows)]
+fn lexical_absolute(path: &Path) -> PathBuf {
+    let mut output = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                output.pop();
+            }
+            Component::CurDir => {}
+            _ => output.push(component.as_os_str()),
+        }
+    }
+    output
+}
+
+#[cfg(windows)]
+pub(crate) fn resolve_existing(path: &Path) -> Result<PathBuf, CatalogError> {
+    let mut output = PathBuf::new();
+    for component in absolute(path)?.components() {
+        match component {
+            Component::ParentDir => {
+                output.pop();
+            }
+            Component::CurDir => {}
+            _ => {
+                output.push(component.as_os_str());
+                if matches!(component, Component::Normal(_)) {
+                    match output.canonicalize() {
+                        Ok(resolved) => output = resolved,
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                            ) => {}
+                        Err(_) => return Err(CatalogError("invalid_author_path")),
+                    }
+                }
+            }
+        }
+    }
+    text(&output)?;
+    Ok(output)
+}
+
 fn relative(value: &str, cwd: &Path) -> Result<String, CatalogError> {
     if value.is_empty() || value.contains('\0') {
         return Err(CatalogError("invalid_author_path"));
@@ -601,7 +651,7 @@ fn relative(value: &str, cwd: &Path) -> Result<String, CatalogError> {
     {
         return Err(CatalogError("non_author_path"));
     }
-    Ok(text(relative)?.to_owned())
+    Ok(text(relative)?.replace(std::path::MAIN_SEPARATOR, "/"))
 }
 
 fn local_uri(uri: &str) -> Result<String, CatalogError> {
@@ -636,16 +686,39 @@ fn local_uri(uri: &str) -> Result<String, CatalogError> {
             index += 1;
         }
     }
-    String::from_utf8(decoded).map_err(|_| CatalogError("invalid_author_uri"))
+    let decoded = String::from_utf8(decoded).map_err(|_| CatalogError("invalid_author_uri"))?;
+    #[cfg(windows)]
+    let decoded = if decoded.as_bytes().get(2) == Some(&b':')
+        && decoded.starts_with('/')
+        && decoded.as_bytes()[1].is_ascii_alphabetic()
+    {
+        decoded[1..].to_owned()
+    } else {
+        decoded
+    };
+    Ok(decoded)
 }
 
 pub(crate) fn path_uri(path: &Path) -> Result<String, CatalogError> {
     if !path.is_absolute() {
         return Err(CatalogError("invalid_author_path"));
     }
-    let mut uri = String::from("file://");
-    for byte in text(path)?.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'.' | b'_' | b'~') {
+    let value = text(path)?;
+    #[cfg(windows)]
+    let value = value
+        .strip_prefix(r"\\?\")
+        .unwrap_or(value)
+        .replace('\\', "/");
+    #[cfg(windows)]
+    if !value.as_bytes().get(1).is_some_and(|byte| *byte == b':') {
+        return Err(CatalogError("non_local_author_path"));
+    }
+    let mut uri = String::from(if cfg!(windows) { "file:///" } else { "file://" });
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric()
+            || matches!(byte, b'/' | b'-' | b'.' | b'_' | b'~')
+            || (cfg!(windows) && byte == b':')
+        {
             uri.push(byte as char);
         } else {
             use std::fmt::Write;
@@ -687,6 +760,32 @@ fn collapse(path: &Path) -> Vec<String> {
 }
 
 fn relative_lexical(path: &Path, cwd: &Path) -> String {
+    #[cfg(windows)]
+    let normalized = |path: &Path| {
+        let value = path.to_string_lossy();
+        if let Some(unc) = value.strip_prefix(r"\\?\UNC\") {
+            PathBuf::from(format!(r"\\{unc}"))
+        } else {
+            PathBuf::from(value.strip_prefix(r"\\?\").unwrap_or(&value))
+        }
+    };
+    #[cfg(windows)]
+    let (target_path, base_path) = (normalized(path), normalized(cwd));
+    #[cfg(windows)]
+    let (path, cwd) = (target_path.as_path(), base_path.as_path());
+    #[cfg(windows)]
+    if !path
+        .components()
+        .next()
+        .zip(cwd.components().next())
+        .is_some_and(|(left, right)| {
+            left.as_os_str()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&right.as_os_str().to_string_lossy())
+        })
+    {
+        return path.to_string_lossy().replace('\\', "/");
+    }
     let target = collapse(path);
     let base = collapse(cwd);
     let common = target

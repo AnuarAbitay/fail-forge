@@ -1,7 +1,9 @@
 //! Namespace isolation regressions and transaction fault injection.
+use crate::test_fs::symlink;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -24,7 +26,19 @@ struct Fixture {
 fn put(root: &Path, name: &str, bytes: impl AsRef<[u8]>) {
     let path = root.join(name);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
+    #[cfg(unix)]
     fs::write(path, bytes).unwrap();
+    #[cfg(windows)]
+    {
+        use failforge_workspace::windows_fs;
+        use std::io::Write;
+        let parent = windows_fs::directory(path.parent().unwrap()).unwrap();
+        let exists = path.exists();
+        let mut file =
+            windows_fs::regular_at(&parent, path.file_name().unwrap(), true, !exists).unwrap();
+        file.set_len(0).unwrap();
+        file.write_all(bytes.as_ref()).unwrap();
+    }
 }
 
 fn copy_tree(source: &Path, destination: &Path) {
@@ -34,7 +48,17 @@ fn copy_tree(source: &Path, destination: &Path) {
         if entry.file_type().unwrap().is_dir() {
             copy_tree(&entry.path(), &destination.join(entry.file_name()));
         } else {
+            #[cfg(unix)]
             fs::copy(entry.path(), destination.join(entry.file_name())).unwrap();
+            #[cfg(windows)]
+            {
+                use failforge_workspace::windows_fs;
+                use std::io::Write;
+                let parent = windows_fs::directory(destination).unwrap();
+                let mut file =
+                    windows_fs::regular_at(&parent, &entry.file_name(), true, true).unwrap();
+                file.write_all(&fs::read(entry.path()).unwrap()).unwrap();
+            }
         }
     }
 }
@@ -48,7 +72,11 @@ fn snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
                 walk(root, &path, out);
             } else if entry.file_type().unwrap().is_file() {
                 out.insert(
-                    path.strip_prefix(root).unwrap().to_str().unwrap().into(),
+                    path.strip_prefix(root)
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .replace(std::path::MAIN_SEPARATOR, "/"),
                     fs::read(path).unwrap(),
                 );
             }
@@ -86,7 +114,7 @@ impl Fixture {
             ".dart_tool/package_graph.json",
             br#"{"roots":["subject"]}"#,
         );
-        let config = json!({"configVersion":2,"packages":[{"name":"subject","rootUri":"../","packageUri":"lib/","languageVersion":"3.13"},{"name":"test","rootUri":format!("file://{}/",dependency.display()),"packageUri":"lib/"}],"metadata":{"unicode":"Ж😀","large":u64::MAX,"negative":i64::MIN,"fraction":0.12345678901234567_f64}});
+        let config = json!({"configVersion":2,"packages":[{"name":"subject","rootUri":"../","packageUri":"lib/","languageVersion":"3.13"},{"name":"test","rootUri":format!("{}/",crate::test_catalog::path_uri(&dependency).unwrap()),"packageUri":"lib/"}],"metadata":{"unicode":"Ж😀","large":u64::MAX,"negative":i64::MIN,"fraction":0.12345678901234567_f64}});
         put(
             &original,
             ".dart_tool/package_config.json",
@@ -129,12 +157,17 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
+        #[cfg(windows)]
+        {
+            crate::test_fs::remove_tree(&self.base);
+        }
+        #[cfg(unix)]
         fn writable(path: &Path) {
             let Ok(info) = fs::symlink_metadata(path) else {
                 return;
             };
             if info.is_dir() {
-                let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
+                let _ = fs::set_permissions(path, crate::test_fs::permissions(0o700));
                 if let Ok(entries) = fs::read_dir(path) {
                     for entry in entries.flatten() {
                         writable(&entry.path());
@@ -142,8 +175,11 @@ impl Drop for Fixture {
                 }
             }
         }
-        writable(&self.base);
-        let _ = fs::remove_dir_all(&self.base);
+        #[cfg(unix)]
+        {
+            writable(&self.base);
+            let _ = fs::remove_dir_all(&self.base);
+        }
     }
 }
 
@@ -160,6 +196,7 @@ impl Drop for Hook {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn posix_sync_preserves_regular_file_bytes_and_directory_entries() {
     let fixture = Fixture::new();
@@ -175,6 +212,7 @@ fn posix_sync_preserves_regular_file_bytes_and_directory_entries() {
     assert_eq!(snapshot(&fixture.copy), before);
 }
 
+#[cfg(unix)]
 #[test]
 fn posix_sync_propagates_a_non_filesystem_descriptor_error() {
     use std::os::fd::FromRawFd;
@@ -201,12 +239,12 @@ fn minimal_prefix_edits_preserve_upstream_framework_modes_and_config_values() {
         serde_json::from_slice(&original[".dart_tool/package_config.json"]).unwrap();
     fs::set_permissions(
         fixture.copy.join("test/main.dart"),
-        fs::Permissions::from_mode(0o444),
+        crate::test_fs::permissions(0o444),
     )
     .unwrap();
     fs::set_permissions(
         fixture.copy.join(".dart_tool/package_config.json"),
-        fs::Permissions::from_mode(0o444),
+        crate::test_fs::permissions(0o444),
     )
     .unwrap();
     let proof = fixture.run(None, &Cancellation::default()).unwrap();
@@ -269,6 +307,8 @@ fn minimal_prefix_edits_preserve_upstream_framework_modes_and_config_values() {
             .contains("%20")
     );
     for name in ["test/main.dart", ".dart_tool/package_config.json"] {
+        assert!(crate::test_fs::readonly(fixture.copy.join(name)));
+        #[cfg(unix)]
         assert_eq!(
             fs::metadata(fixture.copy.join(name)).unwrap().mode() & 0o777,
             0o444
@@ -292,8 +332,10 @@ fn copied_metadata_cannot_redirect_verified_imports_or_change_dependency_semanti
             3 => {
                 let replacement = fixture.base.join("foreign test");
                 put(&replacement, "bin/test.dart", b"void main() {}");
-                config["packages"][1]["rootUri"] =
-                    json!(format!("file://{}/", replacement.display()));
+                config["packages"][1]["rootUri"] = json!(format!(
+                    "{}/",
+                    crate::test_catalog::path_uri(&replacement).unwrap()
+                ));
             }
             _ => put(
                 &fixture.copy,
@@ -323,7 +365,10 @@ fn legitimate_rebased_dependencies_shared_framework_and_short_alias_are_supporte
     let fixture = Fixture::new();
     let original_path = fixture.original.join(".dart_tool/package_config.json");
     let mut original: Value = serde_json::from_slice(&fs::read(&original_path).unwrap()).unwrap();
-    original["packages"][0]["rootUri"] = json!(format!("file://{}/", fixture.original.display()));
+    original["packages"][0]["rootUri"] = json!(format!(
+        "{}/",
+        crate::test_catalog::path_uri(&fixture.original).unwrap()
+    ));
     original["packages"][1]["rootUri"] = json!("../../test dependency Ж/");
     fs::write(&original_path, serde_json::to_vec(&original).unwrap()).unwrap();
     // Snapshot config has already rebased the same dependency to an absolute

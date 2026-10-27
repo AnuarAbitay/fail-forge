@@ -1,7 +1,7 @@
 use super::*;
 
 fn value() -> Value {
-    json!({"operation":"campaign","mode":"profile",
+    crate::test_support::paths(json!({"operation":"campaign","mode":"profile",
         "project":{"root":"/tmp/snapshot","name":"subject","packages":{"subject":"/tmp/snapshot"},
             "graph":{},"flutter":false,"frameworkCollision":false},
         "original":{"root":"/tmp/original","hashes":{}},"output":"/tmp/reports",
@@ -13,7 +13,7 @@ fn value() -> Value {
             {"family":"language_specific","rules":{"operators":["NSM-001"]},"workers":1,
                 "config":{"commandTimeout":"6s","testTimeout":"1s"}},
             {"family":"classic","rules":{"operators":["BOOLEAN_LITERAL_FLIP"]},"workers":2,
-                "config":{"commandTimeout":"6s","testTimeout":"1s"}}]})
+                "config":{"commandTimeout":"6s","testTimeout":"1s"}}]}))
 }
 fn request(value: &Value) -> Result<Request, NamespaceError> {
     decode(&serde_json::to_vec(value).unwrap())
@@ -36,7 +36,10 @@ fn canonical_profile_order_and_direct_scope_keep_distinct_empty_and_limit_polici
         empty.empty_policy,
         crate::family_execution::EmptyPolicy::Skip
     );
-    assert_eq!(empty.output, PathBuf::from("/tmp/reports/families/classic"));
+    assert_eq!(
+        empty.output,
+        crate::test_support::absolute("/tmp/reports/families/classic")
+    );
     input["mode"] = "direct".into();
     assert!(request(&input).is_err());
     input["families"].as_array_mut().unwrap().truncate(1);
@@ -47,7 +50,7 @@ fn canonical_profile_order_and_direct_scope_keep_distinct_empty_and_limit_polici
         empty.empty_policy,
         crate::family_execution::EmptyPolicy::Controls
     );
-    assert_eq!(empty.output, PathBuf::from("/tmp/reports"));
+    assert_eq!(empty.output, crate::test_support::absolute("/tmp/reports"));
 }
 
 #[test]

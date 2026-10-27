@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::OwnedFd;

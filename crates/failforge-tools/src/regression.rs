@@ -5,7 +5,9 @@ use clap::{Args, ValueEnum};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::fs::{self, File};
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
+#[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -43,17 +45,9 @@ pub struct Options {
     suite: Suite,
 }
 fn file_uri(path: &Path) -> Result<String> {
-    let path = path.to_str().ok_or("non-UTF-8 prepared dependency path")?;
-    let mut uri = String::from("file://");
-    for byte in path.bytes() {
-        if byte.is_ascii_alphanumeric() || b"/-_.~".contains(&byte) {
-            uri.push(byte as char);
-        } else {
-            uri.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    Ok(uri)
+    Ok(failforge_workspace::file_uri(path)?)
 }
+
 fn fixture(root: &Path, path: &Path, source: &str, tests: &str) -> Result<PathBuf> {
     let adapter = root.join("adapters/dart");
     let config_path = adapter.join(".dart_tool/package_config.json");
@@ -103,7 +97,7 @@ pub(crate) fn summary_contract(summary: &Value, stdout: &[u8]) -> Result<()> {
     )?;
     let output = summary["output"].as_str().ok_or("missing summary output")?;
     ensure(
-        text.contains(&format!("{output}/summary.json")),
+        text.contains(&Path::new(output).join("summary.json").display().to_string()),
         "terminal report path mismatch",
     )?;
     let records = summary["records"]
@@ -170,13 +164,20 @@ struct Harness {
 }
 impl Harness {
     fn command(&self) -> std::process::Command {
-        let mut command = common::command(&self.binary_dir.join("failforge"));
+        let mut command = common::command(
+            &self
+                .binary_dir
+                .join(failforge_config::platform::binary_name("failforge").as_ref()),
+        );
         command
             .current_dir(&self.root)
             .env("XDG_CONFIG_HOME", self.output.join("tool-state"))
             .env("PUB_CACHE", self.root.join(".toolchain/pub-cache"));
         if let Some(root) = &self.temp_root {
-            command.env("TMPDIR", root);
+            command
+                .env("TMPDIR", root)
+                .env("TMP", root)
+                .env("TEMP", root);
         }
         command
     }
@@ -751,7 +752,7 @@ impl Harness {
                 .stderr(File::create(logs.join("stderr.log"))?);
             println!("regression {name}");
             let start = Instant::now();
-            let mut owner = common::OwnedChild::new(cmd.spawn()?);
+            let mut owner = common::OwnedChild::spawn(&mut cmd)?;
             let mut observed = false;
             while start.elapsed() < Duration::from_secs(120) && owner.0.try_wait()?.is_none() {
                 common::check_interrupt()?;
@@ -778,6 +779,7 @@ impl Harness {
         Ok(())
     }
 
+    #[cfg(unix)]
     fn recovery(&mut self) -> Result<()> {
         let project = fixture(
             &self.root,
@@ -844,7 +846,7 @@ impl Harness {
             .stdout(File::create(logs.join("stdout.log"))?)
             .stderr(File::create(logs.join("stderr.log"))?);
         let start = Instant::now();
-        let mut controller = common::OwnedChild::new(cmd.spawn()?);
+        let mut controller = common::OwnedChild::spawn(&mut cmd)?;
         while !author_started(&destination, "loop")? {
             common::check_interrupt()?;
             ensure(
@@ -956,6 +958,62 @@ impl Harness {
         );
         self.temp_root = None;
         fs::remove_dir_all(temp_root)?;
+        Ok(())
+    }
+    #[cfg(windows)]
+    fn recovery(&mut self) -> Result<()> {
+        let project = fixture(
+            &self.root,
+            &self.output.join("recovery-subject"),
+            SOURCE,
+            TESTS,
+        )?;
+        let temporary = common::Temporary::new("ff-ws")?;
+        self.temp_root = Some(temporary.0.clone());
+        let registry = temporary
+            .0
+            .join(format!("failforge-workspaces-{}", common::account_id()?));
+        let cancel = failforge_workspace::Cancellation::default();
+        let abandoned = failforge_workspace::lifecycle::start(&registry, &cancel)?;
+        let abandoned_name = abandoned.campaign_name.clone();
+        let allocation = failforge_workspace::lifecycle::allocate(
+            &registry,
+            &abandoned_name,
+            abandoned.caps.try_clone()?,
+            "snapshot",
+            &cancel,
+        )?;
+        fs::write(allocation.path.join("fixture"), b"abandoned")?;
+        let mut empty = profile();
+        empty["mutations"]
+            .as_object_mut()
+            .unwrap()
+            .retain(|key, _| key == "classic");
+        empty["rules"]["methods"] = json!(["noSuchMethod"]);
+        let active = self.configured("active-owner-preserved", &project, empty.clone(), 0)?;
+        ensure(
+            active["workspaceRecovery"]["skipped"]
+                .as_array()
+                .is_some_and(|rows| {
+                    rows.iter()
+                        .any(|row| row["name"] == abandoned_name && row["reason"] == "active_lease")
+                }),
+            "active Windows shared lease was not preserved",
+        )?;
+        drop(abandoned);
+        let recovered = self.configured("stale-lease-recovered", &project, empty, 0)?;
+        ensure(
+            recovered["workspaceRecovery"]["recovered"]
+                .as_array()
+                .is_some_and(|rows| rows.contains(&json!(abandoned_name))),
+            "released Windows lease not recovered",
+        )?;
+        ensure(
+            !registry.join(&abandoned_name).exists(),
+            "stale directory remains",
+        )?;
+        self.reports.push(json!({"name":"windows-shared-lease-recovery", "activeNativeOwnerProtected":true, "staleLeaseRecovered":true, "registryClean":true}));
+        self.temp_root = None;
         Ok(())
     }
     fn applicability(&mut self) -> Result<()> {
@@ -1199,12 +1257,14 @@ fn full_score(score: &Value) -> Result<()> {
     )
 }
 
+#[cfg(unix)]
 fn recovery_temporary() -> Result<common::Temporary> {
     // macOS sockaddr_un paths are limited to 104 bytes; an inherited TMPDIR
     // plus a nested registry can exceed the limit before the SDK creates one.
     common::Temporary::new_in(Path::new("/tmp"), "ff-ws")
 }
 
+#[cfg(unix)]
 fn lease_busy(lease: &File) -> Result<bool> {
     let result = unsafe { libc::flock(lease.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
     if result == 0 {
@@ -1220,6 +1280,7 @@ fn lease_busy(lease: &File) -> Result<bool> {
         Err(error.into())
     }
 }
+#[cfg(unix)]
 fn watchdog_complete(summary: &Value) -> Result<()> {
     ensure(
         summary["status"] == "cancelled"
@@ -1231,6 +1292,7 @@ fn watchdog_complete(summary: &Value) -> Result<()> {
     )?;
     expect_counts(summary, json!({"CANCELLED":1}))
 }
+#[cfg(unix)]
 fn wait_watchdog_summary(path: &Path, budget: Duration) -> Result<()> {
     let start = Instant::now();
     loop {
@@ -1353,7 +1415,7 @@ pub fn run(options: Options) -> Result<()> {
     )?;
     Ok(())
 }
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     #[test]
@@ -1517,6 +1579,6 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "regression_adversarial_tests.rs"]
 mod adversarial_tests;

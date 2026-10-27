@@ -1,6 +1,8 @@
 //! Bounded terminal delivery never owns campaign cleanup or a workspace lease.
+#[cfg(unix)]
 use std::fs::File;
 use std::io::{self, Write};
+#[cfg(unix)]
 use std::os::fd::{FromRawFd, RawFd};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -15,6 +17,7 @@ pub(crate) struct Display {
     failure: Arc<Mutex<Option<String>>>,
 }
 
+#[cfg(unix)]
 fn duplicate(fd: RawFd) -> io::Result<File> {
     // SAFETY: borrow the standard descriptor; adopt only the new owned duplicate.
     let fd = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) };
@@ -26,10 +29,20 @@ fn duplicate(fd: RawFd) -> io::Result<File> {
 
 impl Display {
     pub(crate) fn stdio() -> io::Result<Self> {
-        Self::start(
-            duplicate(libc::STDOUT_FILENO)?,
-            duplicate(libc::STDERR_FILENO)?,
-        )
+        #[cfg(unix)]
+        {
+            Self::start(
+                duplicate(libc::STDOUT_FILENO)?,
+                duplicate(libc::STDERR_FILENO)?,
+            )
+        }
+        #[cfg(windows)]
+        {
+            Self::start(
+                crate::windows_output::Writer::stdio(false, Duration::from_millis(250))?,
+                crate::windows_output::Writer::stdio(true, Duration::from_millis(250))?,
+            )
+        }
     }
 
     fn start(

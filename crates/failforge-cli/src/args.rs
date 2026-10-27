@@ -1,5 +1,8 @@
 use std::ffi::OsString;
+#[cfg(unix)]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
+#[cfg(windows)]
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -31,36 +34,47 @@ pub(crate) enum Commands {
     Profile(ProfileArgs),
     /// Internal prepared-input operations for the campaign controller.
     #[command(hide = true)]
+    #[cfg(unix)]
     WorkspaceInputs,
     /// Internal leased workspace lifecycle for the campaign controller.
     #[command(hide = true)]
+    #[cfg(unix)]
     WorkspaceLifecycle,
     /// Internal Dart namespace planning and isolated byte rewriting.
     #[command(hide = true)]
+    #[cfg(unix)]
     DartNamespace,
     /// Internal complete test attempt owned by one native process.
     #[command(hide = true)]
+    #[cfg(unix)]
     TestAttempt,
     /// Internal owned adapter discovery and source-bound validation.
     #[command(hide = true)]
+    #[cfg(unix)]
     AdapterDiscover,
     /// Internal complete mutant execution and causal controls.
     #[command(hide = true)]
+    #[cfg(unix)]
     MutantExecute,
     /// Internal bounded family execution with streamed completions.
     #[command(hide = true)]
+    #[cfg(unix)]
     FamilyExecute,
     /// Private campaign discovery and family scheduling operation.
     #[command(hide = true)]
+    #[cfg(unix)]
     CampaignExecute,
     /// Private owner of preflight, snapshot, campaign execution and cleanup.
     #[command(hide = true)]
+    #[cfg(unix)]
     CampaignRun,
     /// Private pure final summary and terminal rendering operation.
     #[command(hide = true)]
+    #[cfg(unix)]
     CampaignReport,
     /// Private descriptor-bound atomic publication of final campaign reports.
     #[command(hide = true)]
+    #[cfg(unix)]
     CampaignPublish,
 }
 
@@ -500,6 +514,7 @@ fn config_error(message: impl Into<String>) -> clap::Error {
     Cli::command().error(ErrorKind::ValueValidation, message.into())
 }
 
+#[cfg(unix)]
 fn split_env_assignment(assignment: OsString) -> Result<(OsString, OsString), clap::Error> {
     let bytes = assignment.as_os_str().as_bytes();
     let separator = bytes
@@ -509,6 +524,19 @@ fn split_env_assignment(assignment: OsString) -> Result<(OsString, OsString), cl
     Ok((
         OsString::from_vec(bytes[..separator].to_vec()),
         OsString::from_vec(bytes[separator + 1..].to_vec()),
+    ))
+}
+
+#[cfg(windows)]
+fn split_env_assignment(assignment: OsString) -> Result<(OsString, OsString), clap::Error> {
+    let units = assignment.encode_wide().collect::<Vec<_>>();
+    let separator = units
+        .iter()
+        .position(|unit| *unit == u16::from(b'='))
+        .ok_or_else(|| config_error("--env requires KEY=VALUE"))?;
+    Ok((
+        OsString::from_wide(&units[..separator]),
+        OsString::from_wide(&units[separator + 1..]),
     ))
 }
 

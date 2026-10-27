@@ -1,9 +1,11 @@
 use super::*;
+use crate::test_fs::symlink;
 use crate::{ByteEdit, MutationFamily, Symbol, ValidationState};
 use failforge_workspace::lifecycle::{self, StartResult};
 use serde_json::json;
 use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -47,7 +49,7 @@ impl Fixture {
             "test/value_test.dart",
             b"import 'package:subject/value.dart';\n",
         );
-        put(&root, ".dart_tool/package_config.json", serde_json::to_vec(&json!({"configVersion":2,"packages":[{"name":"subject","rootUri":"../","packageUri":"lib/"},{"name":"test","rootUri":format!("file://{}/",dependency.display()),"packageUri":"lib/"}]})).unwrap());
+        put(&root, ".dart_tool/package_config.json", serde_json::to_vec(&json!({"configVersion":2,"packages":[{"name":"subject","rootUri":"../","packageUri":"lib/"},{"name":"test","rootUri":format!("{}/",crate::test_catalog::path_uri(&dependency).unwrap()),"packageUri":"lib/"}]})).unwrap());
         put(&root, ".dart_tool/package_graph.json", br#"{"roots":["subject"],"packages":[{"name":"subject","dependencies":["test"]},{"name":"test","dependencies":[]}]}"#);
         let project = inspect_project(&root, &Cancellation::default()).unwrap();
         let campaign = lifecycle::start(&base.join("registry"), &Cancellation::default()).unwrap();
@@ -99,19 +101,27 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
+        #[cfg(windows)]
+        {
+            crate::test_fs::remove_tree(&self.base);
+        }
+        #[cfg(unix)]
         fn writable(path: &Path) {
             if !fs::symlink_metadata(path).is_ok_and(|m| m.is_dir()) {
                 return;
             }
-            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
+            let _ = fs::set_permissions(path, crate::test_fs::permissions(0o700));
             if let Ok(entries) = fs::read_dir(path) {
                 for entry in entries.flatten() {
                     writable(&entry.path());
                 }
             }
         }
-        writable(&self.base);
-        let _ = fs::remove_dir_all(&self.base);
+        #[cfg(unix)]
+        {
+            writable(&self.base);
+            let _ = fs::remove_dir_all(&self.base);
+        }
     }
 }
 
@@ -120,7 +130,7 @@ fn fresh_copy_namespace_readonly_patch_seal_verify_and_idempotent_cleanup() {
     let fixture = Fixture::new();
     fs::set_permissions(
         fixture.project.root.join("lib/value.dart"),
-        fs::Permissions::from_mode(0o444),
+        crate::test_fs::permissions(0o444),
     )
     .unwrap();
     let before = source_hashes(&fixture.project.root, &Cancellation::default()).unwrap();
@@ -146,6 +156,7 @@ fn fresh_copy_namespace_readonly_patch_seal_verify_and_idempotent_cleanup() {
         fs::read(workspace.copy_path().join("lib/value.dart")).unwrap(),
         patched
     );
+    #[cfg(unix)]
     assert_eq!(
         fs::metadata(workspace.copy_path().join("lib/value.dart"))
             .unwrap()
@@ -154,6 +165,9 @@ fn fresh_copy_namespace_readonly_patch_seal_verify_and_idempotent_cleanup() {
             & 0o777,
         0o444
     );
+    assert!(crate::test_fs::readonly(
+        workspace.copy_path().join("lib/value.dart")
+    ));
     let hashes = workspace.seal(&Cancellation::default()).unwrap();
     assert_eq!(hashes[Path::new("lib/value.dart")], sha256_hex(patched));
     workspace.verify_execution_inputs().unwrap();
@@ -315,7 +329,7 @@ fn replaced_allocation_is_never_removed_and_can_be_restored_for_retry() {
     let moved = fixture.base.join("retained original allocation");
     fs::rename(&allocation, &moved).unwrap();
     fs::create_dir(&allocation).unwrap();
-    fs::set_permissions(&allocation, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::set_permissions(&allocation, crate::test_fs::permissions(0o700)).unwrap();
     fs::write(allocation.join("foreign"), b"keep").unwrap();
     assert!(
         workspace
@@ -381,7 +395,7 @@ fn protected_input_overlap_fails_but_sibling_snapshot_in_same_registry_is_allowe
         .join(&fixture.campaign.campaign_name)
         .join("work/snapshot-01234567890123456789012345678901");
     fs::create_dir(&snapshot).unwrap();
-    fs::set_permissions(&snapshot, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::set_permissions(&snapshot, crate::test_fs::permissions(0o700)).unwrap();
     let project = copy_project(
         &fixture.project.root,
         &snapshot.join("package"),

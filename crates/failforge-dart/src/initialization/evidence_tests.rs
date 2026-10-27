@@ -45,7 +45,7 @@ fn observed(body: &str, stack: &str) -> InitializationObservation {
     );
     analyze_initialization_evidence(
         &raw,
-        Path::new("/missing/initialization"),
+        &crate::test_fs::absolute("/missing/initialization"),
         ReporterMode::Dart,
         &classified(&raw, ReporterMode::Dart),
         Some(&json!({"file":"lib/subject.dart"})),
@@ -174,6 +174,8 @@ fn null_fallback_requires_narrow_author_and_framework_stack() {
 #[test]
 fn normalization_preserves_error_line_padding_and_replay_identity() {
     let evidence = |cwd: &str, column: u32| {
+        let native = crate::test_fs::absolute(cwd);
+        let cwd = native.to_str().unwrap();
         let suite = format!("{cwd}/test/author_test.dart");
         let stack =
             format!("package:subject/subject.dart 2:1 initialize\n{suite} 3:{column} main\n");
@@ -223,7 +225,7 @@ fn unsafe_targets_never_supply_subject_or_null_signatures() {
             );
             let actual = analyze_initialization_evidence(
                 &raw,
-                Path::new("/missing/init"),
+                &crate::test_fs::absolute("/missing/init"),
                 ReporterMode::Dart,
                 &classified(&raw, ReporterMode::Dart),
                 Some(&json!({"file":target})),
@@ -240,7 +242,7 @@ fn suites_are_sorted_complete_and_reject_aliases_escaping_root() {
     let raw = capture(&[("test/z.dart", None), ("test/a.dart", None)], true);
     let actual = analyze_initialization_evidence(
         &raw,
-        Path::new("/missing/init"),
+        &crate::test_fs::absolute("/missing/init"),
         ReporterMode::Flutter,
         &json!({}),
         None,
@@ -256,7 +258,7 @@ fn suites_are_sorted_complete_and_reject_aliases_escaping_root() {
         assert!(
             analyze_initialization_evidence(
                 &capture(&suites, false),
-                Path::new("/missing/init"),
+                &crate::test_fs::absolute("/missing/init"),
                 ReporterMode::Dart,
                 &json!({}),
                 None,
@@ -279,7 +281,7 @@ fn redundant_dot_in_suite_is_normalized_before_frame_matching() {
     );
     let actual = analyze_initialization_evidence(
         &raw,
-        Path::new("/missing/init"),
+        &crate::test_fs::absolute("/missing/init"),
         ReporterMode::Dart,
         &classified(&raw, ReporterMode::Dart),
         Some(&json!({"file":"lib/subject.dart"})),
@@ -292,7 +294,7 @@ fn redundant_dot_in_suite_is_normalized_before_frame_matching() {
 
 #[test]
 fn symlink_cwd_preserves_logical_frames_but_checks_physical_containment() {
-    use std::os::unix::fs::symlink;
+    use crate::test_fs::symlink;
     let temporary = std::env::temp_dir().join(format!("ff-init-symlink-{}", std::process::id()));
     std::fs::create_dir_all(temporary.join("project/test")).unwrap();
     struct Cleanup(PathBuf);
@@ -354,7 +356,7 @@ fn invalid_incomplete_or_duplicate_json_never_has_suites() {
         assert!(
             analyze_initialization_evidence(
                 &raw,
-                Path::new("/missing/init"),
+                &crate::test_fs::absolute("/missing/init"),
                 ReporterMode::Dart,
                 &json!({}),
                 None,
@@ -387,7 +389,7 @@ fn modified_or_partial_primary_evidence_cannot_supply_signature() {
         assert!(
             analyze_initialization_evidence(
                 &raw,
-                Path::new("/missing/init"),
+                &crate::test_fs::absolute("/missing/init"),
                 ReporterMode::Dart,
                 &classified,
                 Some(&json!({"file":"lib/subject.dart"})),
@@ -429,7 +431,7 @@ fn null_fallback_rejects_timeout_partial_control_and_noncanonical_runner() {
         assert!(
             analyze_initialization_evidence(
                 &raw,
-                Path::new("/missing/init"),
+                &crate::test_fs::absolute("/missing/init"),
                 ReporterMode::Dart,
                 &changed,
                 Some(&json!({"file":"lib/subject.dart"})),
@@ -468,16 +470,20 @@ fn signature_order_matches_python_ascii_escaped_json() {
 
 #[test]
 fn normalization_budget_stops_short_root_amplification() {
-    let directory = Directory::new(Path::new("/")).unwrap();
-    assert!(directory.normalize("/////", &mut 16).is_none());
+    let directory = Directory::new(&crate::test_fs::absolute("/")).unwrap();
+    let root = text(&directory.logical).unwrap();
+    assert!(directory.normalize(&root.repeat(5), &mut 16).is_none());
     let mut budget = 32;
     assert_eq!(
-        directory.normalize("a/b", &mut budget).as_deref(),
+        directory
+            .normalize(&format!("a{root}b"), &mut budget)
+            .as_deref(),
         Some("a<workspace>b")
     );
     assert_eq!(budget, 19);
 }
 
+#[cfg(unix)]
 #[test]
 #[ignore = "reads frozen Python differential cases from an explicit local path"]
 fn frozen_python_initialization_signatures_match() {
@@ -494,7 +500,7 @@ fn frozen_python_initialization_signatures_match() {
         };
         let actual = analyze_initialization_evidence(
             raw,
-            Path::new(case["cwd"].as_str().unwrap()),
+            &crate::test_fs::absolute(case["cwd"].as_str().unwrap()),
             mode,
             &case["classification"],
             case.get("mutant"),

@@ -1,10 +1,17 @@
 //! Byte-oriented output capture. Readers never decode child output.
 
+use crate::platform::OutputPipe;
 use std::collections::VecDeque;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
+#[cfg(unix)]
+use std::fs::OpenOptions;
 use std::io::{self, Write};
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, OwnedFd};
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
+#[cfg(windows)]
+use std::os::windows::io::{AsRawHandle, OwnedHandle};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -12,7 +19,9 @@ use std::thread;
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
+#[cfg(unix)]
 use tokio::io::Interest;
+#[cfg(unix)]
 use tokio::io::unix::AsyncFd;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
@@ -245,7 +254,7 @@ impl StreamQueue {
         self.close(true);
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn pop(self: &Arc<Self>) -> Option<StreamChunk> {
         lock(&self.state)
             .chunks
@@ -565,11 +574,16 @@ impl OutputSession {
                     .enumerate()
             {
                 let path = dir.join(name);
-                let file = OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .mode(0o600)
-                    .open(&path)?;
+                #[cfg(unix)]
+                let mut options = OpenOptions::new();
+                #[cfg(unix)]
+                options.write(true).create_new(true);
+                #[cfg(unix)]
+                options.mode(0o600);
+                #[cfg(unix)]
+                let file = options.open(&path)?;
+                #[cfg(windows)]
+                let file = crate::security_windows::create_private_file(&path)?;
                 lock(&state[index]).summary.file_path = Some(path);
                 prepared[index] = Some(PreparedFile { file, permit });
             }
@@ -590,8 +604,8 @@ impl OutputSession {
 
     pub(crate) fn begin(
         &mut self,
-        stdout: OwnedFd,
-        stderr: OwnedFd,
+        stdout: OutputPipe,
+        stderr: OutputPipe,
     ) -> io::Result<Option<StreamReceiver>> {
         if self.started {
             return Err(io::Error::new(
@@ -778,6 +792,7 @@ fn error_description(error: &io::Error) -> String {
     format!("{:?}, OS error {:?}", error.kind(), error.raw_os_error())
 }
 
+#[cfg(unix)]
 fn nonblocking_pipe(fd: OwnedFd) -> io::Result<AsyncFd<OwnedFd>> {
     // SAFETY: fd is owned and remains valid across both fcntl calls; F_GETFL
     // and F_SETFL take no pointers. This is the read end of a dedicated child
@@ -793,8 +808,18 @@ fn nonblocking_pipe(fd: OwnedFd) -> io::Result<AsyncFd<OwnedFd>> {
     AsyncFd::with_interest(fd, Interest::READABLE)
 }
 
+#[cfg(unix)]
+type PipeReader = AsyncFd<OwnedFd>;
+#[cfg(windows)]
+type PipeReader = OwnedHandle;
+
+#[cfg(windows)]
+fn nonblocking_pipe(pipe: OwnedHandle) -> io::Result<PipeReader> {
+    Ok(pipe)
+}
+
 async fn read_pipe(
-    pipe: AsyncFd<OwnedFd>,
+    pipe: PipeReader,
     state: Arc<Mutex<CaptureState>>,
     file: Option<FileProducer>,
     stream: Option<Arc<StreamQueue>>,
@@ -804,26 +829,7 @@ async fn read_pipe(
 ) {
     let mut buffer = vec![0; read_chunk];
     loop {
-        let mut read_now = |fd: &OwnedFd| {
-            // SAFETY: fd remains owned by AsyncFd; buffer is writable for
-            // its entire declared length, and read never stores pointers.
-            let bytes =
-                unsafe { libc::read(fd.as_raw_fd(), buffer.as_mut_ptr().cast(), buffer.len()) };
-            if bytes < 0 {
-                Err(io::Error::last_os_error())
-            } else {
-                Ok(bytes as usize)
-            }
-        };
-        // A permanent read error need not produce a readable event on Linux.
-        // Probe the nonblocking descriptor first; only WouldBlock needs the
-        // reactor, which also handles readiness arriving between these calls.
-        let read = match read_now(pipe.get_ref()) {
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                pipe.async_io(Interest::READABLE, read_now).await
-            }
-            result => result,
-        };
+        let read = read_pipe_chunk(&pipe, &mut buffer).await;
         let bytes = match read {
             Ok(0) => {
                 lock(&state).summary.eof = true;
@@ -858,6 +864,81 @@ async fn read_pipe(
         tokio::task::yield_now().await;
     }
     // The file producer's Drop delivers EOF on every exit path.
+}
+
+#[cfg(unix)]
+async fn read_pipe_chunk(pipe: &PipeReader, buffer: &mut [u8]) -> io::Result<usize> {
+    let mut read_now = |fd: &OwnedFd| {
+        // SAFETY: AsyncFd owns the live pipe; buffer is writable for this size.
+        let bytes = unsafe { libc::read(fd.as_raw_fd(), buffer.as_mut_ptr().cast(), buffer.len()) };
+        if bytes < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(bytes as usize)
+        }
+    };
+    match read_now(pipe.get_ref()) {
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+            pipe.async_io(Interest::READABLE, read_now).await
+        }
+        result => result,
+    }
+}
+
+#[cfg(windows)]
+async fn read_pipe_chunk(pipe: &PipeReader, buffer: &mut [u8]) -> io::Result<usize> {
+    use windows_sys::Win32::Foundation::ERROR_BROKEN_PIPE;
+    use windows_sys::Win32::Storage::FileSystem::ReadFile;
+    use windows_sys::Win32::System::Pipes::PeekNamedPipe;
+    loop {
+        let mut available = 0;
+        // SAFETY: the owned anonymous pipe remains live, no data pointer is
+        // supplied and available points to writable DWORD storage. Peek reports
+        // buffered bytes without consuming them or waiting for a future write.
+        if unsafe {
+            PeekNamedPipe(
+                pipe.as_raw_handle().cast(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        } == 0
+        {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(ERROR_BROKEN_PIPE as i32) {
+                return Ok(0);
+            }
+            return Err(error);
+        }
+        if available == 0 {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+            continue;
+        }
+        let amount = buffer.len().min(available as usize).min(u32::MAX as usize) as u32;
+        let mut read = 0;
+        // SAFETY: this is the sole reader, so the peeked bytes remain available.
+        // Read only that bounded amount into the valid writable buffer; this
+        // synchronous ReadFile cannot wait for bytes not yet written.
+        if unsafe {
+            ReadFile(
+                pipe.as_raw_handle().cast(),
+                buffer.as_mut_ptr(),
+                amount,
+                &mut read,
+                std::ptr::null_mut(),
+            )
+        } == 0
+        {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(ERROR_BROKEN_PIPE as i32) {
+                return Ok(0);
+            }
+            return Err(error);
+        }
+        return Ok(read as usize);
+    }
 }
 
 fn write_file(mut file: impl Write, queue: &FileQueue, state: &Mutex<CaptureState>) {
@@ -947,7 +1028,7 @@ impl TailBuffer {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::fd::FromRawFd;

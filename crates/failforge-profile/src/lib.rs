@@ -1,6 +1,10 @@
 //! Native generation and static applicability of file-scoped mutation profiles.
 
 pub mod analysis;
+#[cfg(unix)]
+pub mod output;
+#[cfg(windows)]
+#[path = "output_windows.rs"]
 pub mod output;
 pub mod preparation;
 mod pubspec;

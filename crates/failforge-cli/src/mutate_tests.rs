@@ -197,3 +197,69 @@ fn obsolete_interpreter_flag_is_rejected() {
         .is_err()
     );
 }
+
+#[cfg(windows)]
+#[test]
+fn explicit_child_environment_omits_hidden_drive_and_private_capability_keys() {
+    let values = environment(
+        Path::new(r"C:\installation"),
+        [
+            ("=C:".into(), r"C:\source".into()),
+            ("=D:".into(), r"D:\other".into()),
+            ("PATH".into(), r"C:\Windows\System32".into()),
+            ("PUB_CACHE".into(), r"D:\pub-cache".into()),
+            (
+                "FAILFORGE_CLI_CANCEL_PIPE".into(),
+                r"\\.\pipe\private".into(),
+            ),
+            (crate::campaign_controller::PARENT_ENV.into(), "123".into()),
+        ],
+    );
+    assert!(!values.keys().any(|key| key.starts_with('=')));
+    assert!(!values.contains_key("FAILFORGE_CLI_CANCEL_PIPE"));
+    assert!(!values.contains_key(crate::campaign_controller::PARENT_ENV));
+    assert_eq!(values["PATH"], r"C:\Windows\System32");
+    assert_eq!(values["PUB_CACHE"], r"D:\pub-cache");
+    assert_eq!(values["CI"], "true");
+}
+
+#[cfg(windows)]
+#[test]
+fn inherited_mixed_case_overrides_do_not_create_duplicate_child_keys() {
+    let installation = std::env::temp_dir().join(format!("ff-env-{}", identity().unwrap()));
+    std::fs::create_dir_all(installation.join(".toolchain/pub-cache")).unwrap();
+    let values = environment(
+        &installation,
+        [
+            ("ci".into(), "false".into()),
+            ("Flutter_Suppress_Analytics".into(), "false".into()),
+            ("dart_suppress_analytics".into(), "false".into()),
+            ("pub_cache".into(), r"D:\caller-cache".into()),
+            ("failforge_cli_cancel_pipe".into(), "private".into()),
+        ],
+    );
+    assert_eq!(values["CI"], "true");
+    assert_eq!(values["FLUTTER_SUPPRESS_ANALYTICS"], "true");
+    assert_eq!(values["DART_SUPPRESS_ANALYTICS"], "true");
+    assert_eq!(values["pub_cache"], r"D:\caller-cache");
+    for expected in [
+        "CI",
+        "FLUTTER_SUPPRESS_ANALYTICS",
+        "DART_SUPPRESS_ANALYTICS",
+        "PUB_CACHE",
+    ] {
+        assert_eq!(
+            values
+                .keys()
+                .filter(|key| key.eq_ignore_ascii_case(expected))
+                .count(),
+            1
+        );
+    }
+    assert!(
+        !values
+            .keys()
+            .any(|name| name.eq_ignore_ascii_case("FAILFORGE_CLI_CANCEL_PIPE"))
+    );
+    std::fs::remove_dir_all(installation).unwrap();
+}

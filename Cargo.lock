@@ -203,6 +203,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "windows-sys",
 ]
 
 [[package]]
@@ -214,6 +215,7 @@ dependencies = [
  "regex",
  "serde_json",
  "thiserror",
+ "windows-sys",
 ]
 
 [[package]]
@@ -229,6 +231,7 @@ dependencies = [
  "sha2",
  "thiserror",
  "tokio",
+ "windows-sys",
 ]
 
 [[package]]
@@ -249,6 +252,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "unicode-normalization",
+ "windows-sys",
 ]
 
 [[package]]
@@ -260,6 +264,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "windows-sys",
 ]
 
 [[package]]
@@ -274,18 +279,21 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "windows-sys",
 ]
 
 [[package]]
 name = "failforge-workspace"
 version = "0.1.0-beta.3"
 dependencies = [
+ "failforge-runner",
  "libc",
  "serde",
  "serde_json",
  "sha2",
  "thiserror",
  "tokio",
+ "windows-sys",
 ]
 
 [[package]]

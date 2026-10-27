@@ -1,17 +1,17 @@
 //! Public campaign entry point: configuration, lifecycle and reports in one process.
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::signals::{SignalKind, signal};
 use failforge_config::{CampaignConfig, Context, RunConfig};
 use failforge_dart::namespace::NamespaceError;
 use failforge_workspace::Cancellation;
 use serde_json::{Value, json};
-use tokio::signal::unix::{SignalKind, signal};
 
 use crate::args::MutateArgs;
 use crate::campaign_display::Display;
@@ -27,28 +27,57 @@ struct Plan {
 }
 
 fn identity() -> io::Result<String> {
-    let mut bytes = [0u8; 16];
-    File::open("/dev/urandom")?.read_exact(&mut bytes)?;
-    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+    crate::campaign_publish::token()
+}
+
+fn private_environment_key(key: &str) -> bool {
+    [
+        crate::campaign_controller::PARENT_ENV,
+        "FAILFORGE_CLI_CANCEL_PIPE",
+    ]
+    .iter()
+    .any(|private| {
+        #[cfg(unix)]
+        {
+            key == *private
+        }
+        #[cfg(windows)]
+        {
+            key.eq_ignore_ascii_case(private)
+        }
+    })
 }
 
 fn environment(
     installation: &Path,
     values: impl IntoIterator<Item = (String, String)>,
 ) -> BTreeMap<String, String> {
-    let mut values: BTreeMap<_, _> = values.into_iter().collect();
+    let mut values: BTreeMap<_, _> = values
+        .into_iter()
+        .filter(|(key, _)| !key.starts_with('=') && !private_environment_key(key))
+        .collect();
     for key in [
         "CI",
         "FLUTTER_SUPPRESS_ANALYTICS",
         "DART_SUPPRESS_ANALYTICS",
     ] {
+        #[cfg(windows)]
+        values.retain(|name, _| !name.eq_ignore_ascii_case(key));
         values.insert(key.into(), "true".into());
     }
     let cache = installation.join(".toolchain/pub-cache");
-    if cache.is_dir() {
-        values
-            .entry("PUB_CACHE".into())
-            .or_insert_with(|| cache.to_string_lossy().into_owned());
+    let has_cache = values.keys().any(|name| {
+        #[cfg(unix)]
+        {
+            name == "PUB_CACHE"
+        }
+        #[cfg(windows)]
+        {
+            name.eq_ignore_ascii_case("PUB_CACHE")
+        }
+    });
+    if cache.is_dir() && !has_cache {
+        values.insert("PUB_CACHE".into(), cache.to_string_lossy().into_owned());
     }
     values
 }
@@ -212,12 +241,19 @@ fn exit_status(summary: &Value, signal: Option<i32>) -> u8 {
 async fn run(
     plan: Plan,
     display: &Display,
-    parent: File,
+    parent: Option<File>,
 ) -> Result<(FinalReport, Option<i32>), NamespaceError> {
     let mut interrupt = signal(SignalKind::interrupt())?;
     let mut terminate = signal(SignalKind::terminate())?;
     let cancel = Cancellation::default();
-    crate::campaign_controller::watch_parent(parent, cancel.clone())?;
+    #[cfg(unix)]
+    crate::campaign_controller::watch_parent(
+        parent
+            .ok_or_else(|| crate::dart_namespace::invalid("campaign parent channel is missing"))?,
+        cancel.clone(),
+    )?;
+    #[cfg(windows)]
+    let _ = parent;
     let listening = cancel.clone();
     let listener = tokio::spawn(async move {
         listening.request(tokio::select! { _ = interrupt.recv() => libc::SIGINT, _ = terminate.recv() => libc::SIGTERM });
@@ -292,16 +328,24 @@ fn execute_selected(
     invocation_cwd: &Path,
     replay: Option<crate::retained_replay::ReplayPaths>,
 ) -> ExitCode {
-    let Some(channel) = std::env::var_os(crate::campaign_controller::PARENT_ENV) else {
-        return crate::campaign_controller::execute();
+    #[cfg(unix)]
+    let parent = {
+        let Some(channel) = std::env::var_os(crate::campaign_controller::PARENT_ENV) else {
+            return crate::campaign_controller::execute();
+        };
+        let parent = match crate::campaign_controller::inherited_parent(&channel) {
+            Ok(parent) => parent,
+            Err(error) => {
+                diagnostic(&error.to_string());
+                return ExitCode::from(125);
+            }
+        };
+        Some(parent)
     };
-    let parent = match crate::campaign_controller::inherited_parent(&channel) {
-        Ok(parent) => parent,
-        Err(error) => {
-            diagnostic(&error.to_string());
-            return ExitCode::from(125);
-        }
-    };
+    // The Windows process owns Runner Job Objects directly. It connects to the
+    // private cancellation capability exactly once, without a reexec launcher.
+    #[cfg(windows)]
+    let parent = None;
     let installation = match crate::installation::resolve(arguments.installation.as_deref()) {
         Ok(installation) => installation,
         Err(error) => {
@@ -339,7 +383,9 @@ fn execute_selected(
         }
         let runner = std::env::current_exe()?.canonicalize()?;
         let variables = std::env::vars_os()
-            .filter(|(key, _)| key != crate::campaign_controller::PARENT_ENV)
+            .filter(|(key, _)| {
+                key != crate::campaign_controller::PARENT_ENV && key != "FAILFORGE_CLI_CANCEL_PIPE"
+            })
             .map(|(key, value)| {
                 key.into_string()
                     .ok()
@@ -376,9 +422,11 @@ fn execute_selected(
         display.text(
             false,
             format!(
-                "{}\nReport: {}/summary.json\n",
+                "{}\nReport: {}\n",
                 report.terminal,
-                report.summary["output"].as_str().unwrap_or("")
+                Path::new(report.summary["output"].as_str().unwrap_or(""))
+                    .join("summary.json")
+                    .display()
             ),
         )?;
         if status == 125 {

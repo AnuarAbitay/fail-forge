@@ -1,6 +1,6 @@
 use super::*;
+use crate::test_fs::symlink;
 use serde_json::json;
-use std::os::unix::fs::symlink;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 fn events() -> Vec<Value> {
@@ -8,7 +8,7 @@ fn events() -> Vec<Value> {
         json!({"type":"start","time":0,"protocolVersion":"0.1.1","runnerVersion":"1","pid":100}),
         json!({"type":"suite","time":1,"suite":{"id":0,"platform":"vm","path":"test/a.dart"}}),
         json!({"type":"group","time":2,"group":{"id":1,"suiteID":0,"parentID":null,"name":"","testCount":2,"metadata":{"skip":false},"line":null,"column":null,"url":null}}),
-        json!({"type":"testStart","time":3,"test":{"id":9,"suiteID":0,"groupIDs":[1],"name":"z author","metadata":{"skip":false},"line":10,"column":3,"url":"file:///work/test/a.dart"}}),
+        json!({"type":"testStart","time":3,"test":{"id":9,"suiteID":0,"groupIDs":[1],"name":"z author","metadata":{"skip":false},"line":10,"column":3,"url":path_uri(&crate::test_fs::absolute("/work/test/a.dart")).unwrap()}}),
         json!({"type":"testStart","time":4,"test":{"id":3,"suiteID":0,"groupIDs":[1],"name":"a author","metadata":{"skip":false},"line":20,"column":3,"url":"test/a.dart"}}),
         json!({"type":"testDone","time":5,"testID":3,"result":"success","hidden":false,"skipped":false}),
         json!({"type":"testDone","time":6,"testID":9,"result":"success","hidden":false,"skipped":false}),
@@ -29,7 +29,12 @@ fn raw(events: &[Value]) -> Vec<u8> {
 }
 
 fn snapshot(events: &[Value]) -> CatalogSnapshot {
-    analyze_catalogue(&raw(events), Path::new("/work"), ReporterMode::Dart).unwrap()
+    analyze_catalogue(
+        &raw(events),
+        &crate::test_fs::absolute("/work"),
+        ReporterMode::Dart,
+    )
+    .unwrap()
 }
 
 fn row<'a>(events: &'a mut [Value], kind: &str) -> &'a mut Value {
@@ -79,7 +84,10 @@ fn catalogue_preserves_duplicate_multiplicity_and_reporter_order() {
     let capture = raw(&original);
     let first = snapshot(&original);
     assert_eq!(first.raw_sha256, format!("{:x}", Sha256::digest(&capture)));
-    assert_eq!(first.cwd, "/work");
+    assert_eq!(
+        first.cwd,
+        crate::test_fs::absolute("/work").to_str().unwrap()
+    );
     assert_eq!(
         first.identities,
         [["test/a.dart", "a author"], ["test/a.dart", "z author"]]
@@ -147,17 +155,25 @@ fn malformed_or_incomplete_protocol_never_supplies_identities() {
     let mut truncated = events();
     truncated.pop();
     assert_eq!(
-        analyze_catalogue(&raw(&truncated), Path::new("/work"), ReporterMode::Dart)
-            .unwrap_err()
-            .0,
+        analyze_catalogue(
+            &raw(&truncated),
+            &crate::test_fs::absolute("/work"),
+            ReporterMode::Dart
+        )
+        .unwrap_err()
+        .0,
         "missing_done_event"
     );
     let mut bad = events();
     bad[4]["test"]["id"] = json!(9);
     assert_eq!(
-        analyze_catalogue(&raw(&bad), Path::new("/work"), ReporterMode::Dart)
-            .unwrap_err()
-            .0,
+        analyze_catalogue(
+            &raw(&bad),
+            &crate::test_fs::absolute("/work"),
+            ReporterMode::Dart
+        )
+        .unwrap_err()
+        .0,
         "duplicate_event_id"
     );
     for raw in [
@@ -165,13 +181,19 @@ fn malformed_or_incomplete_protocol_never_supplies_identities() {
         br#"{"type":"start","type":"start"}"#,
         b"\xff",
     ] {
-        assert!(analyze_catalogue(raw, Path::new("/work"), ReporterMode::Dart).is_err());
+        assert!(
+            analyze_catalogue(raw, &crate::test_fs::absolute("/work"), ReporterMode::Dart).is_err()
+        );
     }
     let blanks = vec![b'\n'; MAX_EVENTS];
     assert_eq!(
-        analyze_catalogue(&blanks, Path::new("/work"), ReporterMode::Dart)
-            .unwrap_err()
-            .0,
+        analyze_catalogue(
+            &blanks,
+            &crate::test_fs::absolute("/work"),
+            ReporterMode::Dart
+        )
+        .unwrap_err()
+        .0,
         "event_limit_exceeded"
     );
 }
@@ -186,14 +208,26 @@ fn flutter_tool_events_and_unicode_line_separators_do_not_add_identities() {
         json!([{"event":"test.startedProcess","params":{"vmServiceUri":null}}]),
     );
     let bytes = raw(&events);
-    let snapshot = analyze_catalogue(&bytes, Path::new("/work"), ReporterMode::Flutter).unwrap();
+    let snapshot = analyze_catalogue(
+        &bytes,
+        &crate::test_fs::absolute("/work"),
+        ReporterMode::Flutter,
+    )
+    .unwrap();
     assert_eq!(snapshot.identities.len(), 2);
     assert!(snapshot.view.is_some());
     assert_eq!(
         snapshot.identities[1][1],
         "before\u{2028}middle\u{2029}after"
     );
-    assert!(analyze_catalogue(&bytes, Path::new("/work"), ReporterMode::Dart).is_err());
+    assert!(
+        analyze_catalogue(
+            &bytes,
+            &crate::test_fs::absolute("/work"),
+            ReporterMode::Dart
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -207,7 +241,14 @@ fn broad_identity_path_normalization_matches_legacy_lexical_paths() {
         ("", "."),
     ] {
         let mut events = events();
-        row(&mut events, "suite")["suite"]["path"] = json!(path);
+        let native = if path.starts_with('/') {
+            crate::test_fs::absolute(path)
+                .to_string_lossy()
+                .into_owned()
+        } else {
+            path.to_owned()
+        };
+        row(&mut events, "suite")["suite"]["path"] = json!(native);
         let snapshot = snapshot(&events);
         assert_eq!(snapshot.identities[0][0], expected, "{path}");
     }
@@ -215,7 +256,7 @@ fn broad_identity_path_normalization_matches_legacy_lexical_paths() {
 
 #[test]
 fn strict_local_uri_decodes_unicode_spaces_and_escaped_separators() {
-    let cwd = Path::new("/work");
+    let cwd = &crate::test_fs::absolute("/work");
     for (input, expected) in [
         ("test/a.dart", "test/a.dart"),
         ("/work/test/a.dart", "test/a.dart"),
@@ -230,8 +271,9 @@ fn strict_local_uri_decodes_unicode_spaces_and_escaped_separators() {
     ] {
         assert_eq!(relative(input, cwd).unwrap(), expected, "{input}");
     }
+    #[cfg(unix)]
     assert_eq!(
-        path_uri(Path::new("/work/test/тест a#b.dart")).unwrap(),
+        path_uri(&crate::test_fs::absolute("/work/test/тест a#b.dart")).unwrap(),
         "file:///work/test/%D1%82%D0%B5%D1%81%D1%82%20a%23b.dart"
     );
     assert!(path_uri(Path::new("relative/a.dart")).is_err());
@@ -256,7 +298,10 @@ fn source_paths_reject_nonlocal_uris_escape_invalid_encoding_and_non_authors() {
         "file:///work/test/%",
         "file:///work/test/%2E%2E/lib/a.dart",
     ] {
-        assert!(relative(input, Path::new("/work")).is_err(), "{input:?}");
+        assert!(
+            relative(input, &crate::test_fs::absolute("/work")).is_err(),
+            "{input:?}"
+        );
     }
 }
 
@@ -338,7 +383,12 @@ fn absent_or_invalid_group_metadata_and_source_locations_withhold_strict_view() 
         changed[2]["group"][field] = value;
         if field == "parentID" {
             assert!(
-                analyze_catalogue(&raw(&changed), Path::new("/work"), ReporterMode::Dart).is_err()
+                analyze_catalogue(
+                    &raw(&changed),
+                    &crate::test_fs::absolute("/work"),
+                    ReporterMode::Dart
+                )
+                .is_err()
             );
         } else {
             assert!(snapshot(&changed).view.is_none());
@@ -402,7 +452,9 @@ fn budget_rejects_graph_growth_before_expanding_shared_descriptors() {
         ));
     }
     assert_eq!(
-        identities(&rows, Path::new("/work")).unwrap_err().0,
+        identities(&rows, &crate::test_fs::absolute("/work"))
+            .unwrap_err()
+            .0,
         "catalogue_graph_limit_exceeded"
     );
 }
@@ -423,7 +475,12 @@ fn deep_group_ancestry_is_bounded_without_discarding_observed_identities() {
     retime(&mut capture);
     let bytes = raw(&capture);
     assert!(bytes.len() < 1024 * 1024);
-    let snapshot = analyze_catalogue(&bytes, Path::new("/work"), ReporterMode::Dart).unwrap();
+    let snapshot = analyze_catalogue(
+        &bytes,
+        &crate::test_fs::absolute("/work"),
+        ReporterMode::Dart,
+    )
+    .unwrap();
     assert_eq!(snapshot.identities.len(), 2);
     assert!(snapshot.view.is_none());
 }
@@ -447,7 +504,12 @@ fn repeated_large_metadata_is_bounded_before_cloning_per_test() {
     retime(&mut capture);
     let bytes = raw(&capture);
     assert!(bytes.len() < 2 * 1024 * 1024);
-    let snapshot = analyze_catalogue(&bytes, Path::new("/work"), ReporterMode::Dart).unwrap();
+    let snapshot = analyze_catalogue(
+        &bytes,
+        &crate::test_fs::absolute("/work"),
+        ReporterMode::Dart,
+    )
+    .unwrap();
     assert_eq!(snapshot.identities.len(), 22);
     assert!(snapshot.view.is_none());
 }
@@ -518,5 +580,46 @@ fn ordinary_failure_witness_accepts_frames_using_logical_symlink_cwd() {
     assert_eq!(
         result["reason"],
         "ordinary_author_failure_with_setup_suppression"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_drive_verbatim_and_file_uri_paths_retain_author_identity() {
+    let fixture = Fixture::new();
+    std::fs::create_dir(fixture.0.join("test")).unwrap();
+    let author = fixture.0.join("test/Ж 😀.dart");
+    std::fs::write(&author, "void main() {}\n").unwrap();
+    let canonical = author.canonicalize().unwrap();
+    let uri = path_uri(&canonical).unwrap();
+    assert!(uri.starts_with("file:///"));
+    assert!(!uri.contains("%3A"));
+    assert!(!uri.contains("%5C"));
+    assert!(!uri.contains("%3F"));
+    for input in [canonical.to_string_lossy().into_owned(), uri] {
+        assert_eq!(relative(&input, &fixture.0).unwrap(), "test/Ж 😀.dart");
+    }
+    assert!(relative(r"Z:\foreign\test\a.dart", &fixture.0).is_err());
+}
+
+#[cfg(windows)]
+#[test]
+fn broad_identities_match_dart_drive_paths_to_verbatim_working_copy_paths() {
+    for path in [
+        r"C:\work\test\a.dart",
+        r"c:\work\test\a.dart",
+        r"\\?\C:\work\test\a.dart",
+    ] {
+        assert_eq!(
+            relative_lexical(Path::new(path), Path::new(r"\\?\C:\work")),
+            "test/a.dart"
+        );
+    }
+    assert_eq!(
+        relative_lexical(
+            Path::new(r"D:\other\test\a.dart"),
+            Path::new(r"\\?\C:\work")
+        ),
+        "D:/other/test/a.dart"
     );
 }

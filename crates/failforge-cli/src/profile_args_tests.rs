@@ -1,6 +1,5 @@
 use super::*;
 use clap::Parser;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 fn parse(extra: &[&str]) -> ProfileGenerateArgs {
     let mut values = vec![
@@ -176,26 +175,25 @@ fn language_must_match_the_selected_family() {
 
 #[test]
 fn non_unicode_and_dash_prefixed_paths_reach_native_validation_without_loss() {
-    let source = OsString::from_vec(b"--file=-source-\xff.dart".to_vec());
-    let output = OsString::from_vec(b"--output=-profile-\xfe.yml".to_vec());
+    let raw = crate::test_support::raw;
     let values = vec![
         OsString::from("failforge"),
         "profile".into(),
         "generate".into(),
-        source,
+        raw(b"--file=-source-\xff.dart"),
         "--family".into(),
         "classic".into(),
-        output,
+        raw(b"--output=-profile-\xfe.yml"),
     ];
     let Commands::Profile(arguments) = Cli::try_parse_from(values).unwrap().command else {
         panic!("expected profile");
     };
     let ProfileCommands::Generate(arguments) = arguments.command;
     let options = arguments.generate_options();
-    assert_eq!(options.source.as_os_str().as_bytes(), b"-source-\xff.dart");
+    assert_eq!(options.source.as_os_str(), raw(b"-source-\xff.dart"));
     assert_eq!(
-        options.output.unwrap().as_os_str().as_bytes(),
-        b"-profile-\xfe.yml"
+        options.output.unwrap().as_os_str(),
+        raw(b"-profile-\xfe.yml")
     );
 }
 

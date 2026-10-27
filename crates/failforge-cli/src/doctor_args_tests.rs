@@ -111,7 +111,7 @@ fn non_unicode_paths_reach_explicit_validation_without_lossy_conversion() {
         OsString::from("failforge"),
         "doctor".into(),
         "--project".into(),
-        OsString::from_vec(b"private-\xff".to_vec()),
+        crate::test_support::raw(b"private-\xff"),
     ];
     let Commands::Doctor(args) = Cli::try_parse_from(values).unwrap().command else {
         panic!("expected doctor");

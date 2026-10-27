@@ -1,22 +1,30 @@
 //! Private owner of adapter discovery, verified artifacts and source bindings.
-use std::fs::{File, OpenOptions};
+#[cfg(windows)]
+use failforge_workspace::windows_fs as win;
+use std::fs::File;
+#[cfg(unix)]
+use std::fs::OpenOptions;
 use std::io::{self, Write};
+#[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::PathBuf;
+#[cfg(unix)]
 use std::process::ExitCode;
 use std::time::Instant;
 
+#[cfg(unix)]
+use crate::signals::{SignalKind, signal};
 use failforge_dart::discovery::{DiscoveryConfig, DiscoveryError, DiscoveryRun, discover};
 use failforge_dart::{MutationFamily, namespace::NamespaceError};
 use failforge_runner::WorkspaceLease;
+#[cfg(unix)]
+use failforge_workspace::parse_json;
 use failforge_workspace::{
-    Cancellation, Hashes, PreparedProject, hash_file, inspect_project, parse_json, source_hashes,
-    verify_source,
+    Cancellation, Hashes, PreparedProject, hash_file, inspect_project, source_hashes, verify_source,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use tokio::signal::unix::{SignalKind, signal};
 
 use crate::dart_namespace::{absolute, invalid};
 use crate::namespace_planner::{PlanProject, PlanRuntime, ReportDirectory};
@@ -41,6 +49,7 @@ struct Runtime {
     helper: PathBuf,
 }
 
+#[cfg(unix)]
 fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
     decode_value(parse_json(raw)?)
 }
@@ -109,10 +118,13 @@ impl InputBinding {
         if request.payload.get("flutterSdkPath").is_some() {
             payload_path(request, "flutterSdkPath")?.canonicalize()?;
         }
+        #[cfg(unix)]
         let root = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
             .open(&request.project.root)?;
+        #[cfg(windows)]
+        let root = win::directory(&request.project.root)?;
         let binding = Self {
             project: request.project.clone(),
             root,
@@ -128,19 +140,26 @@ impl InputBinding {
     }
 
     fn verify_with(&self, cancel: &Cancellation) -> Result<(), NamespaceError> {
-        let owned = self.root.metadata()?;
-        let named = std::fs::symlink_metadata(&self.project.root)?;
-        if !named.is_dir()
-            || owned.dev() != named.dev()
-            || owned.ino() != named.ino()
-            || inspect_project(&self.project.root, cancel)? != self.project
-        {
+        self.verify_root()?;
+        if inspect_project(&self.project.root, cancel)? != self.project {
             return Err(invalid("prepared discovery inputs changed"));
         }
         verify_source(&self.project.root, &self.hashes, cancel)?;
-        let named = std::fs::symlink_metadata(&self.project.root)?;
-        if !named.is_dir() || owned.dev() != named.dev() || owned.ino() != named.ino() {
-            return Err(invalid("prepared discovery root changed"));
+        self.verify_root()?;
+        Ok(())
+    }
+    fn verify_root(&self) -> Result<(), NamespaceError> {
+        #[cfg(unix)]
+        {
+            let owned = self.root.metadata()?;
+            let named = std::fs::symlink_metadata(&self.project.root)?;
+            if !named.is_dir() || owned.dev() != named.dev() || owned.ino() != named.ino() {
+                return Err(invalid("prepared input root changed"));
+            }
+        }
+        #[cfg(windows)]
+        if win::identity(&self.root)? != win::identity(&win::directory(&self.project.root)?)? {
+            return Err(invalid("prepared input root changed"));
         }
         Ok(())
     }
@@ -182,7 +201,11 @@ pub(crate) struct OwnedDiscovery {
 fn prepare(request: Request, cancel: &Cancellation) -> Result<Prepared, NamespaceError> {
     let binding = InputBinding::new(&request, cancel)?;
     let config = DiscoveryConfig::new(
-        request.runtime.dart_sdk.join("bin/dart").into_os_string(),
+        request
+            .runtime
+            .dart_sdk
+            .join(failforge_config::platform::DART_BIN)
+            .into_os_string(),
         request.runtime.adapter_root.clone(),
         request.payload.clone(),
         request.family,
@@ -288,7 +311,11 @@ fn finish(
     };
     let command = json!([
         prepared.request.runtime.helper,
-        prepared.request.runtime.dart_sdk.join("bin/dart"),
+        prepared
+            .request
+            .runtime
+            .dart_sdk
+            .join(failforge_config::platform::DART_BIN),
         prepared.request.runtime.adapter_root,
         prepared.request.directory.join("payload.json")
     ]);
@@ -347,6 +374,7 @@ fn exit_code(error: &NamespaceError) -> u8 {
     }
 }
 
+#[cfg(unix)]
 async fn process(
     request: Request,
     lease: WorkspaceLease,
@@ -382,6 +410,7 @@ async fn process(
     result
 }
 
+#[cfg(unix)]
 pub(crate) fn execute() -> ExitCode {
     let result = (|| {
         for key in [
@@ -416,6 +445,6 @@ pub(crate) fn execute() -> ExitCode {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "adapter_discovery_tests.rs"]
 mod tests;

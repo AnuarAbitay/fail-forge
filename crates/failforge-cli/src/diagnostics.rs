@@ -19,7 +19,17 @@ pub(crate) struct Diagnostics {
 
 impl Diagnostics {
     pub(crate) fn new() -> io::Result<Self> {
-        Self::with_writer(io::stderr())
+        #[cfg(unix)]
+        {
+            Self::with_writer(io::stderr())
+        }
+        #[cfg(windows)]
+        {
+            Self::with_writer(crate::windows_output::Writer::stdio(
+                true,
+                Duration::from_millis(250),
+            )?)
+        }
     }
 
     fn with_writer<W: Write + Send + 'static>(writer: W) -> io::Result<Self> {

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -22,6 +23,20 @@ String canonicalTarget(String value, {bool allowDot = false}) {
     throw AdapterException(
       'unsafe_path',
       'target must be a canonical package-relative path',
+    );
+  }
+  if (Platform.isWindows &&
+      segments.any((segment) {
+        final stem = segment.split('.').first.toUpperCase();
+        return RegExp(r'[<>:"|?*\x00-\x1f]').hasMatch(segment) ||
+            segment.endsWith('.') ||
+            segment.endsWith(' ') ||
+            RegExp(r'^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])$')
+                .hasMatch(stem);
+      })) {
+    throw AdapterException(
+      'unsafe_path',
+      'target contains a reserved Windows path component',
     );
   }
   return value;

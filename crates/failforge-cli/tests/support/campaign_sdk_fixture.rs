@@ -1,7 +1,8 @@
 //! Finite SDK surrogate for native campaign process tests.
 //! It implements adapter JSONL and package:test JSONL without another runtime.
 use std::fs::{self, OpenOptions};
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -22,7 +23,7 @@ fn mark(config: &Value, kind: &str, fields: Value) {
     row.insert("kind".into(), kind.into());
     row.insert("pid".into(), std::process::id().into());
     // SAFETY: getppid has no pointer arguments or side effects.
-    row.insert("parent".into(), unsafe { libc::getppid() }.into());
+    row.insert("parent".into(), parent_id().into());
     row.insert(
         "root".into(),
         std::env::current_dir().unwrap().to_str().unwrap().into(),
@@ -30,19 +31,95 @@ fn mark(config: &Value, kind: &str, fields: Value) {
     let mut stream = OpenOptions::new()
         .create(true)
         .append(true)
+        .read(true)
         .open(config["trace"].as_str().unwrap())
         .unwrap();
-    // SAFETY: stream owns this live descriptor until the lock is released.
-    assert_eq!(unsafe { libc::flock(stream.as_raw_fd(), libc::LOCK_EX) }, 0);
+    lock_trace(&stream, true);
     serde_json::to_writer(&mut stream, &row).unwrap();
     writeln!(stream).unwrap();
     stream.flush().unwrap();
 }
 
+#[cfg(unix)]
+fn parent_id() -> u32 {
+    // SAFETY: getppid only reads this fixture's parent identifier.
+    unsafe { libc::getppid() as u32 }
+}
+#[cfg(windows)]
+fn parent_id() -> u32 {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
+    };
+    // SAFETY: snapshot is an owned native handle; entry has its required ABI size.
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        assert!(snapshot != INVALID_HANDLE_VALUE);
+        let mut entry = PROCESSENTRY32W {
+            dwSize: size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut found = Process32FirstW(snapshot, &mut entry);
+        while found != 0 {
+            if entry.th32ProcessID == std::process::id() {
+                CloseHandle(snapshot);
+                return entry.th32ParentProcessID;
+            }
+            found = Process32NextW(snapshot, &mut entry);
+        }
+        CloseHandle(snapshot);
+        panic!("current fixture process missing from process snapshot");
+    }
+}
+fn lock_trace(file: &fs::File, exclusive: bool) {
+    #[cfg(unix)]
+    assert_eq!(
+        unsafe {
+            libc::flock(
+                file.as_raw_fd(),
+                if exclusive {
+                    libc::LOCK_EX
+                } else {
+                    libc::LOCK_SH
+                },
+            )
+        },
+        0
+    );
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{LOCKFILE_EXCLUSIVE_LOCK, LockFileEx};
+        use windows_sys::Win32::System::IO::OVERLAPPED;
+        let mut offset = OVERLAPPED::default();
+        // A synchronous file handle keeps this blocking fixture-only lock local
+        // to the call. Closing the file releases the complete-record lock.
+        assert_ne!(
+            unsafe {
+                LockFileEx(
+                    file.as_raw_handle(),
+                    if exclusive {
+                        LOCKFILE_EXCLUSIVE_LOCK
+                    } else {
+                        0
+                    },
+                    0,
+                    u32::MAX,
+                    u32::MAX,
+                    &mut offset,
+                )
+            },
+            0
+        );
+    }
+}
 fn rows(config: &Value) -> Vec<Value> {
-    fs::read_to_string(config["trace"].as_str().unwrap())
-        .unwrap()
-        .lines()
+    let mut file = fs::File::open(config["trace"].as_str().unwrap()).unwrap();
+    lock_trace(&file, false);
+    let mut text = String::new();
+    file.read_to_string(&mut text).unwrap();
+    text.lines()
         .filter_map(|line| serde_json::from_str(line).ok())
         .collect()
 }
@@ -245,6 +322,8 @@ fn main() {
         "FAILFORGE_TEST_EVIDENCE_FD",
         "FAILFORGE_RUNNER_READY_FD",
         "FAILFORGE_ADAPTER_CANCEL_FD",
+        "FAILFORGE_ADAPTER_CANCEL_PIPE",
+        "FAILFORGE_CLI_CANCEL_PIPE",
     ] {
         assert!(std::env::var_os(key).is_none(), "private descriptor: {key}");
     }

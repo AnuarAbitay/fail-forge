@@ -1,5 +1,5 @@
 use super::*;
-use std::os::unix::fs::symlink;
+use crate::test_support::symlink;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -305,4 +305,21 @@ fn cancellation_stops_admission_and_relative_archive_paths_are_rejected() {
         relative("capture/stdout.bin").unwrap(),
         Path::new("capture/stdout.bin")
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_bound_evidence_detects_replacement_and_native_content_changes() {
+    let fixture = Fixture::new();
+    let path = fixture.root.join("native-evidence");
+    fs::write(&path, b"first").unwrap();
+    let (bound, bytes) = BoundFile::read(&path, 5).unwrap();
+    assert_eq!(bytes, b"first");
+    fs::write(&path, b"other").unwrap();
+    assert!(bound.verify().is_err());
+    drop(bound);
+    let (bound, _) = BoundFile::read(&path, 5).unwrap();
+    fs::rename(&path, fixture.root.join("retained-old")).unwrap();
+    fs::write(&path, b"other").unwrap();
+    assert!(bound.verify().is_err());
 }

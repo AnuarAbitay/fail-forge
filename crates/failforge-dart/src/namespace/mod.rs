@@ -4,6 +4,10 @@
 //! complete source/configuration binding, authorizes only namespace-prefix
 //! bytes, and commits prepared-copy edits with rollback on failure. Original
 //! project and framework files are read-only inputs.
+#[cfg(unix)]
+pub(crate) mod fs;
+#[cfg(windows)]
+#[path = "fs_windows.rs"]
 pub(crate) mod fs;
 mod isolation;
 mod plan;

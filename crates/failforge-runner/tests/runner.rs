@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Linux/macOS process tests. READY sockets are independent of captured stdio.
 //! Guards release the exact fixture connections on assertion failure; no stale
 //! numeric PGID is used by the harness. Every wait has an external deadline.

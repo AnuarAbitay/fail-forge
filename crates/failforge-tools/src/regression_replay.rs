@@ -260,7 +260,7 @@ impl Harness {
             .stderr(File::create(logs.join("stderr.log"))?);
         println!("regression {name}");
         let start = Instant::now();
-        let mut owner = common::OwnedChild::new(command.spawn()?);
+        let mut owner = common::OwnedChild::spawn(&mut command)?;
         while !author_started(&destination, "loop")? {
             common::check_interrupt()?;
             ensure(

@@ -184,6 +184,19 @@ impl Directory {
             path_uri(cwd).map_err(|_| InitializationError("invalid_initialization_cwd"))?,
             path_uri(&resolved).map_err(|_| InitializationError("invalid_initialization_cwd"))?,
         ];
+        #[cfg(windows)]
+        {
+            let variants: Vec<_> = spellings
+                .iter()
+                .flat_map(|value| {
+                    [
+                        value.replace('\\', "/"),
+                        value.strip_prefix(r"\\?\").unwrap_or(value).to_owned(),
+                    ]
+                })
+                .collect();
+            spellings.extend(variants);
+        }
         spellings.sort();
         spellings.dedup();
         spellings.sort_by_key(|spelling| std::cmp::Reverse(spelling.len()));
@@ -207,7 +220,7 @@ impl Directory {
         if relative.components().next() != Some(Component::Normal("test".as_ref())) {
             return Err(InitializationError("non_author_initialization_suite"));
         }
-        Ok(text(relative)?.to_owned())
+        Ok(text(relative)?.replace(std::path::MAIN_SEPARATOR, "/"))
     }
 
     fn locations(&self, relative: &Path, resolved: bool) -> Option<Vec<String>> {
@@ -221,6 +234,19 @@ impl Directory {
                 text(&self.resolved.join(relative)).ok()?.to_owned(),
                 path_uri(&self.resolved.join(relative)).ok()?,
             ]);
+        }
+        #[cfg(windows)]
+        {
+            let variants: Vec<_> = paths
+                .iter()
+                .flat_map(|value| {
+                    [
+                        value.replace('\\', "/"),
+                        value.strip_prefix(r"\\?\").unwrap_or(value).to_owned(),
+                    ]
+                })
+                .collect();
+            paths.extend(variants);
         }
         Some(paths)
     }

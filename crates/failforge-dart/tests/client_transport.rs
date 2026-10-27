@@ -1,11 +1,16 @@
 use failforge_dart::{AdapterClient, AdapterCommand, ClientError, ClientOptions, ProtocolError};
 use failforge_runner::{CancelReason, CommandSpec, CompletionCause, Runner};
 use serde_json::json;
+#[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::NamedPipeServer as ControlStream;
+#[cfg(unix)]
+use tokio::net::{UnixListener as ControlListener, UnixStream as ControlStream};
 
 fn spec(mode: &str) -> CommandSpec {
     CommandSpec {
@@ -126,17 +131,42 @@ async fn stdout_after_last_response_is_rejected_at_close_after_cleanup() {
 static NEXT_CONTROL: AtomicU64 = AtomicU64::new(0);
 struct Control {
     path: PathBuf,
-    listener: tokio::net::UnixListener,
-    stream: Option<tokio::net::UnixStream>,
+    #[cfg(unix)]
+    listener: ControlListener,
+    #[cfg(windows)]
+    listener: Option<ControlStream>,
+    stream: Option<ControlStream>,
 }
 impl Control {
     fn new() -> Self {
+        #[cfg(unix)]
         let path = PathBuf::from(format!(
             "/tmp/ff-adapter-{}-{}.sock",
             std::process::id(),
             NEXT_CONTROL.fetch_add(1, Ordering::Relaxed)
         ));
-        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        #[cfg(unix)]
+        let listener = ControlListener::bind(&path).unwrap();
+        #[cfg(windows)]
+        let path = PathBuf::from(format!(
+            r"\\.\pipe\failforge-adapter-test-{}-{}",
+            std::process::id(),
+            NEXT_CONTROL.fetch_add(1, Ordering::Relaxed)
+        ));
+        #[cfg(windows)]
+        let listener = {
+            use failforge_workspace::windows_fs::PrivateSecurity;
+            use tokio::net::windows::named_pipe::ServerOptions;
+            let mut security = PrivateSecurity::new().unwrap();
+            Some(unsafe {
+                ServerOptions::new()
+                    .first_pipe_instance(true)
+                    .reject_remote_clients(true)
+                    .max_instances(1)
+                    .create_with_security_attributes_raw(&path, security.as_ptr().cast())
+                    .unwrap()
+            })
+        };
         Self {
             path,
             listener,
@@ -145,10 +175,20 @@ impl Control {
     }
     async fn request_observed(&mut self) {
         use tokio::io::AsyncReadExt;
+        #[cfg(unix)]
         let (stream, _) = tokio::time::timeout(Duration::from_secs(2), self.listener.accept())
             .await
             .unwrap()
             .unwrap();
+        #[cfg(windows)]
+        let stream = {
+            let pipe = self.listener.take().unwrap();
+            tokio::time::timeout(Duration::from_secs(2), pipe.connect())
+                .await
+                .unwrap()
+                .unwrap();
+            pipe
+        };
         self.stream = Some(stream);
         let mut line = Vec::new();
         let mut lines = 0;
@@ -314,7 +354,9 @@ async fn interrupted_request_close_keeps_actual_cleanup_evidence() {
     let result = closed.unwrap();
     assert!(result.cleanup.is_complete());
     assert_eq!(result.cause, CompletionCause::Cancelled(CancelReason::User));
+    #[cfg(unix)]
     assert_eq!(result.status.unwrap().signal(), Some(libc::SIGTERM));
+    #[cfg(unix)]
     assert!(
         result
             .cleanup
@@ -327,7 +369,11 @@ async fn interrupted_request_close_keeps_actual_cleanup_evidence() {
 async fn buffered_response_after_interruption(case: &str) -> failforge_dart::ClientClose {
     let runner = Arc::new(Runner::new());
     let mut control = Control::new();
-    let release = control.path.with_extension("release");
+    let release = std::env::temp_dir().join(format!(
+        "ff-response-release-{}-{}",
+        std::process::id(),
+        NEXT_CONTROL.fetch_add(1, Ordering::Relaxed)
+    ));
     let mut specification = spec("buffered-valid-response");
     specification.env.set.insert(
         "FAILFORGE_ADAPTER_CONTROL".into(),
@@ -419,6 +465,7 @@ async fn interrupted_response_is_still_strictly_validated_after_native_cleanup()
     }
 }
 
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn interrupted_noncooperative_adapter_escalates_after_its_grace_period() {
     let runner = Arc::new(Runner::new());

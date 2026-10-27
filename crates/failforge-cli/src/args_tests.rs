@@ -292,7 +292,7 @@ fn timeout_must_be_positive_in_every_unit() {
 
 #[test]
 fn native_arguments_paths_and_environment_are_preserved() {
-    let raw = |bytes: &[u8]| OsString::from_vec(bytes.to_vec());
+    let raw = crate::test_support::raw;
     let values = vec![
         raw(b"failforge"),
         raw(b"run"),
@@ -316,17 +316,12 @@ fn native_arguments_paths_and_environment_are_preserved() {
     assert_eq!(command.program, raw(b"./tool-\xfa"));
     assert_eq!(command.args, [raw(b"arg-\xf9")]);
     assert_eq!(
-        command.cwd.as_os_str().as_bytes(),
-        b"/invocation/child-\xff"
+        command.cwd,
+        Path::new("/invocation").join(raw(b"child-\xff"))
     );
     assert_eq!(
-        command
-            .capture_policy
-            .capture_dir
-            .unwrap()
-            .as_os_str()
-            .as_bytes(),
-        b"/invocation/capture-\xfe"
+        command.capture_policy.capture_dir.unwrap(),
+        Path::new("/invocation").join(raw(b"capture-\xfe"))
     );
     assert_eq!(
         command.env.set.get(raw(b"KEY-\xfd").as_os_str()),
@@ -342,7 +337,7 @@ fn invalid_native_configuration_does_not_echo_raw_arguments() {
             OsString::from("failforge"),
             OsString::from("run"),
             OsString::from(option),
-            OsString::from_vec(b"secret\0=value".to_vec()),
+            crate::test_support::raw(b"secret\0=value"),
             OsString::from("--"),
             OsString::from("tool"),
         ])

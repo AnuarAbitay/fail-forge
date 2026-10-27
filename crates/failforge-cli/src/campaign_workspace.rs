@@ -1,10 +1,18 @@
 //! Native campaign preflight, fresh snapshot ownership and explicit cleanup.
+#[cfg(windows)]
+use failforge_workspace::windows_fs as win;
 use std::collections::BTreeMap;
+#[cfg(unix)]
 use std::ffi::CString;
-use std::fs::{self, File, OpenOptions};
+#[cfg(unix)]
+use std::fs::OpenOptions;
+use std::fs::{self, File};
 use std::io::{self, Write};
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd};
+#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
+#[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -75,11 +83,19 @@ pub(crate) struct Request {
     pub(crate) replay: Option<ReplayPaths>,
 }
 
-fn default_registry() -> PathBuf {
+#[cfg(unix)]
+fn default_registry() -> Result<PathBuf, NamespaceError> {
     // SAFETY: geteuid has no pointer arguments or side effects.
-    std::env::temp_dir().join(format!("failforge-workspaces-{}", unsafe {
-        libc::geteuid()
-    }))
+    Ok(
+        std::env::temp_dir().join(format!("failforge-workspaces-{}", unsafe {
+            libc::geteuid()
+        })),
+    )
+}
+
+#[cfg(windows)]
+fn default_registry() -> Result<PathBuf, NamespaceError> {
+    Ok(std::env::temp_dir().join(format!("failforge-workspaces-{}", win::current_sid()?)))
 }
 
 pub(crate) fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
@@ -160,7 +176,7 @@ fn validate_request(request: &Request) -> Result<(), NamespaceError> {
         "original":{"root":request.project,"hashes":{}},
         "output":request.output.clone().unwrap_or_else(||request.project.join(".failforge/runs").join(&request.run_id)),
         "runtime":runtime_value(&request.runtime),
-        "workspace":{"root":request.registry.clone().unwrap_or_else(default_registry),
+        "workspace":{"root":match &request.registry { Some(path) => path.clone(), None => default_registry()? },
             "campaign":format!("campaign-{}",request.run_id)},
         "frozen":{},"environment":request.environment,"maxMutants":request.max_mutants,
         "families":request.families.iter().map(Family::to_value).collect::<Vec<_>>()}))?;
@@ -190,9 +206,11 @@ fn executable(path: &Path) -> Result<(), NamespaceError> {
     if !path.is_file() {
         return Err(invalid("missing executable campaign tool"));
     }
+    #[cfg(unix)]
     let name = CString::new(path.as_os_str().as_bytes())
         .map_err(|_| invalid("invalid executable path"))?;
     // SAFETY: name is terminated and remains live during access.
+    #[cfg(unix)]
     if unsafe { libc::access(name.as_ptr(), libc::X_OK) } != 0 {
         return Err(invalid("native campaign tools must be executable"));
     }
@@ -202,12 +220,18 @@ fn executable(path: &Path) -> Result<(), NamespaceError> {
 fn validate_runtime(runtime: &mut RuntimeInputs, flutter: bool) -> Result<(), NamespaceError> {
     if flutter && runtime.flutter_sdk.is_none() {
         if let Some(candidate) = runtime.dart_sdk.ancestors().nth(3) {
-            if candidate.join("bin/flutter").is_file() {
+            if candidate
+                .join(failforge_config::platform::FLUTTER_BIN)
+                .is_file()
+            {
                 runtime.flutter_sdk = Some(candidate.to_owned());
             }
         }
     }
-    for path in [&runtime.runner, &runtime.dart_sdk.join("bin/dart")] {
+    for path in [
+        &runtime.runner,
+        &runtime.dart_sdk.join(failforge_config::platform::DART_BIN),
+    ] {
         executable(path)?;
     }
     for path in [
@@ -224,7 +248,7 @@ fn validate_runtime(runtime: &mut RuntimeInputs, flutter: bool) -> Result<(), Na
                 .flutter_sdk
                 .as_ref()
                 .ok_or_else(|| invalid("Flutter project requires a Flutter SDK"))?
-                .join("bin/flutter"),
+                .join(failforge_config::platform::FLUTTER_BIN),
         )?;
     }
     Ok(())
@@ -272,16 +296,36 @@ pub(crate) fn literal_includes(project: &Path, rules: &Value) -> Result<(), Name
     Ok(())
 }
 
+fn is_alias(info: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        info.file_type().is_symlink()
+    }
+    #[cfg(windows)]
+    {
+        win::is_reparse(info)
+    }
+}
+
 fn no_symlink_ancestors(path: &Path, fresh: bool) -> Result<(), NamespaceError> {
     absolute(path)?;
     let mut current = PathBuf::new();
     for component in path.components() {
         match component {
+            Component::Prefix(_) => {
+                #[cfg(windows)]
+                {
+                    current.push(component);
+                    continue;
+                }
+                #[cfg(unix)]
+                return Err(invalid("campaign output path must be normalized"));
+            }
             Component::RootDir | Component::Normal(_) => current.push(component),
             _ => return Err(invalid("campaign output path must be normalized")),
         }
         match fs::symlink_metadata(&current) {
-            Ok(info) if info.file_type().is_symlink() => {
+            Ok(info) if is_alias(&info) => {
                 return Err(invalid("campaign output ancestors must not be symlinks"));
             }
             Ok(_) if fresh && current == path => {
@@ -314,10 +358,10 @@ fn canonical_missing(path: &Path) -> Result<PathBuf, NamespaceError> {
     loop {
         match fs::symlink_metadata(ancestor) {
             Ok(info) => {
-                if ancestor == path && info.file_type().is_symlink() {
+                if ancestor == path && is_alias(&info) {
                     return Err(invalid("campaign registry must not be a symlink"));
                 }
-                if !info.is_dir() && !info.file_type().is_symlink() {
+                if !info.is_dir() && !is_alias(&info) {
                     return Err(invalid("campaign registry ancestor is not a directory"));
                 }
                 break;
@@ -342,8 +386,45 @@ fn canonical_missing(path: &Path) -> Result<PathBuf, NamespaceError> {
     Ok(result)
 }
 
+#[cfg(unix)]
 fn overlaps(left: &Path, right: &Path) -> bool {
     left.starts_with(right) || right.starts_with(left)
+}
+#[cfg(windows)]
+fn overlaps(left: &Path, right: &Path) -> bool {
+    path_starts_with(left, right) || path_starts_with(right, left)
+}
+#[cfg(unix)]
+pub(crate) fn path_starts_with(path: &Path, root: &Path) -> bool {
+    path.starts_with(root)
+}
+#[cfg(windows)]
+pub(crate) fn path_starts_with(path: &Path, root: &Path) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
+    let mut path = path.components();
+    for expected in root.components() {
+        let Some(actual) = path.next() else {
+            return false;
+        };
+        let left: Vec<_> = actual.as_os_str().encode_wide().collect();
+        let right: Vec<_> = expected.as_os_str().encode_wide().collect();
+        // SAFETY: read-only native ordinal case-insensitive comparison of live
+        // UTF-16 component buffers, whose bounded path lengths fit native i32.
+        if unsafe {
+            CompareStringOrdinal(
+                left.as_ptr(),
+                left.len() as i32,
+                right.as_ptr(),
+                right.len() as i32,
+                1,
+            )
+        } != CSTR_EQUAL
+        {
+            return false;
+        }
+    }
+    true
 }
 
 pub(crate) fn preflight(
@@ -390,15 +471,18 @@ pub(crate) fn preflight(
         .clone()
         .unwrap_or_else(|| original.root.join(".failforge/runs").join(&request.run_id));
     no_symlink_ancestors(&output, true)?;
-    if original.root.starts_with(&output)
-        || output.starts_with(&original.root)
-            && !output.starts_with(original.root.join(".failforge"))
+    if path_starts_with(&original.root, &output)
+        || path_starts_with(&output, &original.root)
+            && !path_starts_with(&output, &original.root.join(".failforge"))
     {
         return Err(invalid(
             "campaign output inside original must be under .failforge",
         ));
     }
-    let registry = canonical_missing(&request.registry.clone().unwrap_or_else(default_registry))?;
+    let registry = canonical_missing(&match &request.registry {
+        Some(path) => path.clone(),
+        None => default_registry()?,
+    })?;
     let mut protected = vec![
         runtime.dart_sdk.canonicalize()?,
         runtime.adapter_root.canonicalize()?,
@@ -442,6 +526,7 @@ pub(crate) fn preflight(
     })
 }
 
+#[cfg(unix)]
 fn verify_named(directory: &File, path: &Path) -> Result<(), NamespaceError> {
     let held = directory.metadata()?;
     let named = fs::symlink_metadata(path)?;
@@ -451,6 +536,7 @@ fn verify_named(directory: &File, path: &Path) -> Result<(), NamespaceError> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn create_directory(path: &Path) -> Result<DirectoryGuard, NamespaceError> {
     no_symlink_ancestors(path, true)?;
     let mut current = PathBuf::from("/");
@@ -507,6 +593,53 @@ fn create_directory(path: &Path) -> Result<DirectoryGuard, NamespaceError> {
     Ok(guard)
 }
 
+#[cfg(windows)]
+fn verify_named(directory: &File, path: &Path) -> Result<(), NamespaceError> {
+    if win::identity(&win::directory(path)?)? != win::identity(directory)? {
+        return Err(invalid("campaign report directory changed"));
+    }
+    Ok(())
+}
+#[cfg(windows)]
+fn create_directory(path: &Path) -> Result<DirectoryGuard, NamespaceError> {
+    no_symlink_ancestors(path, true)?;
+    let mut parts = path.components();
+    let prefix = parts
+        .next()
+        .ok_or_else(|| invalid("campaign output needs a volume"))?;
+    if !matches!(prefix, Component::Prefix(_)) || parts.next() != Some(Component::RootDir) {
+        return Err(invalid("campaign output must be absolute"));
+    }
+    let mut volume = prefix.as_os_str().to_os_string();
+    volume.push("\\");
+    let mut current = PathBuf::from(volume);
+    let mut directory = win::directory(&current)?;
+    let components: Vec<_> = parts.collect();
+    for (index, part) in components.iter().enumerate() {
+        let Component::Normal(name) = part else {
+            return Err(invalid("campaign output path must be normalized"));
+        };
+        verify_named(&directory, &current)?;
+        let child = match win::create_directory_at(&directory, name) {
+            Ok(child) => child,
+            Err(error)
+                if index + 1 < components.len() && error.kind() == io::ErrorKind::AlreadyExists =>
+            {
+                win::directory_at(&directory, name)?
+            }
+            Err(error) => return Err(error.into()),
+        };
+        verify_named(&directory, &current)?;
+        current.push(name);
+        verify_named(&child, &current)?;
+        directory = child;
+    }
+    no_symlink_ancestors(path, false)?;
+    let guard = DirectoryGuard::open(path)?;
+    verify_named(&directory, path)?;
+    Ok(guard)
+}
+
 pub(crate) fn create_output(preflight: &Preflight) -> Result<DirectoryGuard, NamespaceError> {
     verify_original(preflight)?;
     let output = create_directory(&preflight.output)?;
@@ -533,6 +666,7 @@ pub(crate) fn verify_original(preflight: &Preflight) -> Result<(), NamespaceErro
     preflight.original_guard.verify()
 }
 
+#[cfg(unix)]
 fn block_cleanup(campaign: &File) -> io::Result<()> {
     let name = CString::new(".cleanup-blocked").expect("constant filename");
     // The existing V1 reaper rejects an extra control entry before touching work.
@@ -569,6 +703,22 @@ fn block_cleanup(campaign: &File) -> io::Result<()> {
     marker.write_all(b"FAILFORGE_CLEANUP_BLOCKED_V1\n")?;
     marker.sync_all()?;
     campaign.sync_all()
+}
+
+#[cfg(windows)]
+fn block_cleanup(campaign: &File) -> io::Result<()> {
+    let mut marker = match win::regular_at(
+        campaign,
+        std::ffi::OsStr::new(".cleanup-blocked"),
+        true,
+        true,
+    ) {
+        Ok(marker) => marker,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    marker.write_all(b"FAILFORGE_CLEANUP_BLOCKED_V1\n")?;
+    marker.sync_all()
 }
 
 pub(crate) struct Workspace {
@@ -611,7 +761,7 @@ impl Workspace {
         self.root.join(&self.campaign)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn snapshot_path(&self) -> Option<&Path> {
         self.snapshot_path.as_deref()
     }
@@ -750,6 +900,40 @@ pub(crate) struct Cleanup {
     pub(crate) skipped: Vec<Skip>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "campaign_workspace_tests.rs"]
 mod tests;
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    #[test]
+    fn windows_output_paths_preserve_volume_and_reject_existing_directory() {
+        let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "failforge-campaign-output-{}",
+            win::random_token().unwrap()
+        ));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("nested/report");
+        let guard = create_directory(&path).unwrap();
+        guard.verify().unwrap();
+        win::require_private(&win::directory(&path).unwrap(), true).unwrap();
+        assert!(create_directory(&path).is_err());
+        assert!(no_symlink_ancestors(&root.join("a/../b"), true).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn windows_protected_overlap_is_ordinal_case_insensitive() {
+        assert!(overlaps(Path::new(r"C:\SDK\bin"), Path::new(r"c:\sdk")));
+        assert!(!overlaps(Path::new(r"C:\SDK-other"), Path::new(r"c:\sdk")));
+        assert!(
+            default_registry()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("failforge-workspaces-S-")
+        );
+    }
+}

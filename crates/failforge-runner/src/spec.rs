@@ -68,8 +68,20 @@ impl CommandSpec {
 
         self.env.validate()?;
 
+        #[cfg(unix)]
         let has_program_path = self.program.as_encoded_bytes().contains(&b'/');
-        let has_explicit_path = self.env.set.contains_key(OsStr::new("PATH"));
+        #[cfg(windows)]
+        let has_program_path = self
+            .program
+            .as_encoded_bytes()
+            .iter()
+            .any(|byte| matches!(byte, b'/' | b'\\'))
+            || std::path::Path::new(&self.program).has_root();
+        let has_explicit_path = self
+            .env
+            .set
+            .keys()
+            .any(|key| env_keys_equal(key, OsStr::new("PATH")));
 
         if self.env.clear && !has_program_path && !has_explicit_path {
             return Err(SpecError::ClearEnvRequiresPath);
@@ -163,13 +175,37 @@ impl EnvSpec {
         }
 
         for key in self.set.keys() {
-            if self.remove.contains(key) {
+            if self
+                .remove
+                .iter()
+                .any(|removed| env_keys_equal(key, removed))
+            {
                 return Err(SpecError::EnvKeyConflict);
             }
         }
 
+        #[cfg(windows)]
+        for (index, key) in self.set.keys().enumerate() {
+            if self
+                .set
+                .keys()
+                .skip(index + 1)
+                .any(|other| env_keys_equal(key, other))
+            {
+                return Err(SpecError::EnvKeyConflict);
+            }
+        }
         Ok(())
     }
+}
+
+#[cfg(unix)]
+fn env_keys_equal(left: &OsStr, right: &OsStr) -> bool {
+    left == right
+}
+#[cfg(windows)]
+fn env_keys_equal(left: &OsStr, right: &OsStr) -> bool {
+    crate::prepare::env_keys_equal(left, right)
 }
 
 #[derive(Debug, PartialEq, Eq, Default)]

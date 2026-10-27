@@ -49,6 +49,10 @@ pub(crate) fn prepare(spec: &CommandSpec, invocation: &Path) -> io::Result<Comma
     Ok(command)
 }
 
+pub(crate) fn set_stdin(command: &mut Command, input: std::fs::File) {
+    command.stdin(Stdio::from(input));
+}
+
 pub(crate) fn absolute(path: &Path, base: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_path_buf()

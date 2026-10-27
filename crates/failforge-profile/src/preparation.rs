@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
@@ -46,7 +47,25 @@ fn normalized_folded(value: &str) -> String {
 
 fn same_file(left: &Path, right: &Path) -> io::Result<bool> {
     match (fs::metadata(left), fs::metadata(right)) {
-        (Ok(a), Ok(b)) => Ok(a.dev() == b.dev() && a.ino() == b.ino()),
+        (Ok(a), Ok(b)) => {
+            #[cfg(unix)]
+            {
+                Ok(a.dev() == b.dev() && a.ino() == b.ino())
+            }
+            #[cfg(windows)]
+            {
+                let _ = (a, b);
+                use failforge_workspace::windows_fs as win;
+                let open = |path: &Path| {
+                    if path.is_dir() {
+                        win::directory(path)
+                    } else {
+                        win::regular(path, false)
+                    }
+                };
+                Ok(win::identity(&open(left)?)? == win::identity(&open(right)?)?)
+            }
+        }
         (Err(e), _) | (_, Err(e)) if e.kind() == io::ErrorKind::NotFound => Ok(false),
         (Err(e), _) | (_, Err(e)) => Err(e),
     }
@@ -93,7 +112,16 @@ fn reject_aliases(requested: &Path, project: &Path) -> Result<(), ProfileError> 
             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
             Err(error) => return Err(error.into()),
         };
-        if metadata.file_type().is_symlink() {
+        if metadata.file_type().is_symlink() || {
+            #[cfg(windows)]
+            {
+                failforge_workspace::windows_fs::is_reparse(&metadata)
+            }
+            #[cfg(unix)]
+            {
+                false
+            }
+        } {
             let resolved = paths::resolve_native_path(candidate, "profile path", project)?;
             let parent = candidate.parent().unwrap_or(Path::new("/"));
             let parent = paths::resolve_native_path(parent, "profile path", project)?;
@@ -192,6 +220,8 @@ fn package_paths(
     let relative_text = relative
         .to_str()
         .ok_or_else(|| config("file must contain valid Unicode"))?;
+    #[cfg(windows)]
+    let relative_text = relative_text.replace('\\', "/");
     if relative_text.contains(['*', '?', '[', ']', '{', '}', '\\']) {
         return Err(config(
             "--file must have a literal path without glob characters or backslashes",
@@ -427,6 +457,8 @@ pub fn prepare_profile(
     let source_text = relative
         .to_str()
         .ok_or_else(|| config("file must contain valid Unicode"))?;
+    #[cfg(windows)]
+    let source_text = source_text.replace('\\', "/");
     let mut values = json!({"workers": 1, "timeouts": {"test": "30s", "command": "120s"},
         "rules": {"include": [source_text]}, "mutations": mutations, "limits": {"max_mutants": 1000}});
     for (name, path) in [

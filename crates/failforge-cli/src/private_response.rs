@@ -1,7 +1,9 @@
 //! Bounded private JSON responses shared by the native workspace commands.
 use std::io::{self, Write};
 
-use failforge_workspace::{Cancellation, InputError};
+#[cfg(unix)]
+use failforge_workspace::Cancellation;
+use failforge_workspace::InputError;
 use serde_json::{Value, json};
 
 const LIMIT: usize = 64 * 1024 * 1024;
@@ -33,6 +35,7 @@ pub(crate) fn encode(result: Value) -> Result<Vec<u8>, InputError> {
     Ok(response.0)
 }
 
+#[cfg(unix)]
 pub(crate) fn publish(response: &[u8], cancellation: &Cancellation) -> Result<(), InputError> {
     for chunk in response.chunks(64 * 1024) {
         cancellation.check()?;

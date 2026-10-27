@@ -1,18 +1,24 @@
 //! Private filesystem operations; the campaign retains scheduling and leases.
 use std::collections::BTreeMap;
+#[cfg(unix)]
 use std::io::Write;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::process::ExitCode;
 
+#[cfg(unix)]
+use crate::signals::{SignalKind, signal};
+#[cfg(unix)]
 use failforge_runner::WorkspaceLease;
 use failforge_workspace::{self as inputs, BoundTree, Cancellation, InputError, PreparedProject};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use tokio::signal::unix::{SignalKind, signal};
 
+#[cfg(unix)]
 const REQUEST_ENV: &str = "FAILFORGE_WORKSPACE_REQUEST_FD";
 
+#[cfg(unix)]
 #[derive(Debug, Deserialize)]
 #[serde(tag = "operation", rename_all = "kebab-case", deny_unknown_fields)]
 enum Request {
@@ -57,6 +63,7 @@ fn invalid(message: &str) -> InputError {
     InputError::Invalid(message.into())
 }
 
+#[cfg(unix)]
 fn absolute(path: &Path) -> Result<(), InputError> {
     if !path.is_absolute() || path.to_str().is_none_or(|text| text.contains('\0')) {
         return Err(invalid(
@@ -66,6 +73,7 @@ fn absolute(path: &Path) -> Result<(), InputError> {
     Ok(())
 }
 
+#[cfg(unix)]
 impl Request {
     fn validate(&self) -> Result<(), InputError> {
         match self {
@@ -108,6 +116,7 @@ impl Request {
     }
 }
 
+#[cfg(unix)]
 fn decode(bytes: &[u8]) -> Result<Request, InputError> {
     let request: Request = serde_json::from_value(inputs::parse_json(bytes)?)
         .map_err(|_| invalid("invalid native workspace request"))?;
@@ -115,11 +124,13 @@ fn decode(bytes: &[u8]) -> Result<Request, InputError> {
     Ok(request)
 }
 
+#[cfg(unix)]
 fn value<T: serde::Serialize>(value: T) -> Result<Value, InputError> {
     serde_json::to_value(value)
         .map_err(|_| invalid("workspace result cannot be represented as JSON"))
 }
 
+#[cfg(unix)]
 fn dispatch(request: Request, cancellation: &Cancellation) -> Result<Value, InputError> {
     cancellation.check()?;
     match request {
@@ -200,7 +211,10 @@ pub(crate) fn bind_inputs(
     // A bundled Dart SDK can be used without invoking Flutter. Bind Flutter's
     // tools and engine only when the prepared test framework actually uses them.
     if let Some(flutter) = runtime.flutter_sdk.as_ref().filter(|_| project.flutter) {
-        for relative in ["bin/flutter", "bin/cache/flutter_tools.snapshot"] {
+        for relative in [
+            failforge_config::platform::FLUTTER_BIN,
+            "bin/cache/flutter_tools.snapshot",
+        ] {
             let path = flutter.join(relative);
             if path.is_file() {
                 paths.push(path);
@@ -281,6 +295,7 @@ fn environment_hash(environment: &BTreeMap<String, String>) -> String {
     )
 }
 
+#[cfg(unix)]
 async fn process(
     request: Request,
     readiness: Option<crate::readiness::Readiness>,
@@ -311,6 +326,7 @@ async fn process(
     cancellation.check()
 }
 
+#[cfg(unix)]
 pub(crate) fn execute() -> ExitCode {
     let result = (|| -> Result<(), InputError> {
         // Hold any inherited campaign lease until all filesystem work ends.
@@ -337,6 +353,6 @@ pub(crate) fn execute() -> ExitCode {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "workspace_inputs_tests.rs"]
 mod tests;

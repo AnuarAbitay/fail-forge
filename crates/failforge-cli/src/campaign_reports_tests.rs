@@ -1,5 +1,6 @@
 use super::*;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -500,6 +501,7 @@ fn journal_failure_latches_and_keeps_late_worker_records() {
         "foreign"
     );
 }
+#[cfg(unix)]
 #[test]
 fn final_journal_failure_overrides_success_but_preserves_execution_failure() {
     for status in ["completed", "failed"] {
@@ -670,6 +672,13 @@ fn report_files_are_private() {
         "progress.json",
         "families/classic/summary.json",
     ] {
+        #[cfg(windows)]
+        failforge_workspace::windows_fs::require_private(
+            &failforge_workspace::windows_fs::regular(&fixture.output.join(path), false).unwrap(),
+            false,
+        )
+        .unwrap();
+        #[cfg(unix)]
         assert_eq!(
             fs::metadata(fixture.output.join(path))
                 .unwrap()

@@ -25,6 +25,11 @@ use std::time::{Duration, Instant};
 #[link(name = "proc")]
 unsafe extern "C" {}
 
+pub(crate) const INTERRUPT: i32 = libc::SIGINT;
+pub(crate) const TERMINATE: i32 = libc::SIGTERM;
+pub(crate) const KILL: i32 = libc::SIGKILL;
+pub(crate) type OutputPipe = OwnedFd;
+
 const MAX_GROUP_PIDS: usize = 65_536;
 const REAPER_CAPACITY: usize = 128;
 const REAPER_BUDGET: Duration = Duration::from_secs(5);

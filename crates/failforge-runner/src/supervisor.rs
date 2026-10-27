@@ -6,7 +6,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
 use tokio::io::Interest;
+#[cfg(unix)]
 use tokio::io::unix::AsyncFd;
 use tokio::sync::watch;
 
@@ -164,7 +166,7 @@ impl Runner {
     /// only bookkeeping; filesystem calls never hold the accounting mutex.
     /// Once spawn succeeds, an unwind guard owns publication and accounting.
     pub fn start(&self, spec: CommandSpec) -> Result<RunHandle, RunnerError> {
-        self.start_inner(spec, None)
+        self.start_inner(spec, None, None)
     }
 
     /// Start with a caller-owned input descriptor instead of null stdin.
@@ -177,13 +179,28 @@ impl Runner {
         spec: CommandSpec,
         input: std::fs::File,
     ) -> Result<RunHandle, RunnerError> {
-        self.start_inner(spec, Some(input))
+        self.start_inner(spec, Some(input), None)
+    }
+
+    /// Intentionally pass the internal campaign lease to a native helper.
+    ///
+    /// Ordinary subject commands never inherit it. The backend duplicates the
+    /// handle, supplies its actual inherited value in the environment and admits
+    /// it to the explicit handle allowlist before starting the helper.
+    #[cfg(windows)]
+    pub fn start_with_workspace_lease(
+        &self,
+        spec: CommandSpec,
+        lease: &crate::WorkspaceLease,
+    ) -> Result<RunHandle, RunnerError> {
+        self.start_inner(spec, None, Some(lease))
     }
 
     fn start_inner(
         &self,
         spec: CommandSpec,
         input: Option<std::fs::File>,
+        lease: Option<&crate::WorkspaceLease>,
     ) -> Result<RunHandle, RunnerError> {
         spec.validate().map_err(RunnerError::InvalidSpec)?;
         let id = self.allocate_id()?;
@@ -225,8 +242,16 @@ impl Runner {
         let mut command = crate::prepare::prepare(&spec, &invocation)
             .map_err(|error| RunnerError::preparation("command preparation", error))?;
         if let Some(input) = input {
-            command.stdin(std::process::Stdio::from(input));
+            crate::prepare::set_stdin(&mut command, input);
         }
+        #[cfg(windows)]
+        if let Some(lease) = lease {
+            command
+                .set_lease(lease)
+                .map_err(|error| RunnerError::preparation("workspace lease", error))?;
+        }
+        #[cfg(unix)]
+        let _ = lease;
         let mut output = OutputSession::prepare(&spec.capture_policy, &invocation)
             .map_err(|error| RunnerError::preparation("capture preparation", error))?;
         let preparation = preparation_start.elapsed();
@@ -397,9 +422,18 @@ fn validate_runtime() -> Result<tokio::runtime::Handle, RunnerError> {
     // spawn, catch this boundary, and never replace the global panic hook.
     let probe = catch_unwind(AssertUnwindSafe(|| -> io::Result<()> {
         drop(tokio::time::sleep(Duration::ZERO));
-        let (stream, _peer) = std::os::unix::net::UnixStream::pair()?;
-        stream.set_nonblocking(true)?;
-        drop(AsyncFd::with_interest(stream, Interest::READABLE)?);
+        #[cfg(unix)]
+        {
+            let (stream, _peer) = std::os::unix::net::UnixStream::pair()?;
+            stream.set_nonblocking(true)?;
+            drop(AsyncFd::with_interest(stream, Interest::READABLE)?);
+        }
+        #[cfg(windows)]
+        {
+            let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?;
+            listener.set_nonblocking(true)?;
+            drop(tokio::net::TcpListener::from_std(listener)?);
+        }
         Ok(())
     }));
     match probe {
@@ -517,8 +551,8 @@ async fn supervise(
     guard.timings.execution = spawned.elapsed();
     let cleanup_start = Instant::now();
     let initial_signal = match cause {
-        CompletionCause::Cancelled(CancelReason::CtrlC) => libc::SIGINT,
-        _ => libc::SIGTERM,
+        CompletionCause::Cancelled(CancelReason::CtrlC) => crate::platform::INTERRUPT,
+        _ => crate::platform::TERMINATE,
     };
     let mut group = cleanup_group(&child, &mut guard.cleanup);
     let mut observed = cleanup_observe(&mut child, &mut guard.cleanup);
@@ -553,7 +587,7 @@ async fn supervise(
             .unwrap_or_else(Instant::now);
         send_signal(
             &mut child,
-            libc::SIGKILL,
+            crate::platform::KILL,
             forced_deadline,
             spawned,
             &mut guard.cleanup,
@@ -688,6 +722,6 @@ async fn send_signal(
     });
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "supervisor_tests.rs"]
 mod tests;

@@ -1,10 +1,12 @@
 use super::*;
+#[cfg(unix)]
+use crate::test_support::symlink;
 use std::fs;
-use std::os::unix::fs::symlink;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 fn value() -> Value {
-    json!({"operation":"family","project":{"root":"/tmp/subject","name":"subject",
+    crate::test_support::paths(
+        json!({"operation":"family","project":{"root":"/tmp/subject","name":"subject",
         "packages":{"subject":"/tmp/subject","test":"/tmp/test"},"graph":{},
         "flutter":false,"frameworkCollision":false},"output":"/tmp/reports",
         "runtime":{"installation":"/tmp/tools","runner":"/tmp/tools/failforge",
@@ -12,7 +14,8 @@ fn value() -> Value {
         "config":{"commandTimeout":"6s","testTimeout":"1s"},
         "workspace":{"root":"/tmp/registry","campaign":"campaign-00000000000000000000000000000000"},
         "candidates":[],"family":"classic","workers":2,"emptyPolicy":"controls",
-        "frozen":{},"environment":{"CI":"true"}})
+        "frozen":{},"environment":{"CI":"true"}}),
+    )
 }
 fn decode_value(value: &Value) -> Result<Request, NamespaceError> {
     decode(&serde_json::to_vec(value).unwrap())
@@ -43,7 +46,7 @@ fn typed_and_wire_decoders_share_validation() {
 fn retained_replay_baselines_receive_historical_selection_and_explicit_framework() {
     let mut value = value();
     value["retainedExpected"] = json!([["test/a_test.dart", "author"]]);
-    value["frameworkRoot"] = "/archive/upstream".into();
+    value["frameworkRoot"] = json!(crate::test_support::absolute("/archive/upstream"));
     let request = decode_value(&value).unwrap();
     let baseline = attempt_request(&request, request.output.join("baseline"), None, None).unwrap();
     assert_eq!(
@@ -53,7 +56,7 @@ fn retained_replay_baselines_receive_historical_selection_and_explicit_framework
     assert_eq!(baseline.context.alias, "failforge_subject");
     assert_eq!(
         baseline.framework_root,
-        Some(PathBuf::from("/archive/upstream"))
+        Some(crate::test_support::absolute("/archive/upstream"))
     );
     for (key, bad) in [
         ("retainedExpected", Value::Null),
@@ -248,6 +251,7 @@ impl Drop for Temp {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn directory_guard_detects_replacements_and_ancestor_alias_retargets() {
     let temp = Temp::new();
@@ -274,6 +278,12 @@ fn directory_guard_detects_replacements_and_ancestor_alias_retargets() {
 }
 
 fn put(root: &Path, relative: &str, bytes: impl AsRef<[u8]>) {
+    #[cfg(windows)]
+    let relative = if relative == "sdk/bin/dart" {
+        "sdk/bin/dart.exe"
+    } else {
+        relative
+    };
     let path = root.join(relative);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, bytes).unwrap();
@@ -289,7 +299,7 @@ fn owned_fixture() -> (Temp, Request, LifecycleCaps) {
     put(&root, "test/a_test.dart", "void main() {}\n");
     put(&root, ".dart_tool/package_config.json", serde_json::to_vec(&json!({
         "configVersion":2,"packages":[{"name":"subject","rootUri":"../","packageUri":"lib/"},
-            {"name":"test","rootUri":format!("file://{}/",dependency.display()),"packageUri":"lib/"}]
+            {"name":"test","rootUri":format!("{}/",failforge_workspace::file_uri(&dependency).unwrap()),"packageUri":"lib/"}]
     })).unwrap());
     put(&root, ".dart_tool/package_graph.json", br#"{"roots":["subject"],"packages":[{"name":"subject","dependencies":["test"]},{"name":"test","dependencies":[]}]}"#);
     for relative in [

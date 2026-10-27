@@ -47,6 +47,11 @@ pub fn classify_test_run(result: &CommandResult, evidence: &TestEvidence) -> Tes
     let Some(code) = result.status.and_then(|status| status.code()) else {
         return Class::InfrastructureError;
     };
+    #[cfg(windows)]
+    if code < 0 {
+        // Native exception statuses are not ordinary Dart test failures.
+        return Class::InfrastructureError;
+    }
     if !evidence.baseline_succeeded {
         return Class::BaselineUnavailable;
     }
@@ -80,11 +85,14 @@ pub fn classify_test_run(result: &CommandResult, evidence: &TestEvidence) -> Tes
 mod tests {
     use super::*;
     use failforge_runner::{CancelReason, CaptureSummary, CleanupReport, GroupState};
+    #[cfg(unix)]
     use std::os::unix::process::ExitStatusExt;
+    #[cfg(windows)]
+    use std::os::windows::process::ExitStatusExt;
     fn process(code: i32) -> CommandResult {
         CommandResult {
             cause: CompletionCause::ProcessCompleted,
-            status: Some(std::process::ExitStatus::from_raw(code << 8)),
+            status: Some(native_status(code)),
             timings: Default::default(),
             stdout: CaptureSummary::default(),
             stderr: CaptureSummary::default(),
@@ -94,6 +102,16 @@ mod tests {
                 group: GroupState::NoLiveMembers { zombies: 0 },
                 ..Default::default()
             },
+        }
+    }
+    fn native_status(code: i32) -> std::process::ExitStatus {
+        #[cfg(unix)]
+        {
+            std::process::ExitStatus::from_raw(code << 8)
+        }
+        #[cfg(windows)]
+        {
+            std::process::ExitStatus::from_raw(code as u32)
         }
     }
     #[test]
@@ -164,7 +182,14 @@ mod tests {
             TestRunClassification::InfrastructureError
         );
         result = process(1);
-        result.status = Some(std::process::ExitStatus::from_raw(9));
+        #[cfg(unix)]
+        {
+            result.status = Some(std::process::ExitStatus::from_raw(9));
+        }
+        #[cfg(windows)]
+        {
+            result.status = Some(std::process::ExitStatus::from_raw(0xc0000005));
+        }
         assert_eq!(
             classify_test_run(&result, &evidence),
             TestRunClassification::InfrastructureError

@@ -1,3 +1,4 @@
+#![cfg(unix)]
 //! The installed helper cooperatively drains an actual quiet protocol process.
 //! The finite Rust fixture needs neither Dart nor network access. Its natural
 //! 1.5-second response makes an ignored cancellation fail without orphaning it.

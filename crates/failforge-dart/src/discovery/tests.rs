@@ -273,7 +273,7 @@ fn invalid_candidates_reject_symlinks_and_oversized_sources() {
     let original = json!(mutant);
     std::fs::remove_file(fixture.0.join("lib/source.dart")).unwrap();
     std::fs::write(fixture.0.join("outside.dart"), b"int value = 1;\n").unwrap();
-    std::os::unix::fs::symlink("../outside.dart", fixture.0.join("lib/source.dart")).unwrap();
+    crate::test_fs::symlink("../outside.dart", fixture.0.join("lib/source.dart")).unwrap();
     assert!(candidate(0, &original, validation(&mutant, false), &fixture.0).is_err());
     std::fs::remove_file(fixture.0.join("lib/source.dart")).unwrap();
     let source = vec![b' '; MAX_SOURCE_BYTES + 1];

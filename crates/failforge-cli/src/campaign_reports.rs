@@ -9,7 +9,8 @@ use serde_json::{Value, json};
 
 use crate::campaign_publish::Publisher;
 use crate::campaign_publish_fs::invalid;
-#[path = "campaign_reports_fs.rs"]
+#[cfg_attr(unix, path = "campaign_reports_fs.rs")]
+#[cfg_attr(windows, path = "campaign_reports_fs_windows.rs")]
 mod filesystem;
 #[path = "campaign_replay_report.rs"]
 mod replay_report;

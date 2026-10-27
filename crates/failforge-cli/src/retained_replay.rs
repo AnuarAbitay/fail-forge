@@ -1,9 +1,18 @@
 //! Read-only admission of archived discovery and baseline evidence.
 //! Execution, isolation, confirmation and publication stay in the campaign owner.
+#[cfg(windows)]
+use failforge_workspace::windows_fs as win;
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
+#[cfg(test)]
+use std::fs;
+use std::fs::File;
+#[cfg(unix)]
+use std::fs::OpenOptions;
 use std::io::Read;
+#[cfg(unix)]
 use std::os::unix::fs::{FileExt, MetadataExt, OpenOptionsExt};
+#[cfg(windows)]
+use std::os::windows::fs::FileExt;
 use std::path::{Component, Path, PathBuf};
 
 use failforge_dart::namespace::NamespaceError;
@@ -29,21 +38,54 @@ pub(crate) struct ReplayPaths {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Fingerprint {
+    #[cfg(unix)]
     dev: u64,
+    #[cfg(unix)]
     ino: u64,
+    #[cfg(windows)]
+    identity: win::Identity,
     len: u64,
     modified: (i64, i64),
     changed: (i64, i64),
 }
 impl Fingerprint {
-    fn of(metadata: &fs::Metadata) -> Self {
-        Self {
+    #[cfg(unix)]
+    fn of(file: &File) -> Result<Self, NamespaceError> {
+        let metadata = file.metadata()?;
+        Ok(Self {
             dev: metadata.dev(),
             ino: metadata.ino(),
             len: metadata.len(),
             modified: (metadata.mtime(), metadata.mtime_nsec()),
             changed: (metadata.ctime(), metadata.ctime_nsec()),
+        })
+    }
+    #[cfg(windows)]
+    fn of(file: &File) -> Result<Self, NamespaceError> {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_BASIC_INFO, FileBasicInfo, GetFileInformationByHandleEx,
+        };
+        let identity = win::identity(file)?;
+        let mut basic = FILE_BASIC_INFO::default();
+        // SAFETY: retained live file handle and a writable matching ABI record.
+        if unsafe {
+            GetFileInformationByHandleEx(
+                file.as_raw_handle(),
+                FileBasicInfo,
+                (&mut basic as *mut FILE_BASIC_INFO).cast(),
+                size_of::<FILE_BASIC_INFO>() as u32,
+            )
+        } == 0
+        {
+            return Err(std::io::Error::last_os_error().into());
         }
+        Ok(Self {
+            identity,
+            len: file.metadata()?.len(),
+            modified: (basic.LastWriteTime, 0),
+            changed: (basic.ChangeTime, 0),
+        })
     }
 }
 
@@ -68,18 +110,21 @@ impl BoundFile {
             path.file_name()
                 .ok_or_else(|| invalid("invalid replay file"))?,
         );
+        #[cfg(unix)]
         let mut file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
             .open(&path)?;
+        #[cfg(windows)]
+        let mut file = win::regular(&path, false)?;
         let metadata = file.metadata()?;
         if !metadata.is_file() || metadata.len() > limit as u64 {
             return Err(invalid("replay evidence must be a bounded regular file"));
         }
-        let fingerprint = Fingerprint::of(&metadata);
+        let fingerprint = Fingerprint::of(&file)?;
         let mut bytes = Vec::with_capacity(metadata.len() as usize);
         (&mut file).take(limit as u64 + 1).read_to_end(&mut bytes)?;
-        if bytes.len() > limit || Fingerprint::of(&file.metadata()?) != fingerprint {
+        if bytes.len() > limit || Fingerprint::of(&file)? != fingerprint {
             return Err(invalid("replay evidence changed while reading"));
         }
         let bound = Self {
@@ -93,10 +138,16 @@ impl BoundFile {
     }
 
     fn verify_identity(&self) -> Result<(), NamespaceError> {
-        let named = fs::symlink_metadata(&self.path)?;
-        if !named.is_file()
-            || Fingerprint::of(&named) != self.fingerprint
-            || Fingerprint::of(&self.file.metadata()?) != self.fingerprint
+        #[cfg(unix)]
+        let named = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
+            .open(&self.path)?;
+        #[cfg(windows)]
+        let named = win::regular(&self.path, false)?;
+        if !named.metadata()?.is_file()
+            || Fingerprint::of(&named)? != self.fingerprint
+            || Fingerprint::of(&self.file)? != self.fingerprint
         {
             return Err(invalid("retained replay file identity changed"));
         }
@@ -109,7 +160,10 @@ impl BoundFile {
         let mut buffer = [0u8; 64 * 1024];
         let mut offset = 0;
         loop {
+            #[cfg(unix)]
             let count = self.file.read_at(&mut buffer, offset)?;
+            #[cfg(windows)]
+            let count = self.file.seek_read(&mut buffer, offset)?;
             if count == 0 {
                 break;
             }
@@ -241,10 +295,13 @@ impl LoadedReplay {
                     Some("pubspec.yaml" | "dart_test.yaml" | "analysis_options.yaml")
                 )
         }) {
-            if !source.contains_key(
-                name.to_str()
-                    .ok_or_else(|| invalid("non-Unicode replay source"))?,
-            ) {
+            let name = name
+                .components()
+                .map(|part| part.as_os_str().to_str())
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| invalid("non-Unicode replay source"))?
+                .join("/");
+            if !source.contains_key(&name) {
                 return Err(invalid("baseline provenance omits an author source"));
             }
         }

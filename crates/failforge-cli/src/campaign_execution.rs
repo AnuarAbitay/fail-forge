@@ -1,25 +1,28 @@
 //! Sequential discovery and family execution over one frozen campaign snapshot.
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{self, Write};
-use std::os::fd::AsFd;
+use std::io;
+#[cfg(unix)]
+use std::io::Write;
 use std::path::PathBuf;
+#[cfg(unix)]
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Instant;
 
+#[cfg(unix)]
+use crate::signals::{SignalKind, signal};
 use failforge_dart::namespace::NamespaceError;
-use failforge_runner::WorkspaceLease;
 use failforge_workspace::lifecycle::LifecycleCaps;
-use failforge_workspace::{
-    Cancellation, Hashes, PreparedProject, inspect_project, parse_json, verify_source,
-};
+#[cfg(any(unix, test))]
+use failforge_workspace::parse_json;
+use failforge_workspace::{Cancellation, Hashes, PreparedProject, inspect_project, verify_source};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::signal::unix::{SignalKind, signal};
 
 use crate::attempt::{Config, Workspace};
 use crate::dart_namespace::{absolute, invalid};
 use crate::family_execution::{DirectoryGuard, FamilyEvents};
+#[cfg(any(unix, test))]
 use crate::family_stream::Stream;
 use crate::namespace_planner::{PlanProject, PlanRuntime};
 use crate::retained_replay::LoadedReplay;
@@ -100,6 +103,7 @@ fn rules(value: &Value, component: bool) -> Result<(), NamespaceError> {
     Ok(())
 }
 
+#[cfg(any(unix, test))]
 fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
     decode_value(parse_json(raw)?)
 }
@@ -190,7 +194,7 @@ fn discovery_request(
         "directory":family_output(request,family).join("discovery"),"family":family.family,"payload":payload,
         "runtime":{"dartSdk":request.runtime.dart_sdk,"adapterRoot":request.runtime.adapter_root,
             "helper":request.runtime.runner.parent().ok_or_else(||invalid("runner has no parent"))?
-                .join("failforge-adapter-campaign")}}))
+                .join(failforge_config::platform::binary_name("failforge-adapter-campaign").as_ref())}}))
 }
 
 fn validate_selection(value: &Value, family: &Family) -> Result<(), NamespaceError> {
@@ -383,6 +387,7 @@ pub(crate) trait CampaignEvents {
     ) -> io::Result<()>;
 }
 
+#[cfg(any(unix, test))]
 impl CampaignEvents for Stream {
     fn emit_campaign(&mut self, event: Value) -> io::Result<()> {
         self.emit_campaign(event)
@@ -502,11 +507,10 @@ async fn schedule(
                 Ok(Discovery::Retained(replay.discovery.clone()))
             } else {
                 let child = discovery_request(&request, family)?;
-                let lease = WorkspaceLease::from_borrowed(
+                let lease = crate::native::workspace_lease(
                     caps.lease
                         .as_ref()
-                        .ok_or_else(|| invalid("missing campaign lease"))?
-                        .as_fd(),
+                        .ok_or_else(|| invalid("missing campaign lease"))?,
                 )?;
                 crate::adapter_discovery::run_owned(child, lease, cancel)
                     .await
@@ -731,6 +735,7 @@ pub(crate) async fn run_owned(
     published
 }
 
+#[cfg(unix)]
 async fn process(
     request: Request,
     caps: LifecycleCaps,
@@ -758,6 +763,7 @@ async fn process(
     result
 }
 
+#[cfg(unix)]
 pub(crate) fn execute() -> ExitCode {
     let result = (|| {
         for key in [

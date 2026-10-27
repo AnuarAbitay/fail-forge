@@ -1,4 +1,16 @@
 use super::*;
+#[cfg(windows)]
+use std::os::windows::process::ExitStatusExt;
+fn native_status(code: i32) -> std::process::ExitStatus {
+    #[cfg(unix)]
+    {
+        std::process::ExitStatus::from_raw(code << 8)
+    }
+    #[cfg(windows)]
+    {
+        std::process::ExitStatus::from_raw(code as u32)
+    }
+}
 use failforge_runner::{CancelReason, CaptureIssue, CaptureSummary, CleanupReport, GroupState};
 
 fn events(result: &str) -> Vec<Value> {
@@ -254,7 +266,9 @@ fn summary_rejects_noncanonical_numbers_overflows_and_invalid_enums() {
         ("stdout_bytes", "18446744073709551616"),
         ("stdout_bytes", "1.0"),
         ("execution_ms", "340282366920938463463374607431768211456"),
+        #[cfg(unix)]
         ("status", "exit:256"),
+        #[cfg(unix)]
         ("status", "exit:-1"),
         ("status", "exit:01"),
         ("status", "signal:0"),
@@ -558,7 +572,7 @@ fn timeout_identity_limits_count_unicode_characters_and_bound_lists() {
 fn native_result(raw: &[u8]) -> CommandResult {
     CommandResult {
         cause: CompletionCause::ProcessCompleted,
-        status: Some(std::process::ExitStatus::from_raw(0)),
+        status: Some(native_status(0)),
         timings: Default::default(),
         stdout: CaptureSummary {
             bytes_read: raw.len() as u64,
@@ -580,7 +594,7 @@ fn native_owner_and_persisted_receipt_classification_match() {
     for (name, exit) in [("success", 0), ("failure", 1), ("error", 255)] {
         let raw = stream(&events(name));
         let mut result = native_result(&raw);
-        result.status = Some(std::process::ExitStatus::from_raw(exit << 8));
+        result.status = Some(native_status(exit));
         assert_eq!(
             classify_dart_result(&raw, &result, ReporterMode::Dart),
             classify_dart_capture(
@@ -594,7 +608,7 @@ fn native_owner_and_persisted_receipt_classification_match() {
     let raw = stream(&events("success"));
     let mut result = native_result(&raw);
     result.cause = CompletionCause::TimedOut;
-    result.status = Some(std::process::ExitStatus::from_raw(124 << 8));
+    result.status = Some(native_status(124));
     assert_eq!(
         classify_dart_result(&raw, &result, ReporterMode::Dart),
         timeout(&raw)
@@ -615,7 +629,14 @@ fn native_result_faults_cannot_be_hidden_by_valid_reporter_output() {
     result.cause = CompletionCause::Cancelled(CancelReason::SigTerm);
     mutations.push((result, "runner_not_completed"));
     let mut result = native_result(&raw);
-    result.status = Some(std::process::ExitStatus::from_raw(9));
+    #[cfg(unix)]
+    {
+        result.status = Some(std::process::ExitStatus::from_raw(9));
+    }
+    #[cfg(windows)]
+    {
+        result.status = Some(native_status(0xc0000005_u32 as i32));
+    }
     mutations.push((result, "no_normal_child_exit"));
     let mut result = native_result(&raw);
     result.status = None;
@@ -761,7 +782,7 @@ fn typed_verdict_rejects_same_length_capture_replacement_before_parsing() {
     assert!(replacement.len() > original.len());
     original.resize(replacement.len(), b' ');
     let mut owner = native_result(&original);
-    owner.status = Some(std::process::ExitStatus::from_raw(1 << 8));
+    owner.status = Some(native_status(1));
     assert_verdict(
         &classify_dart_result(&original, &owner, ReporterMode::Dart),
         "LOAD_FAILURE",
@@ -818,4 +839,33 @@ fn missing_native_digest_fails_closed_with_cleanup_and_capture_faults_first() {
         "INFRA_ERROR",
         "incomplete_runner_cleanup",
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_full_width_exit_codes_are_canonical_and_exception_status_is_not_a_kill() {
+    let raw = stream(&events("success"));
+    for code in [256, i32::MAX, i32::MIN, -1] {
+        assert_eq!(
+            parse_cli_summary(receipt(&raw, code).as_bytes()).unwrap()["status"],
+            format!("exit:{code}")
+        );
+    }
+    for code in ["2147483648", "-2147483649", "+1", "-0", "-01"] {
+        assert!(
+            parse_cli_summary(
+                receipt(&raw, 0)
+                    .replace("exit:0", &format!("exit:{code}"))
+                    .as_bytes()
+            )
+            .is_err()
+        );
+    }
+    let result = classify_dart_capture(
+        &raw,
+        0xc0000005_u32 as i32,
+        receipt(&raw, 0xc0000005_u32 as i32).as_bytes(),
+        ReporterMode::Dart,
+    );
+    assert_verdict(&result, "INFRA_ERROR", "no_normal_child_exit");
 }

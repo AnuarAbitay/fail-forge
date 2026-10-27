@@ -9,6 +9,7 @@ pub mod duration;
 pub mod models;
 pub mod normalize;
 pub mod paths;
+pub mod platform;
 mod sdk_discovery;
 pub mod yaml;
 
@@ -215,5 +216,9 @@ pub fn resolve_config(args: &Value, context: &Context) -> Result<RunConfig, Conf
         .map(|value| RunConfig::Campaign(Box::new(value)))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
+mod tests;
+
+#[cfg(all(test, windows))]
+#[path = "windows_tests.rs"]
 mod tests;

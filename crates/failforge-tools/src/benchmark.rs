@@ -204,7 +204,7 @@ fn sample(
         .stdout(File::create(&stdout)?)
         .stderr(File::create(&stderr)?);
     let start = Instant::now();
-    let mut child = common::OwnedChild::new(command.spawn()?);
+    let mut child = common::OwnedChild::spawn(&mut command)?;
     let mut connection = None;
     let mut cancel_start = None;
     if scenario == "cancel" {

@@ -11,3 +11,6 @@ serde_json.workspace = true
 thiserror.workspace = true
 libyaml-safer = "=0.3.0"
 regex = { version = "=1.13.1", default-features = false, features = ["std", "perf", "unicode"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }

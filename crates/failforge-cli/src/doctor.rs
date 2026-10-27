@@ -11,8 +11,8 @@ use crate::args::DoctorArgs;
 #[path = "doctor_checks.rs"]
 mod checks;
 use checks::{
-    accessible, adapter_dependencies, conventional_tests, executable, flutter_ready, flutter_sdk,
-    readable_regular, report_destination, supported_version,
+    ACCESS_EXECUTE, ACCESS_READ, accessible, adapter_dependencies, conventional_tests, executable,
+    flutter_ready, flutter_sdk, readable_regular, report_destination, supported_version,
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -150,7 +150,7 @@ fn inspect(
     let mut report = Report::default();
     report.add(Status::Ok, "Configuration", "campaign settings are valid");
     report.prerequisite(
-        installation.is_dir() && accessible(installation, libc::R_OK | libc::X_OK),
+        installation.is_dir() && accessible(installation, ACCESS_READ | ACCESS_EXECUTE),
         "Installation",
         &format!("installation directory {}", quote(installation)),
         "pass --installation PATH pointing to the FailForge installation".into(),
@@ -161,7 +161,7 @@ fn inspect(
         &format!("profile analysis helper {} beside failforge", quote(helper)),
         "restore executable failforge-adapter-campaign beside the failforge executable".into(),
     );
-    let dart = config.dart_sdk.join("bin/dart");
+    let dart = config.dart_sdk.join(failforge_config::platform::DART_BIN);
     report.prerequisite(
         executable(&dart) && readable_regular(&config.dart_sdk.join("lib/core/core.dart")),
         "Dart SDK",
@@ -238,7 +238,7 @@ fn inspect(
     let project_pub =
         if config.flutter_sdk.is_some() || original.is_some_and(|project| project.flutter) {
             flutter_sdk(config)
-                .map(|sdk| sdk.join("bin/flutter"))
+                .map(|sdk| sdk.join(failforge_config::platform::FLUTTER_BIN))
                 .unwrap_or_else(|| dart.clone())
         } else {
             dart.clone()
@@ -252,7 +252,7 @@ fn inspect(
                 "Flutter provides the test runner; see Flutter SDK",
             );
             let flutter = flutter_sdk(config);
-            report.prerequisite(flutter.as_ref().is_some_and(|sdk| flutter_ready(sdk, &config.dart_sdk)), "Flutter SDK", &format!("matching bundled Dart SDK, Flutter sources and prepared host test artifacts at {}", flutter.as_ref().map_or_else(|| "the selected SDK".into(), |sdk| quote(sdk))), flutter.map_or_else(|| "pass --flutter-sdk PATH to a prepared Flutter SDK".into(), |sdk| format!("{} precache; then {} --version", quote(&sdk.join("bin/flutter")), quote(&sdk.join("bin/flutter")))));
+            report.prerequisite(flutter.as_ref().is_some_and(|sdk| flutter_ready(sdk, &config.dart_sdk)), "Flutter SDK", &format!("matching bundled Dart SDK, Flutter sources and prepared host test artifacts at {}", flutter.as_ref().map_or_else(|| "the selected SDK".into(), |sdk| quote(sdk))), flutter.map_or_else(|| "pass --flutter-sdk PATH to a prepared Flutter SDK".into(), |sdk| format!("{} precache; then {} --version", quote(&sdk.join(failforge_config::platform::FLUTTER_BIN)), quote(&sdk.join(failforge_config::platform::FLUTTER_BIN)))));
         } else {
             report.prerequisite(
                 project
@@ -350,6 +350,6 @@ pub(crate) fn execute(arguments: DoctorArgs, invocation_cwd: &Path) -> ExitCode 
     ExitCode::from(status)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "doctor_tests.rs"]
 mod tests;

@@ -1,4 +1,5 @@
 use super::*;
+#[cfg(unix)]
 use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -256,6 +257,7 @@ fn duplicate_json_keys_are_rejected_at_every_depth() {
 }
 
 #[test]
+#[cfg(unix)]
 fn malformed_utf8_and_package_metadata_symlinks_are_rejected() {
     let fixture = Fixture::new();
     fs::write(fixture.0.join("pubspec.yaml"), b"name: \xff\n").unwrap();

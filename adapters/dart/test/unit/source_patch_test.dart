@@ -12,6 +12,28 @@ Matcher failure(String code) =>
     isA<AdapterException>().having((error) => error.code, 'code', code);
 
 void main() {
+  test(
+    'Windows targets reject alternate streams and reserved device aliases',
+    () {
+      for (final path in [
+        'lib/a.dart:stream',
+        'lib/NUL.dart',
+        'lib/COM1.dart',
+        'lib/COM¹.dart',
+        'lib/LPT³',
+        'lib/name?.dart',
+        'lib/name. ',
+        'lib/name.',
+      ]) {
+        if (Platform.isWindows) {
+          expect(() => canonicalTarget(path), throwsA(failure('unsafe_path')));
+        } else {
+          expect(canonicalTarget(path), path);
+        }
+      }
+      expect(canonicalTarget('lib/console.dart'), 'lib/console.dart');
+    },
+  );
   test('operator ID uses the shared 128 UTF-8 byte bound', () {
     final source = SourceFile('lib/a.dart', '/a', utf8.encode('true'));
     final boundary = List.filled(64, 'я').join();

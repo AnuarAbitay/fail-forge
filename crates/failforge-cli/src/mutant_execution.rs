@@ -1,22 +1,32 @@
 //! One native owner of a candidate and its ordered causal controls.
+#[cfg(windows)]
+use failforge_workspace::windows_fs as win;
 use std::collections::BTreeMap;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
+#[cfg(unix)]
+use std::fs::OpenOptions;
+#[cfg(unix)]
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::PathBuf;
+#[cfg(unix)]
 use std::process::ExitCode;
 use std::sync::Arc;
 
+#[cfg(unix)]
+use crate::signals::{SignalKind, signal};
 use failforge_dart::discovery::{VerifiedCandidate, verify_candidate};
 use failforge_dart::namespace::NamespaceError;
 use failforge_dart::{
     InitializationHandoff, InitializationRequest, InitializationRole, SelectionContext,
 };
 use failforge_workspace::lifecycle::LifecycleCaps;
-use failforge_workspace::{Cancellation, PreparedProject, inspect_project, parse_json};
+#[cfg(unix)]
+use failforge_workspace::parse_json;
+use failforge_workspace::{Cancellation, PreparedProject, inspect_project};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::signal::unix::{SignalKind, signal};
 
 use crate::attempt::{NamespaceCache, OwnedAttempt, Publication};
 use crate::dart_namespace::{absolute, invalid};
@@ -45,6 +55,7 @@ pub(crate) struct Request {
     pub(crate) replay: Option<Arc<LoadedReplay>>,
 }
 
+#[cfg(unix)]
 fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
     decode_value(parse_json(raw)?)
 }
@@ -153,10 +164,13 @@ struct InputGuard {
 }
 impl InputGuard {
     fn new(project: &PreparedProject) -> Result<Self, NamespaceError> {
+        #[cfg(unix)]
         let root = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
             .open(&project.root)?;
+        #[cfg(windows)]
+        let root = win::directory(&project.root)?;
         let guard = Self {
             project: project.clone(),
             root,
@@ -165,14 +179,24 @@ impl InputGuard {
         Ok(guard)
     }
     fn verify(&self) -> Result<(), NamespaceError> {
-        let owned = self.root.metadata()?;
-        let named = std::fs::symlink_metadata(&self.project.root)?;
-        if !named.is_dir()
-            || owned.dev() != named.dev()
-            || owned.ino() != named.ino()
-            || inspect_project(&self.project.root, &Cancellation::default())? != self.project
-        {
+        self.verify_root()?;
+        if inspect_project(&self.project.root, &Cancellation::default())? != self.project {
             return Err(invalid("mutant prepared inputs changed"));
+        }
+        Ok(())
+    }
+    fn verify_root(&self) -> Result<(), NamespaceError> {
+        #[cfg(unix)]
+        {
+            let owned = self.root.metadata()?;
+            let named = std::fs::symlink_metadata(&self.project.root)?;
+            if !named.is_dir() || owned.dev() != named.dev() || owned.ino() != named.ino() {
+                return Err(invalid("prepared input root changed"));
+            }
+        }
+        #[cfg(windows)]
+        if win::identity(&self.root)? != win::identity(&win::directory(&self.project.root)?)? {
+            return Err(invalid("prepared input root changed"));
         }
         Ok(())
     }
@@ -574,6 +598,7 @@ fn seal_completed(
     Ok(owned)
 }
 
+#[cfg(unix)]
 async fn process(
     request: Request,
     caps: LifecycleCaps,
@@ -610,6 +635,7 @@ async fn process(
     result
 }
 
+#[cfg(unix)]
 pub(crate) fn execute() -> ExitCode {
     let result = (|| {
         for key in [
@@ -647,6 +673,6 @@ pub(crate) fn execute() -> ExitCode {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "mutant_execution_tests.rs"]
 mod tests;

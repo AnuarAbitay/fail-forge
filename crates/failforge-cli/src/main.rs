@@ -1,6 +1,6 @@
-//! Unix CLI. Signal ownership lives here, never inside the runner library.
-#[cfg(not(unix))]
-compile_error!("FailForge's first stage supports Linux and macOS only");
+//! Native CLI. Console signal ownership lives here, never inside the runner library.
+#[cfg(not(any(unix, windows)))]
+compile_error!("FailForge requires a supported native process backend");
 
 mod adapter_discovery;
 mod args;
@@ -11,9 +11,12 @@ mod campaign_controller;
 mod campaign_display;
 mod campaign_execution;
 mod campaign_progress;
+#[cfg_attr(windows, path = "campaign_publish_windows.rs")]
 mod campaign_publish;
+#[cfg_attr(windows, path = "campaign_publish_fs_windows.rs")]
 mod campaign_publish_fs;
 mod campaign_report;
+#[cfg(unix)]
 mod campaign_report_command;
 mod campaign_report_terminal;
 mod campaign_reports;
@@ -21,6 +24,7 @@ mod campaign_session;
 mod campaign_workspace;
 mod dart_namespace;
 mod diagnostics;
+#[cfg_attr(windows, path = "display_windows.rs")]
 mod display;
 mod doctor;
 mod family_execution;
@@ -31,30 +35,46 @@ mod mutant_confirmation;
 mod mutant_execution;
 mod mutate;
 mod namespace_planner;
+mod native;
+#[cfg(unix)]
 mod private_request;
 mod private_response;
 mod profile;
+#[cfg(unix)]
 mod readiness;
 mod retained_replay;
+mod signals;
 mod test_context;
 mod test_evidence;
+#[cfg(test)]
+mod test_support;
+#[cfg(windows)]
+mod windows_output;
+#[cfg(unix)]
 mod workspace_handoff;
 mod workspace_inputs;
+#[cfg(unix)]
 mod workspace_lifecycle;
 
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use crate::signals::{SignalKind, signal};
 use clap::Parser;
 use failforge_runner::{
     CancelReason, CaptureIssue, CommandResult, CompletionCause, Runner, WorkspaceLease,
 };
-use tokio::signal::unix::{SignalKind, signal};
 
 use args::{Cli, Commands, ProfileCommands};
 use diagnostics::Diagnostics;
+
+#[cfg(unix)]
+type ProcessCode = u8;
+#[cfg(windows)]
+type ProcessCode = u32;
 
 const DIAGNOSTIC_BUDGET: Duration = Duration::from_millis(100);
 
@@ -89,16 +109,27 @@ fn main() -> ExitCode {
             let (arguments, replay) = arguments.into_campaign(&invocation_cwd);
             return mutate::execute_replay(arguments, &invocation_cwd, replay);
         }
+        #[cfg(unix)]
         Commands::WorkspaceInputs => return workspace_inputs::execute(),
+        #[cfg(unix)]
         Commands::WorkspaceLifecycle => return workspace_lifecycle::execute(),
+        #[cfg(unix)]
         Commands::DartNamespace => return dart_namespace::execute(),
+        #[cfg(unix)]
         Commands::TestAttempt => return attempt::execute(),
+        #[cfg(unix)]
         Commands::AdapterDiscover => return adapter_discovery::execute(),
+        #[cfg(unix)]
         Commands::MutantExecute => return mutant_execution::execute(),
+        #[cfg(unix)]
         Commands::FamilyExecute => return family_execution::execute(),
+        #[cfg(unix)]
         Commands::CampaignExecute => return campaign_execution::execute(),
+        #[cfg(unix)]
         Commands::CampaignRun => return campaign_session::execute(),
+        #[cfg(unix)]
         Commands::CampaignReport => return campaign_report_command::execute(),
+        #[cfg(unix)]
         Commands::CampaignPublish => return campaign_publish::execute(),
         Commands::Profile(arguments) => match arguments.command {
             ProfileCommands::Generate(arguments) => {
@@ -118,6 +149,7 @@ fn main() -> ExitCode {
             return ExitCode::from(125);
         }
     };
+    #[cfg(unix)]
     let readiness = match readiness::Readiness::from_env() {
         Ok(readiness) => readiness,
         Err(_) => {
@@ -128,6 +160,7 @@ fn main() -> ExitCode {
             return ExitCode::from(125);
         }
     };
+    #[cfg(unix)]
     let evidence = match test_evidence::EvidenceHandoff::from_env(arguments.test_reporter) {
         Ok(evidence) => evidence,
         Err(_) => {
@@ -145,12 +178,19 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    #[cfg(windows)]
+    for name in ["FAILFORGE_CLI_CANCEL_PIPE", "FAILFORGE_ADAPTER_CANCEL_PIPE"] {
+        spec.env.set.remove(std::ffi::OsStr::new(name));
+        spec.env.remove.insert(name.into());
+    }
     if let Some(lease) = &workspace_lease {
         lease.protect_child(&mut spec);
     }
+    #[cfg(unix)]
     if let Some(readiness) = &readiness {
         readiness.protect_child(&mut spec);
     }
+    #[cfg(unix)]
     if let Some(evidence) = &evidence {
         evidence.protect_child(&mut spec);
     }
@@ -183,7 +223,22 @@ fn main() -> ExitCode {
             return ExitCode::from(125);
         }
     };
-    ExitCode::from(runtime.block_on(run(spec, &diagnostics, readiness, evidence)))
+    #[cfg(unix)]
+    let result = runtime.block_on(run(spec, &diagnostics, readiness, evidence));
+    #[cfg(windows)]
+    let result = runtime.block_on(run(spec, &diagnostics));
+    #[cfg(unix)]
+    {
+        ExitCode::from(result)
+    }
+    #[cfg(windows)]
+    {
+        // ExitCode::from(u32) is unstable. Preserve the native status bits after
+        // all owned process and output cleanup has completed.
+        drop(runtime);
+        drop(diagnostics);
+        std::process::exit(result as i32)
+    }
 }
 
 fn parse_error_diagnostic(error: &clap::Error) -> Option<String> {
@@ -209,9 +264,10 @@ fn parse_error_diagnostic(error: &clap::Error) -> Option<String> {
 async fn run(
     spec: failforge_runner::CommandSpec,
     diagnostics: &Diagnostics,
-    readiness: Option<readiness::Readiness>,
-    evidence: Option<test_evidence::EvidenceHandoff>,
-) -> u8 {
+    #[cfg(unix)] readiness: Option<readiness::Readiness>,
+    #[cfg(unix)] evidence: Option<test_evidence::EvidenceHandoff>,
+) -> ProcessCode {
+    #[cfg(unix)]
     let cwd = spec.cwd.clone();
     // Install both listeners before spawning: no child is owned if installation
     // fails, and the first signal cannot arrive between spawn and subscription.
@@ -228,6 +284,7 @@ async fn run(
             return 125;
         }
     };
+    #[cfg(unix)]
     if readiness.is_some_and(|ready| ready.acknowledge().is_err()) {
         diagnostics.report(
             "failforge: cannot acknowledge native readiness\n",
@@ -287,6 +344,7 @@ async fn run(
     };
     // Never terminate the runtime while the runner still owns cleanup work.
     let shutdown = runner.shutdown().await;
+    #[cfg(unix)]
     let native_ok = outcome.is_ok() && shutdown.is_ok() && !display_failed;
     let mut code = match &outcome {
         Ok(result) => {
@@ -308,6 +366,7 @@ async fn run(
     if display_failed {
         code = 125;
     }
+    #[cfg(unix)]
     if let Some(evidence) = evidence {
         let result = match &outcome {
             Ok(result) => Some(result.as_ref()),
@@ -324,7 +383,7 @@ async fn run(
     code
 }
 
-fn result_exit_code(result: &CommandResult) -> u8 {
+fn result_exit_code(result: &CommandResult) -> ProcessCode {
     if !result.cleanup.is_complete() {
         return 125;
     }
@@ -333,21 +392,27 @@ fn result_exit_code(result: &CommandResult) -> u8 {
         CompletionCause::Cancelled(CancelReason::CtrlC) => 130,
         CompletionCause::Cancelled(CancelReason::SigTerm) => 143,
         CompletionCause::Cancelled(_) | CompletionCause::RunnerFailure => 125,
-        CompletionCause::ProcessCompleted => result
-            .status
-            .and_then(|status| {
+        CompletionCause::ProcessCompleted => {
+            let code = result.status.and_then(|status| {
                 status
                     .code()
-                    .or_else(|| status.signal().map(|signal| 128 + signal))
-            })
-            .and_then(|code| u8::try_from(code).ok())
-            .unwrap_or(125),
+                    .or_else(|| status_signal(status).map(|signal| 128 + signal))
+            });
+            #[cfg(unix)]
+            {
+                code.and_then(|code| u8::try_from(code).ok()).unwrap_or(125)
+            }
+            #[cfg(windows)]
+            {
+                code.map(|code| code as u32).unwrap_or(125)
+            }
+        }
     }
 }
 
 fn summary(result: &CommandResult) -> String {
     let status = match result.status {
-        Some(status) => match (status.code(), status.signal()) {
+        Some(status) => match (status.code(), status_signal(status)) {
             (Some(code), _) => format!("exit:{code}"),
             (_, Some(signal)) => format!("signal:{signal}"),
             _ => "unknown".to_owned(),
@@ -435,7 +500,7 @@ fn capture_issue_label(issue: Option<&CaptureIssue>) -> &'static str {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use failforge_runner::{CleanupReport, GroupState};
@@ -599,6 +664,75 @@ mod tests {
             assert!(summary.contains(&format!("stdout_issue={label}")));
             assert!(summary.contains("stdout_tail_truncated=true"));
             assert!(!summary.contains("SECRET"));
+        }
+    }
+}
+
+fn status_signal(status: std::process::ExitStatus) -> Option<i32> {
+    #[cfg(unix)]
+    {
+        status.signal()
+    }
+    #[cfg(windows)]
+    {
+        let _ = status;
+        None
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use failforge_runner::{CleanupReport, GroupState};
+    use std::os::windows::process::ExitStatusExt;
+    use std::process::ExitStatus;
+
+    fn result(cause: CompletionCause, code: u32) -> CommandResult {
+        CommandResult {
+            cause,
+            status: Some(ExitStatus::from_raw(code)),
+            timings: Default::default(),
+            stdout: Default::default(),
+            stderr: Default::default(),
+            cleanup: CleanupReport {
+                child_reaped: true,
+                output_finished: true,
+                group: GroupState::NoLiveMembers { zombies: 0 },
+                ..Default::default()
+            },
+        }
+    }
+    #[test]
+    fn preserves_every_native_status_bit() {
+        for code in [
+            0,
+            1,
+            124,
+            125,
+            255,
+            256,
+            65536,
+            0x80000001,
+            0xc0000005,
+            u32::MAX,
+        ] {
+            assert_eq!(
+                result_exit_code(&result(CompletionCause::ProcessCompleted, code)),
+                code
+            );
+        }
+    }
+    #[test]
+    fn cancellation_timeout_and_cleanup_take_priority_over_native_status() {
+        for (cause, code) in [
+            (CompletionCause::TimedOut, 124),
+            (CompletionCause::Cancelled(CancelReason::CtrlC), 130),
+            (CompletionCause::Cancelled(CancelReason::SigTerm), 143),
+        ] {
+            let mut result = result(cause, 0xc0000005);
+            assert_eq!(result_exit_code(&result), code);
+            result.cleanup.child_reaped = false;
+            assert_eq!(result_exit_code(&result), 125);
         }
     }
 }

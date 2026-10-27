@@ -4,7 +4,9 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
+#[cfg(unix)]
 use std::os::unix::fs::DirBuilderExt;
+#[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -23,11 +25,14 @@ pub fn cleanup_confirmed() -> bool {
     !RETAIN_TEMPORARIES.get()
 }
 
+#[cfg(unix)]
 extern "C" fn interrupted(signal: libc::c_int) {
     let _ = INTERRUPTED.compare_exchange(0, signal, Ordering::Relaxed, Ordering::Relaxed);
 }
 
+#[cfg(unix)]
 pub struct SignalGuard(Vec<(libc::c_int, libc::sigaction)>);
+#[cfg(unix)]
 impl Drop for SignalGuard {
     fn drop(&mut self) {
         for (signal, action) in &self.0 {
@@ -38,6 +43,7 @@ impl Drop for SignalGuard {
     }
 }
 
+#[cfg(unix)]
 pub fn install_interrupts() -> Result<SignalGuard> {
     let mut guard = SignalGuard(Vec::new());
     for signal in [libc::SIGINT, libc::SIGTERM] {
@@ -53,6 +59,101 @@ pub fn install_interrupts() -> Result<SignalGuard> {
         guard.0.push((signal, previous));
     }
     Ok(guard)
+}
+
+#[cfg(windows)]
+pub struct SignalGuard;
+#[cfg(windows)]
+unsafe extern "system" fn console_interrupt(event: u32) -> windows_sys::core::BOOL {
+    use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT};
+    if event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT {
+        let _ = INTERRUPTED.compare_exchange(0, libc::SIGINT, Ordering::Relaxed, Ordering::Relaxed);
+        1
+    } else {
+        0
+    }
+}
+#[cfg(windows)]
+pub fn install_interrupts() -> Result<SignalGuard> {
+    if unsafe {
+        windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(console_interrupt), 1)
+    } == 0
+    {
+        return Err(io::Error::last_os_error().into());
+    }
+    Ok(SignalGuard)
+}
+#[cfg(windows)]
+impl Drop for SignalGuard {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(console_interrupt), 0);
+        }
+    }
+}
+
+pub fn status_code(status: std::process::ExitStatus) -> i32 {
+    #[cfg(unix)]
+    {
+        status
+            .code()
+            .unwrap_or_else(|| -status.signal().unwrap_or(1))
+    }
+    #[cfg(windows)]
+    {
+        status.code().unwrap_or(1)
+    }
+}
+pub fn executable(path: &Path, metadata: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = path;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(windows)]
+    {
+        metadata.is_file()
+            && path
+                .extension()
+                .is_some_and(|value| value.eq_ignore_ascii_case("exe"))
+    }
+}
+pub fn private_directory(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        fs::DirBuilder::new().mode(0o700).create(path)
+    }
+    #[cfg(windows)]
+    {
+        let parent = failforge_workspace::windows_fs::directory(
+            path.parent()
+                .ok_or_else(|| io::Error::other("directory has no parent"))?,
+        )?;
+        failforge_workspace::windows_fs::create_directory_at(
+            &parent,
+            path.file_name()
+                .ok_or_else(|| io::Error::other("directory has no name"))?,
+        )?;
+        Ok(())
+    }
+}
+#[cfg(windows)]
+pub fn publish_directory(source: &Path, destination: &Path) -> Result<()> {
+    #[cfg(windows)]
+    {
+        let file = failforge_workspace::windows_fs::directory(source)?;
+        let parent = failforge_workspace::windows_fs::directory(
+            destination.parent().ok_or("destination has no parent")?,
+        )?;
+        failforge_workspace::windows_fs::rename_handle(
+            &file,
+            &parent,
+            destination.file_name().ok_or("destination has no name")?,
+            false,
+        )?;
+        Ok(())
+    }
 }
 
 pub fn interrupt_signal() -> Option<i32> {
@@ -134,6 +235,11 @@ pub fn tree(path: &Path) -> Result<BTreeMap<String, String>> {
             check_interrupt()?;
             let entry = entry?;
             let kind = entry.file_type()?;
+            #[cfg(windows)]
+            ensure(
+                !failforge_workspace::windows_fs::is_reparse(&entry.metadata()?),
+                "fixture contains a reparse point",
+            )?;
             if kind.is_dir() {
                 walk(root, &entry.path(), output)?;
             } else if kind.is_file() {
@@ -168,7 +274,7 @@ impl Temporary {
                 std::process::id(),
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
-            match fs::DirBuilder::new().mode(0o700).create(&path) {
+            match private_directory(&path) {
                 Ok(()) => return Ok(Self(path.canonicalize()?)),
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(error) => return Err(error.into()),
@@ -193,16 +299,80 @@ impl Drop for Temporary {
 /// SIGINT requests native cleanup before reaping. A broken owner that exceeds
 /// the independent drain grace is reported explicitly; its temporary inputs
 /// remain available and the harness does not pretend cleanup succeeded.
-pub struct OwnedChild(pub Child, bool);
+pub struct OwnedChild(pub Child, bool, #[cfg(windows)] Option<File>);
 impl OwnedChild {
+    #[cfg(unix)]
     pub fn new(child: Child) -> Self {
         Self(child, false)
+    }
+    pub fn spawn(command: &mut Command) -> Result<Self> {
+        #[cfg(unix)]
+        {
+            Ok(Self::new(command.spawn()?))
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            use std::os::windows::io::FromRawHandle;
+            use windows_sys::Win32::Foundation::{ERROR_PIPE_LISTENING, INVALID_HANDLE_VALUE};
+            use windows_sys::Win32::Storage::FileSystem::{
+                FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_OUTBOUND,
+            };
+            use windows_sys::Win32::System::Pipes::*;
+            let path = format!(
+                r"\\.\pipe\failforge-cli-cancel-{}",
+                failforge_workspace::windows_fs::random_token()?
+            );
+            let name: Vec<u16> = std::ffi::OsStr::new(&path)
+                .encode_wide()
+                .chain(Some(0))
+                .collect();
+            let mut security = failforge_workspace::windows_fs::PrivateSecurity::new()?;
+            let handle = unsafe {
+                CreateNamedPipeW(
+                    name.as_ptr(),
+                    PIPE_ACCESS_OUTBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                    1,
+                    128,
+                    128,
+                    0,
+                    security.as_ptr(),
+                )
+            };
+            if handle == INVALID_HANDLE_VALUE {
+                return Err(io::Error::last_os_error().into());
+            }
+            let pipe = unsafe { File::from_raw_handle(handle) };
+            use std::os::windows::io::AsRawHandle;
+            if unsafe { ConnectNamedPipe(pipe.as_raw_handle(), std::ptr::null_mut()) } == 0
+                && io::Error::last_os_error().raw_os_error() != Some(ERROR_PIPE_LISTENING as i32)
+            {
+                return Err(io::Error::last_os_error().into());
+            }
+            command.env("FAILFORGE_CLI_CANCEL_PIPE", path);
+            Ok(Self(command.spawn()?, false, Some(pipe)))
+        }
     }
     pub fn signal(&mut self, signal: i32) -> Result<()> {
         if self.0.try_wait()?.is_none() {
             // The child is still owned and unreaped here, preventing PID reuse.
+            #[cfg(unix)]
             if unsafe { libc::kill(self.0.id() as i32, signal) } != 0 {
                 return Err(io::Error::last_os_error().into());
+            }
+            #[cfg(windows)]
+            {
+                if signal == 9 {
+                    self.0.kill()?;
+                    return Ok(());
+                }
+                let pipe = self
+                    .2
+                    .as_ref()
+                    .ok_or("native cancellation capability is absent")?;
+                let mut writer = pipe;
+                writer.write_all(if signal == libc::SIGTERM { b"T" } else { b"I" })?;
             }
         }
         Ok(())
@@ -247,9 +417,7 @@ impl OwnedChild {
                 .into());
             }
             if let Some(status) = self.0.try_wait()? {
-                return Ok(status
-                    .code()
-                    .unwrap_or_else(|| -status.signal().unwrap_or(1)));
+                return Ok(status_code(status));
             }
             if start.elapsed() >= budget {
                 self.signal(libc::SIGINT)?;
@@ -276,7 +444,15 @@ impl Drop for OwnedChild {
         match self.0.try_wait() {
             Ok(Some(_)) => {}
             Ok(None) => {
-                let _ = self.signal(interrupt_signal().unwrap_or(libc::SIGINT));
+                if self
+                    .signal(interrupt_signal().unwrap_or(libc::SIGINT))
+                    .is_err()
+                {
+                    // Only the exact retained child handle is terminated. An
+                    // unavailable cooperative channel never proves cleanup.
+                    RETAIN_TEMPORARIES.set(true);
+                    let _ = self.0.kill();
+                }
                 if !self.drain(DRAIN_GRACE) {
                     eprintln!(
                         "cleanup unconfirmed for owner PID {}; temporary inputs retained",
@@ -291,6 +467,11 @@ impl Drop for OwnedChild {
 
 pub fn command(program: &Path) -> Command {
     let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP);
+    }
     command
         .stdin(Stdio::null())
         .env("CI", "true")
@@ -319,15 +500,11 @@ pub fn execute(
         .map(|s| s.to_string_lossy().into_owned())
         .collect();
     let started = Instant::now();
-    let mut child = OwnedChild::new(command.spawn()?);
+    let mut child = OwnedChild::spawn(command)?;
     let waited = child.wait(budget);
     let code = match &waited {
         Ok(code) => Some(*code),
-        Err(_) => child.0.try_wait()?.map(|status| {
-            status
-                .code()
-                .unwrap_or_else(|| -status.signal().unwrap_or(1))
-        }),
+        Err(_) => child.0.try_wait()?.map(status_code),
     };
     let receipt = json!({"command":argv,"exitCode":code,
         "wallSeconds":started.elapsed().as_secs_f64(),
@@ -345,7 +522,7 @@ pub fn execute(
     Ok(receipt)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     #[test]
@@ -512,6 +689,77 @@ mod tests {
                 );
                 assert_eq!(fs::read(marker).unwrap(), b"drained");
             }
+        }
+    }
+}
+
+pub fn summary(raw: &[u8]) -> Result<BTreeMap<String, String>> {
+    Ok(failforge_dart::parse_cli_summary(raw)?)
+}
+
+pub fn account_id() -> Result<String> {
+    #[cfg(unix)]
+    {
+        Ok(unsafe { libc::geteuid() }.to_string())
+    }
+    #[cfg(windows)]
+    {
+        Ok(failforge_workspace::windows_fs::current_sid()?)
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    #[test]
+    fn temporary_directory_is_private_and_unique() {
+        let first = Temporary::new("ff-native-tools").unwrap();
+        let second = Temporary::new("ff-native-tools").unwrap();
+        assert_ne!(first.0, second.0);
+        failforge_workspace::windows_fs::require_private(
+            &failforge_workspace::windows_fs::directory(&first.0).unwrap(),
+            true,
+        )
+        .unwrap();
+        let path = first.0.clone();
+        drop(first);
+        assert!(!path.exists());
+    }
+    #[test]
+    #[ignore = "subprocess fixture for capability-owned cancellation"]
+    fn cancellation_client() {
+        let path = std::env::var_os("FAILFORGE_TOOLS_TEST_MARKER").unwrap();
+        let pipe = std::env::var_os("FAILFORGE_CLI_CANCEL_PIPE").unwrap();
+        let mut client = fs::OpenOptions::new().read(true).open(pipe).unwrap();
+        fs::write(&path, b"ready").unwrap();
+        let mut signal = [0];
+        client.read_exact(&mut signal).unwrap();
+        fs::write(path, signal).unwrap();
+    }
+    #[test]
+    fn cancellation_uses_private_owned_pipe_and_preserves_interrupt_kind() {
+        for (signal, byte) in [(libc::SIGINT, b'I'), (libc::SIGTERM, b'T')] {
+            let temporary = Temporary::new("ff-tools-pipe").unwrap();
+            let marker = temporary.0.join("marker");
+            let mut command = command(&std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "common::windows_tests::cancellation_client",
+                    "--ignored",
+                    "--nocapture",
+                ])
+                .env("FAILFORGE_TOOLS_TEST_MARKER", &marker);
+            let mut child = OwnedChild::spawn(&mut command).unwrap();
+            let start = Instant::now();
+            while !marker.exists() {
+                assert!(start.elapsed() < Duration::from_secs(10));
+                assert!(child.0.try_wait().unwrap().is_none());
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            child.signal(signal).unwrap();
+            assert_eq!(child.wait(Duration::from_secs(10)).unwrap(), 0);
+            assert_eq!(fs::read(marker).unwrap(), vec![byte]);
         }
     }
 }

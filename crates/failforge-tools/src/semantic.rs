@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Read;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -63,10 +64,13 @@ pub fn transcript(
     project: &Path,
     family: &str,
 ) -> Result<(BTreeMap<String, Value>, Vec<Value>)> {
+    #[cfg(unix)]
     let file = fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)?;
+    #[cfg(windows)]
+    let file = failforge_workspace::windows_fs::regular(path, false)?;
     ensure(
         file.metadata()?.is_file(),
         "transcript is not a regular file",
@@ -78,7 +82,7 @@ pub fn transcript(
     Ok((retained.steps, retained.candidates))
 }
 fn vm_outcome(code: i32, raw: &[u8], errors: &[u8], receipt: &[u8]) -> Result<&'static str> {
-    let summary = crate::benchmark::summary(receipt)?;
+    let summary = common::summary(receipt)?;
     for (key, value) in [
         ("cleanup", "complete".to_owned()),
         ("cause", "ProcessCompleted".to_owned()),
@@ -126,7 +130,7 @@ fn vm(cli: &Path, dart: &Path, project: &Path, directory: &Path, source: &[u8]) 
     let start = Instant::now();
     cmd.stdout(fs::File::create(directory.join("stdout.log"))?)
         .stderr(fs::File::create(directory.join("stderr.log"))?);
-    let mut owner = common::OwnedChild::new(cmd.spawn()?);
+    let mut owner = common::OwnedChild::spawn(&mut cmd)?;
     let code = owner.wait(Duration::from_secs(30))?;
     let raw = fs::read(capture.join("stdout.bin"))?;
     let errors = fs::read(capture.join("stderr.bin"))?;
@@ -155,9 +159,13 @@ pub fn run(options: Options) -> Result<()> {
     let catalog_file = root.join("protocol/fixtures/dart-semantic-catalog.json");
     let value = common::read_json(&catalog_file)?;
     let cases = catalog(&value)?;
-    let cli = root.join("target/debug/failforge");
-    let helper = root.join("target/debug/failforge-adapter-campaign");
-    let dart = sdk.join("bin/dart");
+    let cli = root
+        .join("target/debug")
+        .join(failforge_config::platform::binary_name("failforge").as_ref());
+    let helper = root
+        .join("target/debug")
+        .join(failforge_config::platform::binary_name("failforge-adapter-campaign").as_ref());
+    let dart = sdk.join("bin").join(failforge_config::platform::DART_BIN);
     let adapter = root.join("adapters/dart");
     let tools = [
         catalog_file,
@@ -343,6 +351,7 @@ mod tests {
             assert!(transcript(&t.0.join("transcript"), &t.0, "classic").is_err());
         }
     }
+    #[cfg(unix)]
     #[test]
     fn transcript_input_must_be_a_regular_nonsymlink_file() {
         let temporary = common::Temporary::new("ff-transcript-input").unwrap();

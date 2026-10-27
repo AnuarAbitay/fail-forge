@@ -4,7 +4,10 @@ use clap::Args;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
+#[cfg(all(test, unix))]
+use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
+use std::os::unix::fs::symlink;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -68,7 +71,7 @@ fn fresh_output(path: &Path, installation: &Path, sdk: &Path) -> Result<PathBuf>
                     Err(error) => return Err(error.into()),
                 }
             }
-            Component::Prefix(_) => return Err("unsupported smoke output path".into()),
+            Component::Prefix(_) => resolved.push(component),
         }
     }
     ensure(
@@ -107,15 +110,23 @@ fn payload(root: &Path, manifest: &Value) -> Result<usize> {
             metadata.is_file()
                 && path.canonicalize()? == path
                 && file["bytes"].as_u64() == Some(metadata.len())
-                && file["executable"].as_bool() == Some(metadata.permissions().mode() & 0o111 != 0)
+                && file["executable"].as_bool() == Some(common::executable(&path, &metadata))
                 && file["sha256"].as_str() == Some(common::hash(&path)?.as_str()),
             format!("package file differs from manifest: {relative}"),
         )?;
     }
     ensure(
         [
-            "bin/failforge",
-            "bin/failforge-adapter-campaign",
+            if cfg!(windows) {
+                "bin/failforge.exe"
+            } else {
+                "bin/failforge"
+            },
+            if cfg!(windows) {
+                "bin/failforge-adapter-campaign.exe"
+            } else {
+                "bin/failforge-adapter-campaign"
+            },
             "adapters/dart/pubspec.yaml",
             "adapters/dart/pubspec.lock",
         ]
@@ -273,6 +284,8 @@ impl Harness {
             .current_dir(self.work.join("foreign cwd"))
             .env("PUB_CACHE", &self.cache)
             .env("TMPDIR", self.work.join("temporary"))
+            .env("TMP", self.work.join("temporary"))
+            .env("TEMP", self.work.join("temporary"))
             .env("XDG_CONFIG_HOME", self.work.join("tool-state"))
             .env("DASH__SUPPRESS_ANALYTICS", "true")
             .env_remove("FAILFORGE_MUTATION_PARENT_FD");
@@ -299,7 +312,12 @@ impl Harness {
 
     fn pub_get(&mut self, name: &str, directory: &Path) -> Result<()> {
         let lock = common::hash(&directory.join("pubspec.lock"))?;
-        let mut command = self.command(&self.sdk.join("bin/dart"));
+        let mut command = self.command(
+            &self
+                .sdk
+                .join("bin")
+                .join(failforge_config::platform::DART_BIN),
+        );
         command.current_dir(directory).args([
             "--suppress-analytics",
             "pub",
@@ -322,16 +340,44 @@ impl Harness {
         let manifest = common::read_json(&package_manifest)?;
         let file_count = payload(&self.installation, &manifest)?;
         let adapter = self.installation.join("adapters/dart");
-        let executable = self.work.join("foreign cwd/failforge");
-        symlink(self.installation.join("bin/failforge"), &executable)?;
+        #[cfg(unix)]
+        let executable = self
+            .work
+            .join("foreign cwd")
+            .join(failforge_config::platform::binary_name("failforge").as_ref());
+        #[cfg(unix)]
+        symlink(
+            self.installation
+                .join("bin")
+                .join(failforge_config::platform::binary_name("failforge").as_ref()),
+            &executable,
+        )?;
+        #[cfg(windows)]
+        let executable = self
+            .installation
+            .join("bin")
+            .join(failforge_config::platform::binary_name("failforge").as_ref());
         let binary_hashes = [
-            common::hash(&self.installation.join("bin/failforge"))?,
-            common::hash(&self.installation.join("bin/failforge-adapter-campaign"))?,
+            common::hash(
+                &self
+                    .installation
+                    .join("bin")
+                    .join(failforge_config::platform::binary_name("failforge").as_ref()),
+            )?,
+            common::hash(&self.installation.join("bin").join(
+                failforge_config::platform::binary_name("failforge-adapter-campaign").as_ref(),
+            ))?,
         ];
         for (name, program, arguments) in [
             ("version", executable.clone(), vec!["--version"]),
             ("help", executable.clone(), vec!["--help"]),
-            ("sdk-version", self.sdk.join("bin/dart"), vec!["--version"]),
+            (
+                "sdk-version",
+                self.sdk
+                    .join("bin")
+                    .join(failforge_config::platform::DART_BIN),
+                vec!["--version"],
+            ),
         ] {
             let mut command = self.command(&program);
             command.args(arguments);
@@ -350,7 +396,12 @@ impl Harness {
         fs::write(project.join("lib/value.dart"), SOURCE)?;
         fs::write(project.join("test/value_test.dart"), TEST)?;
         self.pub_get("subject-pub-get", &project)?;
-        let mut baseline = self.command(&self.sdk.join("bin/dart"));
+        let mut baseline = self.command(
+            &self
+                .sdk
+                .join("bin")
+                .join(failforge_config::platform::DART_BIN),
+        );
         baseline
             .current_dir(&project)
             .args(["--suppress-analytics", "test", "--concurrency", "1"]);
@@ -468,8 +519,18 @@ impl Harness {
         ensure(
             binary_hashes
                 == [
-                    common::hash(&self.installation.join("bin/failforge"))?,
-                    common::hash(&self.installation.join("bin/failforge-adapter-campaign"))?,
+                    common::hash(
+                        &self
+                            .installation
+                            .join("bin")
+                            .join(failforge_config::platform::binary_name("failforge").as_ref()),
+                    )?,
+                    common::hash(
+                        &self.installation.join("bin").join(
+                            failforge_config::platform::binary_name("failforge-adapter-campaign")
+                                .as_ref(),
+                        ),
+                    )?,
                 ],
             "installed executables changed during smoke",
         )?;
@@ -488,13 +549,17 @@ pub fn run(options: Options) -> Result<()> {
     let installation = options.installation.canonicalize()?;
     let sdk = options.dart_sdk.canonicalize()?;
     for path in [
-        installation.join("bin/failforge"),
-        installation.join("bin/failforge-adapter-campaign"),
-        sdk.join("bin/dart"),
+        installation
+            .join("bin")
+            .join(failforge_config::platform::binary_name("failforge").as_ref()),
+        installation
+            .join("bin")
+            .join(failforge_config::platform::binary_name("failforge-adapter-campaign").as_ref()),
+        sdk.join("bin").join(failforge_config::platform::DART_BIN),
     ] {
         let metadata = fs::metadata(&path)?;
         ensure(
-            metadata.is_file() && metadata.permissions().mode() & 0o111 != 0,
+            metadata.is_file() && common::executable(&path, &metadata),
             "required executable is unavailable",
         )?;
     }
@@ -547,6 +612,6 @@ pub fn run(options: Options) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "package_smoke_tests.rs"]
 mod tests;

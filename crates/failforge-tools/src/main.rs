@@ -1,4 +1,5 @@
 //! Offline regression and measurement workflows for the production executables.
+#[cfg(unix)]
 mod benchmark;
 mod common;
 mod installer;
@@ -21,6 +22,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Compare repeated Runner calls with fresh CLI processes.
+    #[cfg(unix)]
     Benchmark(benchmark::Options),
     /// Install the pinned or latest stable Flutter SDK after SHA-256 verification.
     InstallTestFlutter {
@@ -50,6 +52,7 @@ fn main() -> std::process::ExitCode {
         }
     };
     let outcome = match Cli::parse().command {
+        #[cfg(unix)]
         Commands::Benchmark(options) => benchmark::run(options),
         Commands::InstallTestFlutter {
             destination,

@@ -2,7 +2,16 @@
 //! No author tests, package downloads, or mutant execution happen here.
 use failforge_workspace as inputs;
 pub use failforge_workspace::Cancellation;
+#[cfg(unix)]
 mod session;
+#[cfg(windows)]
+#[path = "analysis/session_windows.rs"]
+mod session;
+mod transcript;
+#[cfg(unix)]
+mod workspaces;
+#[cfg(windows)]
+#[path = "analysis/workspaces_windows.rs"]
 mod workspaces;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -76,6 +85,31 @@ struct Runtime {
     installation: PathBuf,
 }
 
+fn environment_key_is(key: &std::ffi::OsStr, expected: &str) -> bool {
+    #[cfg(unix)]
+    {
+        key == expected
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
+        let key: Vec<_> = key.encode_wide().collect();
+        let expected: Vec<_> = expected.encode_utf16().collect();
+        // SAFETY: live UTF-16 buffers and read-only ordinal comparison. Native
+        // environment names have lengths representable by the API's i32 count.
+        unsafe {
+            CompareStringOrdinal(
+                key.as_ptr(),
+                key.len() as i32,
+                expected.as_ptr(),
+                expected.len() as i32,
+                1,
+            ) == CSTR_EQUAL
+        }
+    }
+}
+
 impl Runtime {
     fn environment(&self) -> BTreeMap<OsString, OsString> {
         self.environment_from(std::env::vars_os().collect())
@@ -85,9 +119,16 @@ impl Runtime {
         &self,
         mut environment: BTreeMap<OsString, OsString>,
     ) -> BTreeMap<OsString, OsString> {
+        #[cfg(windows)]
+        // Windows carries hidden per-drive state under keys such as =C:.
+        // Every managed program/cwd here is absolute, and explicit EnvSpec keys
+        // must be ordinary application names rather than these OS internals.
+        environment.retain(|key, _| !key.as_encoded_bytes().contains(&b'='));
         for key in [
             "FAILFORGE_WORKSPACE_LEASE_FD",
             "FAILFORGE_ADAPTER_CANCEL_FD",
+            "FAILFORGE_ADAPTER_CANCEL_PIPE",
+            "FAILFORGE_CLI_CANCEL_PIPE",
             "FAILFORGE_RUNNER_READY_FD",
             "FAILFORGE_TEST_EVIDENCE_FD",
             "FAILFORGE_TEST_CONTEXT_FD",
@@ -96,32 +137,46 @@ impl Runtime {
             "FAILFORGE_WORKSPACE_CAPS_FDS",
             "FAILFORGE_REPORT_FDS",
         ] {
-            environment.remove(std::ffi::OsStr::new(key));
+            environment.retain(|name, _| !environment_key_is(name, key));
         }
         for key in [
             "CI",
             "FLUTTER_SUPPRESS_ANALYTICS",
             "DART_SUPPRESS_ANALYTICS",
         ] {
+            environment.retain(|name, _| !environment_key_is(name, key));
             environment.insert(key.into(), "true".into());
         }
         let cache = self.installation.join(".toolchain/pub-cache");
-        if cache.is_dir() {
-            environment
-                .entry("PUB_CACHE".into())
-                .or_insert(cache.into_os_string());
+        if cache.is_dir()
+            && !environment
+                .keys()
+                .any(|key| environment_key_is(key, "PUB_CACHE"))
+        {
+            environment.insert("PUB_CACHE".into(), cache.into_os_string());
         }
         environment
     }
 
     fn validate(&self, flutter: bool) -> Result<(), ProfileError> {
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
         let executable = |path: &Path| {
-            path.metadata()
-                .is_ok_and(|info| info.is_file() && info.permissions().mode() & 0o111 != 0)
+            path.metadata().is_ok_and(|info| {
+                info.is_file() && {
+                    #[cfg(unix)]
+                    {
+                        info.permissions().mode() & 0o111 != 0
+                    }
+                    #[cfg(windows)]
+                    {
+                        true
+                    }
+                }
+            })
         };
         if !executable(&self.helper)
-            || !executable(&self.dart_sdk.join("bin/dart"))
+            || !executable(&self.dart_sdk.join(failforge_config::platform::DART_BIN))
             || !self
                 .adapter
                 .join("bin/failforge_dart_adapter.dart")
@@ -137,7 +192,7 @@ impl Runtime {
             && !self
                 .flutter_sdk
                 .as_ref()
-                .is_some_and(|sdk| executable(&sdk.join("bin/flutter")))
+                .is_some_and(|sdk| executable(&sdk.join(failforge_config::platform::FLUTTER_BIN)))
         {
             return Err(ProfileError::Config(
                 "Flutter project requires a prepared --flutter-sdk".into(),
@@ -201,7 +256,10 @@ impl InputBinding {
             files.insert(graph);
         }
         if let Some(flutter) = runtime.flutter_sdk.as_ref().filter(|_| original.flutter) {
-            for relative in ["bin/flutter", "bin/cache/flutter_tools.snapshot"] {
+            for relative in [
+                failforge_config::platform::FLUTTER_BIN,
+                "bin/cache/flutter_tools.snapshot",
+            ] {
                 let path = flutter.join(relative);
                 if path.is_file() {
                     files.insert(path.canonicalize()?);
@@ -293,6 +351,10 @@ pub async fn analyze_profile(
         })?
         .to_str()
         .ok_or_else(|| failure("source path must be Unicode"))?;
+    #[cfg(windows)]
+    let source = source.replace('\\', "/");
+    #[cfg(windows)]
+    let source = source.as_str();
     if profile.campaigns.iter().any(|config| {
         config.rules.include.as_deref() != Some(&[source.to_owned()])
             || !config.rules.exclude.is_empty()
@@ -339,7 +401,10 @@ pub async fn analyze_profile(
     };
     if original.flutter && runtime.flutter_sdk.is_none() {
         if let Some(candidate) = runtime.dart_sdk.ancestors().nth(3) {
-            if candidate.join("bin/flutter").is_file() {
+            if candidate
+                .join(failforge_config::platform::FLUTTER_BIN)
+                .is_file()
+            {
                 runtime.flutter_sdk = Some(candidate.to_path_buf());
             }
         }
@@ -539,7 +604,10 @@ mod tests {
                 .trees
                 .contains_key(&flutter.join("bin/cache/artifacts/engine"))
         );
-        for relative in ["bin/flutter", "bin/cache/flutter_tools.snapshot"] {
+        for relative in [
+            failforge_config::platform::FLUTTER_BIN,
+            "bin/cache/flutter_tools.snapshot",
+        ] {
             assert!(!binding.files.contains_key(&flutter.join(relative)));
         }
         for relative in [
@@ -570,7 +638,10 @@ mod tests {
                 .trees
                 .contains_key(&flutter.join("bin/cache/artifacts/engine"))
         );
-        for relative in ["bin/flutter", "bin/cache/flutter_tools.snapshot"] {
+        for relative in [
+            failforge_config::platform::FLUTTER_BIN,
+            "bin/cache/flutter_tools.snapshot",
+        ] {
             assert!(binding.files.contains_key(&flutter.join(relative)));
         }
         binding.verify(&Cancellation::default()).unwrap();
@@ -622,6 +693,34 @@ mod tests {
             environment.get(std::ffi::OsStr::new("CI")),
             Some(&OsString::from("true"))
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn explicit_environment_overrides_fold_windows_keys_and_omit_hidden_drive_state() {
+        let fixture = BindingFixture::new(false);
+        let captured = BTreeMap::from([
+            ("ci".into(), "false".into()),
+            ("flutter_suppress_analytics".into(), "false".into()),
+            ("PuB_cAcHe".into(), "existing cache".into()),
+            ("=C:".into(), "C:\\previous".into()),
+            (
+                "failforge_adapter_cancel_pipe".into(),
+                "private control".into(),
+            ),
+        ]);
+        let env = fixture.runtime.environment_from(captured);
+        assert_eq!(
+            env.get(std::ffi::OsStr::new("CI")),
+            Some(&OsString::from("true"))
+        );
+        assert!(!env.contains_key(std::ffi::OsStr::new("ci")));
+        assert_eq!(
+            env.get(std::ffi::OsStr::new("PuB_cAcHe")),
+            Some(&OsString::from("existing cache"))
+        );
+        assert!(!env.contains_key(std::ffi::OsStr::new("=C:")));
+        assert!(!env.contains_key(std::ffi::OsStr::new("failforge_adapter_cancel_pipe")));
     }
 
     #[tokio::test]

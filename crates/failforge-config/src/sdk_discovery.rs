@@ -1,7 +1,10 @@
 //! Discover SDK layouts without executing PATH entries or installing toolchains.
 
-use std::ffi::{CString, OsStr};
+#[cfg(unix)]
+use std::ffi::CString;
+use std::ffi::OsStr;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
@@ -22,7 +25,11 @@ pub(crate) fn discover_path_sdk(search_path: &OsStr, cwd: &Path) -> Option<Disco
         let launcher_root = fs::canonicalize(&directory)
             .ok()
             .and_then(|directory| directory.parent().map(Path::to_path_buf));
-        for name in ["dart", "flutter"] {
+        #[cfg(unix)]
+        let names = ["dart", "flutter"];
+        #[cfg(windows)]
+        let names = ["dart.exe", "dart.bat", "flutter.bat"];
+        for name in names {
             let executable = directory.join(name);
             if !is_executable(&executable) {
                 continue;
@@ -69,11 +76,12 @@ pub(crate) fn discover_path_sdk(search_path: &OsStr, cwd: &Path) -> Option<Disco
 
 fn owns_dart_sdk(flutter_root: &Path, dart_sdk: &Path) -> bool {
     flutter_root.to_str().is_some()
-        && is_executable(&flutter_root.join("bin/flutter"))
+        && is_executable(&flutter_root.join(crate::platform::FLUTTER_BIN))
         && fs::canonicalize(flutter_root.join("bin/cache/dart-sdk"))
             .is_ok_and(|cached| cached == dart_sdk)
 }
 
+#[cfg(unix)]
 fn is_executable(path: &Path) -> bool {
     if !fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
         return false;
@@ -85,12 +93,26 @@ fn is_executable(path: &Path) -> bool {
     unsafe { libc::access(name.as_ptr(), libc::X_OK) == 0 }
 }
 
+#[cfg(windows)]
+fn is_executable(path: &Path) -> bool {
+    path.is_file()
+        && path.extension().is_some_and(|extension| {
+            extension.to_str().is_some_and(|extension| {
+                extension.eq_ignore_ascii_case("exe") || extension.eq_ignore_ascii_case("bat")
+            })
+        })
+}
+
 fn is_dart_sdk(path: &Path) -> bool {
     // Effective configuration paths must be representable in JSON and YAML.
     path.to_str().is_some()
-        && is_executable(&path.join("bin/dart"))
+        && is_executable(&path.join(crate::platform::DART_BIN))
         && fs::metadata(path.join("lib/core/core.dart")).is_ok_and(|metadata| metadata.is_file())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
+mod tests;
+
+#[cfg(all(test, windows))]
+#[path = "sdk_discovery_windows_tests.rs"]
 mod tests;

@@ -6,6 +6,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -477,14 +478,17 @@ impl Harness {
             .current_dir(&self.root)
             .env("PUB_CACHE", self.root.join(".toolchain/pub-cache"))
             .env("XDG_CONFIG_HOME", self.output.join("tool-state"));
-        command.env("TMPDIR", &self.temp_root);
+        command
+            .env("TMPDIR", &self.temp_root)
+            .env("TMP", &self.temp_root)
+            .env("TEMP", &self.temp_root);
         command
     }
     fn registry_clean(&self) -> Result<()> {
         for prefix in ["failforge-workspaces", "failforge-profile-workspaces"] {
             let registry = self
                 .temp_root
-                .join(format!("{prefix}-{}", unsafe { libc::geteuid() }));
+                .join(format!("{prefix}-{}", common::account_id()?));
             if registry.exists() {
                 for entry in fs::read_dir(registry)? {
                     let entry = entry?;
@@ -715,7 +719,7 @@ impl Harness {
             .collect();
         let started = Instant::now();
         let mut barrier_count = 0;
-        let mut child = common::OwnedChild::new(command.spawn()?);
+        let mut child = common::OwnedChild::spawn(command)?;
         let result: Result<i32> = (|| {
             loop {
                 common::check_interrupt()?;
@@ -763,6 +767,7 @@ impl Harness {
         self.registry_clean()?;
         let directory = self.output.join(&case.name);
         fs::create_dir(&directory)?;
+        #[cfg(unix)]
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
         let cancel = failforge_workspace::Cancellation::default();
         let before = failforge_workspace::source_hashes(&case.project, &cancel)?;
@@ -944,13 +949,13 @@ pub fn run(options: Options) -> Result<()> {
     let binary = options
         .binary_dir
         .unwrap_or_else(|| root.join("target/release"))
-        .join("failforge")
+        .join(failforge_config::platform::binary_name("failforge").as_ref())
         .canonicalize()?;
     let sdk = options
         .dart_sdk
         .unwrap_or_else(|| root.join(".toolchain/flutter/bin/cache/dart-sdk"))
         .canonicalize()?;
-    let temporary = common::Temporary::new_in(Path::new("/tmp"), "ff-public")?;
+    let temporary = common::Temporary::new("ff-public")?;
     let harness = Harness {
         root,
         binary,
@@ -1015,7 +1020,7 @@ pub fn run(options: Options) -> Result<()> {
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "public_regression_tests.rs"]
 mod tests;
 

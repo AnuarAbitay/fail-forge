@@ -1,8 +1,11 @@
 use super::*;
+#[cfg(unix)]
+use crate::test_fs::symlink;
 use crate::{ByteEdit, MutationFamily, Symbol, ValidationState, sha256_hex};
 use serde_json::json;
 use std::fs;
-use std::os::unix::fs::{PermissionsExt, symlink};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -69,6 +72,9 @@ impl Fixture {
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
+        #[cfg(windows)]
+        crate::test_fs::remove_tree(&self.root);
+        #[cfg(unix)]
         let _ = fs::remove_dir_all(&self.root);
     }
 }
@@ -80,7 +86,7 @@ fn unicode_crlf_bom_proof_preserves_original_metadata_and_readonly_source() {
     raw["mutant"]["symbol"]["className"] = Value::Null;
     raw["validation"]["diagnostics"] = json!([{"message":"точный текст\u{2028}😀"}]);
     let path = fixture.root.join(&fixture.mutant.file);
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o444)).unwrap();
+    fs::set_permissions(&path, crate::test_fs::permissions(0o444)).unwrap();
     let verified = verify_candidate(&fixture.root, &raw).unwrap();
     assert_eq!(verified.mutant, fixture.mutant);
     assert_eq!(verified.raw_mutant, raw["mutant"]);
@@ -90,10 +96,12 @@ fn unicode_crlf_bom_proof_preserves_original_metadata_and_readonly_source() {
         raw["safePatch"]["patchedHash"].as_str()
     );
     assert_eq!(fs::read(&path).unwrap(), fixture.source.as_bytes());
+    #[cfg(unix)]
     assert_eq!(
-        fs::metadata(path).unwrap().permissions().mode() & 0o777,
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
         0o444
     );
+    assert!(crate::test_fs::readonly(&path));
     for family in [
         MutationFamily::Classic,
         MutationFamily::FailureMode,
@@ -282,6 +290,7 @@ fn valid_edits_reject_utf8_split_ranges_mismatched_expected_and_no_change() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn static_invalid_source_reads_reject_symlinks_fifos_and_oversized_files() {
     let fixture = Fixture::new();

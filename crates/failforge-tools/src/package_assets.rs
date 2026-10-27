@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Component, Path};
 
@@ -69,6 +70,7 @@ pub(super) fn safe_relative(path: &str) -> bool {
             .any(|c| c.is_empty() || c == "." || c == "..")
 }
 
+#[cfg(unix)]
 pub(super) fn regular(root: &Path, relative: &str) -> Result<fs::File> {
     ensure(safe_relative(relative), "unsafe package path")?;
     let mut path = root.to_owned();
@@ -94,6 +96,25 @@ pub(super) fn regular(root: &Path, relative: &str) -> Result<fs::File> {
         "package input is not a regular file",
     )?;
     Ok(file)
+}
+
+#[cfg(windows)]
+pub(super) fn regular(root: &Path, relative: &str) -> Result<fs::File> {
+    ensure(safe_relative(relative), "unsafe package path")?;
+    let mut directory = failforge_workspace::windows_fs::directory(root)?;
+    let mut parts = Path::new(relative).components().peekable();
+    while let Some(part) = parts.next() {
+        if parts.peek().is_none() {
+            return Ok(failforge_workspace::windows_fs::regular_at(
+                &directory,
+                part.as_os_str(),
+                false,
+                false,
+            )?);
+        }
+        directory = failforge_workspace::windows_fs::directory_at(&directory, part.as_os_str())?;
+    }
+    Err("package input has no filename".into())
 }
 
 pub(super) fn digest(root: &Path, relative: &str) -> Result<String> {
@@ -306,6 +327,7 @@ pub(super) fn copy(
         file.write_all(&buffer[..count])?;
         total += count as u64;
     }
+    #[cfg(unix)]
     file.set_permissions(fs::Permissions::from_mode(if executable {
         0o755
     } else {

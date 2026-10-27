@@ -44,7 +44,7 @@ void main() {
     package = p.join(workspace, 'packages', 'pkg space');
     sdk = p.join(temporary.path, 'sdk');
     write(
-      p.join(sdk, 'bin', 'dart'),
+      p.join(sdk, 'bin', Platform.isWindows ? 'dart.exe' : 'dart'),
       'fake SDK executable; never run by this layer',
     );
     write(p.join(sdk, 'lib', 'core', 'core.dart'), '// fake SDK resource');
@@ -178,10 +178,13 @@ void main() {
     final bundled = p.join(flutter, 'bin', 'cache', 'dart-sdk');
     final flutterPackage = p.join(flutter, 'packages', 'flutter');
     write(
-      p.join(flutter, 'bin', 'flutter'),
+      p.join(flutter, 'bin', Platform.isWindows ? 'flutter.bat' : 'flutter'),
       '// fake tooling entry; never executed',
     );
-    write(p.join(bundled, 'bin', 'dart'), '// fake SDK entry; never executed');
+    write(
+      p.join(bundled, 'bin', Platform.isWindows ? 'dart.exe' : 'dart'),
+      '// fake SDK entry; never executed',
+    );
     write(p.join(bundled, 'lib', 'core', 'core.dart'), '// fake core resource');
     write(p.join(flutterPackage, 'pubspec.yaml'), 'name: flutter');
     write(

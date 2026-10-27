@@ -1,8 +1,13 @@
 //! Prepared package snapshots and byte bindings shared by profiles and campaigns.
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+#[cfg(unix)]
+use std::fs::OpenOptions;
+use std::fs::{self, File};
+use std::io::Read;
+#[cfg(unix)]
+use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
@@ -58,6 +63,7 @@ pub fn read_regular_prefix(path: &Path, limit: usize) -> Result<Vec<u8>, InputEr
     Ok(bytes)
 }
 
+#[cfg(unix)]
 pub(crate) fn regular_file(path: &Path) -> Result<File, InputError> {
     let file = OpenOptions::new()
         .read(true)
@@ -67,6 +73,22 @@ pub(crate) fn regular_file(path: &Path) -> Result<File, InputError> {
         return Err(failure("input must be a regular file"));
     }
     Ok(file)
+}
+
+#[cfg(windows)]
+pub(crate) fn regular_file(path: &Path) -> Result<File, InputError> {
+    Ok(crate::windows_fs::regular(path, false)?)
+}
+
+fn reparse(metadata: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        metadata.file_type().is_symlink()
+    }
+    #[cfg(windows)]
+    {
+        crate::windows_fs::is_reparse(metadata)
+    }
 }
 
 // serde_json::Value alone accepts duplicate keys. Prepared dependency roots must
@@ -193,6 +215,7 @@ fn guard_integer_tokens(bytes: &[u8]) -> Result<Cow<'_, [u8]>, InputError> {
 
 /// The supported URI subset is deliberately local, matching prepared Dart
 /// package configuration: file URIs and references relative to package_config.
+#[cfg(unix)]
 fn local_uri(config: &Path, text: &str) -> Result<PathBuf, InputError> {
     if text.contains('\0') || text.contains('\\') {
         return Err(failure("invalid prepared dependency URI"));
@@ -323,6 +346,8 @@ pub fn dependency_roots_from_value(
 
 pub fn inspect_project(root: &Path, cancel: &Cancellation) -> Result<PreparedProject, InputError> {
     cancel.check()?;
+    #[cfg(windows)]
+    let _root_capability = crate::windows_fs::directory(root)?;
     let root = root.canonicalize()?;
     if !root.join("pubspec.yaml").is_file() {
         return Err(failure("project must contain pubspec.yaml"));
@@ -446,6 +471,7 @@ pub fn hash_file(path: &Path, cancel: &Cancellation) -> Result<String, InputErro
     Ok(format!("{:x}", digest.finalize()))
 }
 
+#[cfg(unix)]
 fn tree(
     root: &Path,
     relative: &Path,
@@ -470,7 +496,9 @@ fn tree(
         }
         let path = root.join(&relative);
         let metadata = fs::symlink_metadata(&path)?;
-        if metadata.file_type().is_symlink() {
+        if reparse(&metadata) {
+            #[cfg(windows)]
+            return Err(failure("reparse points are outside supported bound inputs"));
             if source {
                 return Err(failure("project symlinks are outside supported snapshots"));
             }
@@ -516,8 +544,7 @@ pub fn source_hashes(root: &Path, cancel: &Cancellation) -> Result<Hashes, Input
     };
     tree(root, Path::new(""), true, &mut tree_binding, cancel, 0)?;
     let mut hashes = tree_binding.files;
-    if fs::symlink_metadata(root.join(".dart_tool")).is_ok_and(|info| info.file_type().is_symlink())
-    {
+    if fs::symlink_metadata(root.join(".dart_tool")).is_ok_and(|info| reparse(&info)) {
         return Err(failure("symlink prepared configuration"));
     }
     for relative in [
@@ -525,7 +552,7 @@ pub fn source_hashes(root: &Path, cancel: &Cancellation) -> Result<Hashes, Input
         ".dart_tool/package_graph.json",
     ] {
         let path = root.join(relative);
-        if fs::symlink_metadata(&path).is_ok_and(|info| info.file_type().is_symlink()) {
+        if fs::symlink_metadata(&path).is_ok_and(|info| reparse(&info)) {
             return Err(failure("symlink prepared configuration"));
         }
         if path.try_exists()? {
@@ -559,7 +586,8 @@ pub fn verify_source(
     Ok(())
 }
 
-pub(crate) fn file_uri(path: &Path) -> Result<String, InputError> {
+#[cfg(unix)]
+pub fn file_uri(path: &Path) -> Result<String, InputError> {
     let text = path
         .to_str()
         .ok_or_else(|| failure("dependency path must be UTF-8"))?;
@@ -574,6 +602,7 @@ pub(crate) fn file_uri(path: &Path) -> Result<String, InputError> {
     Ok(uri)
 }
 
+#[cfg(unix)]
 pub fn copy_snapshot(
     original: &PreparedProject,
     destination: &Path,
@@ -642,6 +671,89 @@ pub fn copy_snapshot(
     inspect_project(destination, cancel)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "inputs_tests.rs"]
 mod tests;
+
+#[cfg(windows)]
+#[path = "inputs_windows.rs"]
+mod platform;
+#[cfg(windows)]
+pub use platform::file_uri;
+#[cfg(windows)]
+use platform::local_uri;
+#[cfg(windows)]
+pub fn copy_snapshot(
+    original: &PreparedProject,
+    destination: &Path,
+    before: &Hashes,
+    cancel: &Cancellation,
+) -> Result<PreparedProject, InputError> {
+    verify_source(&original.root, before, cancel)?;
+    let copied = crate::copy_project(&original.root, destination, cancel)?;
+    verify_source(&original.root, before, cancel)?;
+    Ok(copied)
+}
+
+#[cfg(windows)]
+fn tree(
+    root: &Path,
+    relative: &Path,
+    source: bool,
+    result: &mut BoundTree,
+    cancel: &Cancellation,
+    depth: usize,
+) -> Result<(), InputError> {
+    fn visit(
+        dir: &File,
+        prefix: &Path,
+        source: bool,
+        result: &mut BoundTree,
+        cancel: &Cancellation,
+        depth: usize,
+    ) -> Result<(), InputError> {
+        use crate::windows_fs as win;
+        if depth > 128 {
+            return Err(failure("input tree exceeds supported depth"));
+        }
+        for name in win::names(dir)? {
+            cancel.check()?;
+            let relative = prefix.join(&name);
+            if skip(&relative, source) {
+                continue;
+            }
+            match win::directory_at(dir, &name) {
+                Ok(child) => {
+                    visit(&child, &relative, source, result, cancel, depth + 1)?;
+                    win::same_entry(dir, &name, &child)?;
+                }
+                Err(_) => {
+                    let mut file = win::regular_at(dir, &name, false, false)?;
+                    let mut digest = Sha256::new();
+                    let mut buffer = [0; 65536];
+                    loop {
+                        cancel.check()?;
+                        let count = file.read(&mut buffer)?;
+                        if count == 0 {
+                            break;
+                        }
+                        digest.update(&buffer[..count]);
+                    }
+                    win::same_entry(dir, &name, &file)?;
+                    result.files.insert(
+                        PathBuf::from(
+                            relative
+                                .to_str()
+                                .ok_or_else(|| failure("input paths must be UTF-8"))?
+                                .replace('\\', "/"),
+                        ),
+                        format!("{:x}", digest.finalize()),
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+    let directory = crate::windows_fs::directory(&root.join(relative))?;
+    visit(&directory, relative, source, result, cancel, depth)
+}

@@ -1,24 +1,34 @@
 //! Baseline, bounded mutant queue and original control under one native owner.
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
+use std::fs::File;
+#[cfg(unix)]
+use std::fs::OpenOptions;
+use std::io;
+#[cfg(unix)]
+use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Instant;
 
+#[cfg(unix)]
+use crate::signals::{SignalKind, signal};
 use failforge_dart::discovery::verify_candidate;
 use failforge_dart::namespace::NamespaceError;
 use failforge_dart::{InitializationHandoff, SelectionContext};
 use failforge_workspace::lifecycle::LifecycleCaps;
-use failforge_workspace::{Cancellation, PreparedProject, inspect_project, parse_json};
+#[cfg(any(unix, test))]
+use failforge_workspace::parse_json;
+use failforge_workspace::{Cancellation, PreparedProject, inspect_project};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::signal::unix::{SignalKind, signal};
 
 use crate::attempt::{Config, NamespaceCache, OwnedAttempt, Publication, Workspace};
 use crate::dart_namespace::{absolute, invalid};
+#[cfg(any(unix, test))]
 use crate::family_stream::{FrameWriter, Stream};
 use crate::namespace_planner::{PlanProject, PlanRuntime};
 use crate::retained_replay::LoadedReplay;
@@ -54,6 +64,7 @@ pub(crate) struct Request {
     pub(crate) replay: Option<Arc<LoadedReplay>>,
 }
 
+#[cfg(any(unix, test))]
 fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
     decode_value(parse_json(raw)?)
 }
@@ -149,6 +160,7 @@ pub(crate) trait FamilyEvents {
     ) -> io::Result<()>;
 }
 
+#[cfg(any(unix, test))]
 impl<W: FrameWriter> FamilyEvents for Stream<W> {
     fn emit(&mut self, event: Value) -> io::Result<()> {
         Stream::emit(self, event)
@@ -202,10 +214,13 @@ pub(crate) struct DirectoryGuard {
 impl DirectoryGuard {
     pub(crate) fn open(path: &Path) -> Result<Self, NamespaceError> {
         let canonical = path.canonicalize()?;
+        #[cfg(unix)]
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
             .open(path)?;
+        #[cfg(windows)]
+        let file = failforge_workspace::windows_fs::directory(path)?;
         let value = Self {
             path: path.to_owned(),
             canonical,
@@ -215,14 +230,27 @@ impl DirectoryGuard {
         Ok(value)
     }
     pub(crate) fn verify(&self) -> Result<(), NamespaceError> {
-        let held = self.file.metadata()?;
-        let named = std::fs::symlink_metadata(&self.path)?;
-        if !named.is_dir()
-            || held.dev() != named.dev()
-            || held.ino() != named.ino()
-            || self.path.canonicalize()? != self.canonical
+        #[cfg(unix)]
         {
-            return Err(invalid("family directory binding changed"));
+            let held = self.file.metadata()?;
+            let named = std::fs::symlink_metadata(&self.path)?;
+            if !named.is_dir()
+                || held.dev() != named.dev()
+                || held.ino() != named.ino()
+                || self.path.canonicalize()? != self.canonical
+            {
+                return Err(invalid("family directory binding changed"));
+            }
+        }
+        #[cfg(windows)]
+        {
+            use failforge_workspace::windows_fs as win;
+            let named = win::directory(&self.path)?;
+            if win::identity(&named)? != win::identity(&self.file)?
+                || self.path.canonicalize()? != self.canonical
+            {
+                return Err(invalid("family directory binding changed"));
+            }
         }
         Ok(())
     }
@@ -734,6 +762,7 @@ fn terminal_state(
     }
 }
 
+#[cfg(unix)]
 async fn process(
     request: Request,
     caps: LifecycleCaps,
@@ -760,6 +789,7 @@ async fn process(
     result
 }
 
+#[cfg(unix)]
 pub(crate) fn execute() -> ExitCode {
     let result = (|| {
         for key in [

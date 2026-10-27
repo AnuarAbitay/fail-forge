@@ -1,20 +1,33 @@
 //! Private result handoff to the campaign controller, never inherited by tests.
+#[cfg(unix)]
 use std::ffi::OsStr;
-use std::fs::{File, Metadata, OpenOptions};
-use std::io::{self, Read, Seek, Write};
+#[cfg(unix)]
+use std::fs::File;
+#[cfg(unix)]
+use std::fs::{Metadata, OpenOptions};
+use std::io::{self, Read};
+#[cfg(unix)]
+use std::io::{Seek, Write};
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+#[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 
 use failforge_dart::{CatalogSnapshot, InitializationHandoff, SelectionContext};
-use failforge_runner::{CaptureSummary, CommandResult, CommandSpec};
+#[cfg(unix)]
+use failforge_runner::CommandSpec;
+use failforge_runner::{CaptureSummary, CommandResult};
+#[cfg(unix)]
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use crate::args::TestReporter;
 
+#[cfg(unix)]
 pub(crate) const EVIDENCE_ENV: &str = "FAILFORGE_TEST_EVIDENCE_FD";
 const MAX_CAPTURE: u64 = 256 * 1024 * 1024;
+#[cfg(unix)]
 const MAX_REPORT: usize = 64 * 1024 * 1024;
 
 /// In-memory evidence shared by `run` and the complete native attempt owner.
@@ -25,9 +38,12 @@ pub(crate) struct AttemptEvidence {
     pub(crate) classification: serde_json::Value,
     pub(crate) catalogue: Option<CatalogSnapshot>,
     pub(crate) initialization: InitializationHandoff,
+    #[cfg(unix)]
     pub(crate) stdout_length: u64,
     pub(crate) stdout_hash: String,
+    #[cfg(unix)]
     pub(crate) stderr_length: u64,
+    #[cfg(unix)]
     pub(crate) stderr_hash: String,
 }
 
@@ -42,7 +58,7 @@ pub(crate) fn analyze(
 ) -> io::Result<AttemptEvidence> {
     failforge_dart::validate_selection_context(context).map_err(|_| invalid())?;
     let stdout = read_capture(&result.stdout, true)?;
-    let stderr = read_capture(&result.stderr, false)?;
+    let _stderr = read_capture(&result.stderr, false)?;
     let mut classification =
         failforge_dart::classify_dart_result(&stdout.bytes, result, reporter.mode());
     if !native_ok {
@@ -78,19 +94,24 @@ pub(crate) fn analyze(
         classification,
         catalogue,
         initialization,
+        #[cfg(unix)]
         stdout_length: stdout.length,
         stdout_hash: stdout.hash,
-        stderr_length: stderr.length,
-        stderr_hash: stderr.hash,
+        #[cfg(unix)]
+        stderr_length: _stderr.length,
+        #[cfg(unix)]
+        stderr_hash: _stderr.hash,
     })
 }
 
+#[cfg(unix)]
 pub(crate) struct EvidenceHandoff {
     file: File,
     mode: TestReporter,
     context: Option<failforge_dart::SelectionContext>,
 }
 
+#[cfg(unix)]
 impl EvidenceHandoff {
     pub(crate) fn from_env(mode: Option<TestReporter>) -> io::Result<Option<Self>> {
         let mut evidence = Self::from_value(std::env::var_os(EVIDENCE_ENV).as_deref(), mode)?;
@@ -175,6 +196,7 @@ impl EvidenceHandoff {
     }
 }
 
+#[cfg(unix)]
 fn validate_handoff(file: &mut File) -> io::Result<()> {
     let metadata = file.metadata()?;
     // SAFETY: getters take no pointers and do not modify descriptor state.
@@ -201,10 +223,12 @@ fn validate_handoff(file: &mut File) -> io::Result<()> {
 
 pub(crate) struct Capture {
     pub(crate) bytes: Vec<u8>,
+    #[cfg(any(unix, test))]
     pub(crate) length: u64,
     pub(crate) hash: String,
 }
 
+#[cfg(unix)]
 fn same_file(a: &Metadata, b: &Metadata) -> bool {
     a.is_file()
         && b.is_file()
@@ -227,10 +251,15 @@ pub(crate) fn read_capture_limited(
     limit: u64,
 ) -> io::Result<Capture> {
     let path = summary.file_path.as_deref().ok_or_else(invalid)?;
+    #[cfg(unix)]
     let mut file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
         .open(path)?;
+    #[cfg(windows)]
+    let mut file = failforge_workspace::windows_fs::regular(path, false)?;
+    #[cfg(windows)]
+    let fingerprint = crate::campaign_publish_fs::fingerprint(&file)?;
     let before = file.metadata()?;
     if !before.is_file()
         || before.len() > limit
@@ -257,10 +286,16 @@ pub(crate) fn read_capture_limited(
             bytes.extend_from_slice(&buffer[..read]);
         }
     }
-    if length != before.len()
-        || !same_file(&before, &file.metadata()?)
-        || !same_file(&before, &std::fs::symlink_metadata(path)?)
-    {
+    #[cfg(unix)]
+    let unchanged = same_file(&before, &file.metadata()?)
+        && same_file(&before, &std::fs::symlink_metadata(path)?);
+    #[cfg(windows)]
+    let unchanged = fingerprint == crate::campaign_publish_fs::fingerprint(&file)?
+        && fingerprint
+            == crate::campaign_publish_fs::fingerprint(&failforge_workspace::windows_fs::regular(
+                path, false,
+            )?)?;
+    if length != before.len() || !unchanged {
         return Err(invalid());
     }
     let digest = hash.finalize();
@@ -269,13 +304,16 @@ pub(crate) fn read_capture_limited(
     }
     Ok(Capture {
         bytes,
+        #[cfg(any(unix, test))]
         length,
         hash: format!("{digest:x}"),
     })
 }
 
+#[cfg(unix)]
 struct BoundedReport(Vec<u8>);
 
+#[cfg(unix)]
 impl Write for BoundedReport {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         if bytes.len() > (MAX_REPORT - 1).saturating_sub(self.0.len()) {
@@ -294,6 +332,10 @@ fn invalid() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "invalid native test evidence")
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "test_evidence_tests.rs"]
 mod tests;
+
+#[cfg(all(test, windows))]
+#[path = "test_evidence_windows_tests.rs"]
+mod windows_tests;

@@ -1,16 +1,36 @@
 //! Native protocol fixture. It has no subprocesses and executes no JSON command.
 use failforge_dart::{AdapterFailure, RequestEnvelope, ResponseEnvelope, ResponseKind};
 use serde_json::json;
+#[cfg(windows)]
+use std::fs::File as ControlStream;
 use std::io::{self, BufRead, Read, Write};
-use std::os::unix::net::UnixStream;
+#[cfg(unix)]
+use std::os::unix::net::UnixStream as ControlStream;
+
+fn connect_control(path: &std::ffi::OsStr) -> io::Result<ControlStream> {
+    #[cfg(unix)]
+    {
+        ControlStream::connect(path)
+    }
+    #[cfg(windows)]
+    {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+    }
+}
 
 /// Finite protocol actor for the installed helper's cancellation boundary.
 fn cancellation_fixture(marker: std::path::PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(unix)]
     let probe: i32 = std::env::var("FAILFORGE_CANCEL_PROBE_FD")?.parse()?;
+    #[cfg(unix)]
     let expected: serde_json::Value =
         serde_json::from_str(&std::env::var("FAILFORGE_CANCEL_PROBE_INODE")?)?;
     // SAFETY: fstat initializes the supplied storage when it succeeds. An
     // intentionally closed probe descriptor returns EBADF without mutation.
+    #[cfg(unix)]
     let inherited = unsafe {
         let mut info = std::mem::MaybeUninit::<libc::stat>::uninit();
         if libc::fstat(probe, info.as_mut_ptr()) == 0 {
@@ -20,12 +40,14 @@ fn cancellation_fixture(marker: std::path::PathBuf) -> Result<(), Box<dyn std::e
             false
         }
     };
+    #[cfg(windows)]
+    let inherited = false;
     let close = std::env::var("FAILFORGE_CANCEL_MODE").as_deref() == Ok("close");
     let report = |stage: &str| {
         std::fs::write(
             &marker,
             json!({"pid":std::process::id(),"inheritedControl":inherited,
-                "privateEnvironmentPresent":std::env::var_os("FAILFORGE_ADAPTER_CANCEL_FD").is_some(),
+                "privateEnvironmentPresent":std::env::var_os("FAILFORGE_ADAPTER_CANCEL_FD").is_some() || std::env::var_os("FAILFORGE_ADAPTER_CANCEL_PIPE").is_some(),
                 "stage":stage})
             .to_string(),
         )
@@ -62,17 +84,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return cancellation_fixture(marker.into());
     }
     let mode = std::env::args().nth(1).ok_or("fixture mode required")?;
+    #[cfg(unix)]
     if mode == "hang-ignore-term" {
         // SAFETY: this dedicated fixture process changes only its own SIGTERM
         // disposition before notifying the test that it is ready.
         unsafe { libc::signal(libc::SIGTERM, libc::SIG_IGN) };
     }
     let mut control = if let Some(path) = std::env::var_os("FAILFORGE_ADAPTER_CONTROL") {
-        let mut stream = UnixStream::connect(path)?;
+        let mut stream = connect_control(&path)?;
         // SAFETY: getpgrp reads this fixture's own process group without mutation.
-        writeln!(stream, "READY {} {}", std::process::id(), unsafe {
-            libc::getpgrp()
-        })?;
+        #[cfg(unix)]
+        let group = unsafe { libc::getpgrp() };
+        #[cfg(windows)]
+        let group = std::process::id();
+        writeln!(stream, "READY {} {}", std::process::id(), group)?;
         let mut watchdog = stream.try_clone()?;
         std::thread::spawn(move || {
             let mut byte = [0];

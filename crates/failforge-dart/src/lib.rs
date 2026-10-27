@@ -59,3 +59,6 @@ pub use test_outcome::{
     ReporterMode, RunnerSummaryError, classify_dart_capture, classify_dart_result,
     parse_cli_summary,
 };
+
+#[cfg(test)]
+mod test_fs;

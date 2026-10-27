@@ -1,5 +1,7 @@
+#[cfg(unix)]
 use std::fs::File;
 use std::io::{self, Write};
+#[cfg(unix)]
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,7 +12,24 @@ use failforge_runner::{
 };
 use serde_json::Value;
 use tokio::io::AsyncWriteExt;
-use tokio::net::UnixStream;
+#[cfg(unix)]
+use tokio::net::UnixStream as InputWriter;
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::NamedPipeServer as InputWriter;
+
+#[cfg(windows)]
+#[path = "client_pipe_windows.rs"]
+mod windows_pipe;
+
+#[cfg(unix)]
+fn input_pair() -> io::Result<(InputWriter, File)> {
+    let (parent, child) = std::os::unix::net::UnixStream::pair()?;
+    parent.set_nonblocking(true)?;
+    Ok((
+        InputWriter::from_std(parent)?,
+        File::from(OwnedFd::from(child)),
+    ))
+}
 
 use crate::{
     AdapterCommand, AdapterFailure, MAX_LINE_BYTES, PROTOCOL_VERSION, ProtocolError,
@@ -78,7 +97,7 @@ pub struct AdapterClient {
     _runner: Arc<Runner>,
     handle: RunHandle,
     stream: StreamReceiver,
-    writer: UnixStream,
+    writer: Option<InputWriter>,
     options: ClientOptions,
     close_budget: Duration,
     next_id: u64,
@@ -162,17 +181,17 @@ impl AdapterClient {
         spec.capture_policy.stream_queue_bytes =
             2 * (options.max_line_bytes + spec.capture_policy.read_chunk_bytes);
         spec.capture_policy.tail_bytes_per_stream = 64 * 1024;
-        let (parent, child) = std::os::unix::net::UnixStream::pair()?;
-        parent.set_nonblocking(true)?;
-        let child = File::from(OwnedFd::from(child));
+        #[cfg(unix)]
+        let (writer, child) = input_pair()?;
+        #[cfg(windows)]
+        let (writer, child) = windows_pipe::input_pair()?;
         let mut handle = runner.start_with_stdin(spec, child)?;
         let stream = handle.take_stream().ok_or(ClientError::MissingStream)?;
-        let writer = UnixStream::from_std(parent)?;
         Ok(Self {
             _runner: runner,
             handle,
             stream,
-            writer,
+            writer: Some(writer),
             options,
             close_budget,
             next_id: 1,
@@ -248,8 +267,11 @@ impl AdapterClient {
 
     async fn exchange(&mut self, request: &[u8]) -> Result<ResponseEnvelope, ClientError> {
         self.check_loss()?;
-        self.writer.write_all(request).await?;
-        self.writer.write_all(b"\n").await?;
+        let writer = self.writer.as_mut().ok_or(ClientError::UnexpectedEof)?;
+        #[cfg(windows)]
+        writer.connect().await?;
+        writer.write_all(request).await?;
+        writer.write_all(b"\n").await?;
         loop {
             let mut chunk = self.stream.recv().await.ok_or(ClientError::UnexpectedEof)?;
             let bytes = chunk.bytes();
@@ -308,7 +330,20 @@ impl AdapterClient {
             // immediate SIGKILL. Transport/protocol poisoning remains forced.
             self.handle.cancel(CancelReason::User);
         }
-        let input_error = self.writer.shutdown().await.err();
+        // Named-pipe shutdown does not close its kernel handle. Drop the writer
+        // before waiting so the child observes EOF on every platform.
+        let input_error = if let Some(writer) = self.writer.take() {
+            #[cfg(unix)]
+            let mut writer = writer;
+            #[cfg(unix)]
+            let error = writer.shutdown().await.err();
+            #[cfg(windows)]
+            let error: Option<io::Error> = None;
+            drop(writer);
+            error
+        } else {
+            None
+        };
         let mut protocol_error = None;
         let outcome = tokio::time::timeout(self.close_budget, async {
             let result = loop {

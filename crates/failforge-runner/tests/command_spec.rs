@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 use failforge_runner::{CapturePolicy, CommandSpec, EnvSpec, SpecError, TimeoutPolicy};
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;

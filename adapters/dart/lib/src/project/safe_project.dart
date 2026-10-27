@@ -58,7 +58,10 @@ class SafeProject {
         jsonString(payload['flutterSdkPath'], 'flutterSdkPath'),
         'Flutter SDK',
       );
-      _readableFile(p.join(flutter, 'bin', 'flutter'), 'sdk_missing');
+      _readableFile(
+        p.join(flutter, 'bin', Platform.isWindows ? 'flutter.bat' : 'flutter'),
+        'sdk_missing',
+      );
       flutterPackage = _directory(
         p.join(flutter, 'packages', 'flutter'),
         'Flutter SDK package',

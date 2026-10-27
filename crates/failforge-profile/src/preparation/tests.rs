@@ -1,6 +1,9 @@
 use super::*;
+#[cfg(unix)]
 use std::ffi::CString;
+#[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
+#[cfg(unix)]
 use std::os::unix::fs::symlink;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -385,6 +388,7 @@ fn existing_default_output_requires_force_and_is_preserved_until_publication() {
 }
 
 #[test]
+#[cfg(unix)]
 fn default_output_rejects_aliases_and_nested_package_boundaries_even_with_force() {
     for kind in ["parent_alias", "destination_alias", "nested_package"] {
         let mut fixture = Fixture::new();
@@ -444,6 +448,7 @@ fn default_output_is_rooted_in_the_nearest_source_package() {
 }
 
 #[test]
+#[cfg(unix)]
 fn unicode_quotes_controls_and_yaml_sensitive_file_names_preserve_literal_scope() {
     let mut fixture = Fixture::new();
     for name in [
@@ -471,6 +476,7 @@ fn unicode_quotes_controls_and_yaml_sensitive_file_names_preserve_literal_scope(
 }
 
 #[test]
+#[cfg(unix)]
 fn source_requires_library_scope_and_rejects_tool_directories_and_globs() {
     let mut fixture = Fixture::new();
     for path in [
@@ -493,6 +499,7 @@ fn source_requires_library_scope_and_rejects_tool_directories_and_globs() {
 }
 
 #[test]
+#[cfg(unix)]
 fn missing_directory_and_fifo_sources_fail_without_blocking() {
     let mut fixture = Fixture::new();
     for path in ["lib/missing.dart", "lib", "pubspec.yaml"] {
@@ -507,6 +514,7 @@ fn missing_directory_and_fifo_sources_fail_without_blocking() {
 }
 
 #[test]
+#[cfg(unix)]
 fn package_local_source_aliases_and_symlink_dotdot_are_rejected() {
     let mut fixture = Fixture::new();
     symlink(
@@ -526,6 +534,7 @@ fn package_local_source_aliases_and_symlink_dotdot_are_rejected() {
 }
 
 #[test]
+#[cfg(unix)]
 fn whole_package_alias_is_allowed_but_alias_to_package_interior_is_rejected() {
     let mut fixture = Fixture::new();
     let alias = fixture.root.join("alias");
@@ -540,6 +549,7 @@ fn whole_package_alias_is_allowed_but_alias_to_package_interior_is_rejected() {
 }
 
 #[test]
+#[cfg(unix)]
 fn output_aliases_are_rejected_even_when_dangling_or_forced() {
     let mut fixture = Fixture::new();
     fs::create_dir(fixture.output().parent().unwrap()).unwrap();
@@ -612,6 +622,7 @@ fn existing_output_is_untouched_and_requires_force() {
 }
 
 #[test]
+#[cfg(unix)]
 fn invalid_unicode_nul_and_empty_paths_are_configuration_errors() {
     let mut fixture = Fixture::new();
     let valid_source = fixture.options.source.clone();
@@ -650,6 +661,7 @@ fn sdk_and_adapter_overrides_become_absolute_and_conflicting_sdks_fail() {
 }
 
 #[test]
+#[cfg(unix)]
 fn pubspec_symlink_or_oversize_fails_before_profile_generation() {
     let fixture = Fixture::new();
     fs::write(

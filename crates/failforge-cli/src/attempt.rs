@@ -1,20 +1,25 @@
 //! Private owner of a complete fresh-copy test attempt and its terminal receipt.
+#[cfg(unix)]
 use std::io::Write;
 use std::path::PathBuf;
+#[cfg(unix)]
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+#[cfg(unix)]
+use crate::signals::{SignalKind, signal};
 use failforge_dart::{
     Mutant, SelectionContext,
     attempt_workspace::AttemptWorkspace,
     namespace::{NamespaceError, isolate_subject},
 };
-use failforge_workspace::{Cancellation, PreparedProject, lifecycle::LifecycleCaps, parse_json};
+#[cfg(any(unix, test))]
+use failforge_workspace::parse_json;
+use failforge_workspace::{Cancellation, PreparedProject, lifecycle::LifecycleCaps};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use tokio::signal::unix::{SignalKind, signal};
 
 use crate::attempt_execution::{ExecutedAttempt, ExecutionConfig};
 use crate::dart_namespace::{absolute, invalid};
@@ -70,6 +75,7 @@ fn hex(text: &str) -> bool {
         .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+#[cfg(any(unix, test))]
 fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
     decode_value(parse_json(raw)?)
 }
@@ -213,7 +219,9 @@ pub(crate) struct OwnedAttempt {
     pub catalogue: Value,
     pub initialization: Value,
     pub namespace_plan: Value,
-    workspace: OwnedWorkspace,
+    // Retaining this guard keeps the lease alive through caller publication.
+    _workspace: OwnedWorkspace,
+    #[cfg(unix)]
     private_response: Option<Vec<u8>>,
 }
 fn infra(reason: &str) -> Value {
@@ -558,7 +566,7 @@ async fn run_owned_inner(
     receipt.attempt["temporaryCopyCleaned"] = cleanup.is_ok().into();
     receipt.attempt["wallSeconds"] = started.elapsed().as_secs_f64().into();
     let cancel = cancel.clone();
-    let (receipt, private_response) = tokio::task::spawn_blocking(move || {
+    let (receipt, _private_response) = tokio::task::spawn_blocking(move || {
         seal_receipt(receipt, &cancel, publication, retain_transport)
     })
     .await
@@ -569,8 +577,9 @@ async fn run_owned_inner(
         catalogue: receipt.catalogue,
         initialization: receipt.initialization,
         namespace_plan: receipt.namespace_plan,
-        workspace,
-        private_response,
+        _workspace: workspace,
+        #[cfg(unix)]
+        private_response: _private_response,
     })
 }
 
@@ -583,6 +592,7 @@ async fn verify_replay(replay: Option<Arc<LoadedReplay>>) -> Result<(), Namespac
     Ok(())
 }
 
+#[cfg(unix)]
 async fn perform(
     request: Request,
     caps: LifecycleCaps,
@@ -601,9 +611,10 @@ async fn perform(
         owned.initialization,
         owned.namespace_plan,
     ));
-    Ok((owned.workspace, bytes))
+    Ok((owned._workspace, bytes))
 }
 
+#[cfg(unix)]
 async fn process(
     request: Request,
     caps: LifecycleCaps,
@@ -634,6 +645,7 @@ async fn process(
     let _ = listener.await;
     result
 }
+#[cfg(unix)]
 pub(crate) fn execute() -> ExitCode {
     let result = (|| {
         for key in [

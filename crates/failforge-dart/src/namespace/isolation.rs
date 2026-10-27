@@ -122,17 +122,8 @@ fn bind_config(
 }
 
 fn file_uri(path: &Path) -> Result<String, NamespaceError> {
-    let text = path
-        .to_str()
-        .ok_or_else(|| invalid("namespace path must be UTF-8"))?;
-    let mut uri = String::from("file://");
-    for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || b"/-._~".contains(&byte) {
-            uri.push(char::from(byte));
-        } else {
-            uri.push_str(&format!("%{byte:02X}"));
-        }
-    }
+    let mut uri = crate::test_catalog::path_uri(path)
+        .map_err(|_| invalid("namespace path must be a local UTF-8 path"))?;
     uri.push('/');
     Ok(uri)
 }
@@ -181,8 +172,19 @@ fn test_bin(uri: &str) -> Result<PathBuf, NamespaceError> {
         text.starts_with('/') && !text.contains('\0'),
         "test dependency is not a local prepared package",
     )?;
+    #[cfg(windows)]
+    let text = if text.as_bytes().get(2) == Some(&b':')
+        && text.starts_with('/')
+        && text.as_bytes()[1].is_ascii_alphabetic()
+    {
+        text[1..].to_owned()
+    } else {
+        text
+    };
     let bin = PathBuf::from(text).join("bin/test.dart");
     require(bin.is_file(), "prepared test entry point missing")?;
+    #[cfg(windows)]
+    let bin = bin.canonicalize()?;
     Ok(bin)
 }
 

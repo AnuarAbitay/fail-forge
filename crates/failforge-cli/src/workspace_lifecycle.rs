@@ -3,10 +3,10 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use crate::signals::{SignalKind, signal};
 use failforge_workspace::{Cancellation, InputError, lifecycle};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::signal::unix::{SignalKind, signal};
 
 use crate::workspace_handoff::{self, Handoff};
 

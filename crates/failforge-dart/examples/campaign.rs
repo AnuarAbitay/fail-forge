@@ -5,6 +5,7 @@ use std::ffi::OsString;
 use std::fs::File;
 use std::future::Future;
 use std::io::{self, Read, Write};
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17,13 +18,24 @@ use failforge_dart::{
 use failforge_runner::{CommandSpec, EnvSpec, Runner, WORKSPACE_LEASE_ENV, WorkspaceLease};
 use serde::Serialize;
 use serde_json::{Value, json};
+#[cfg(unix)]
 use tokio::io::{Interest, unix::AsyncFd};
+#[cfg(unix)]
 use tokio::signal::unix::{Signal, SignalKind, signal};
+#[cfg(windows)]
+#[path = "campaign/windows_control.rs"]
+mod windows_control;
+#[cfg(windows)]
+use windows_control::Cancellation;
 
 type Failure = Box<dyn Error>;
 const MAX_MUTANTS: u64 = 10_000;
 const MAX_SOURCE_BYTES: usize = 4 * 1024 * 1024;
+#[cfg(unix)]
 const CANCEL_ENV: &str = "FAILFORGE_ADAPTER_CANCEL_FD";
+
+#[cfg(windows)]
+const CANCEL_ENV: &str = "FAILFORGE_ADAPTER_CANCEL_PIPE";
 
 struct Configuration {
     dart: OsString,
@@ -54,7 +66,15 @@ impl Configuration {
     fn spec(&self) -> CommandSpec {
         let mut environment = EnvSpec::default();
         environment.remove.insert(WORKSPACE_LEASE_ENV.into());
-        environment.remove.insert(CANCEL_ENV.into());
+        environment
+            .remove
+            .insert("FAILFORGE_ADAPTER_CANCEL_FD".into());
+        environment
+            .remove
+            .insert("FAILFORGE_ADAPTER_CANCEL_PIPE".into());
+        environment
+            .remove
+            .insert("FAILFORGE_CLI_CANCEL_PIPE".into());
         CommandSpec {
             program: self.dart.clone(),
             args: vec![
@@ -155,12 +175,14 @@ struct SessionEvidence {
 
 /// A pipe buffers a controller request even before this process installs its
 /// signal handlers. The private capability is never inherited by the adapter.
+#[cfg(unix)]
 struct Cancellation {
     interrupt: Signal,
     terminate: Signal,
     control: Option<AsyncFd<OwnedFd>>,
 }
 
+#[cfg(unix)]
 impl Cancellation {
     fn new() -> io::Result<Self> {
         // Subscribe before any managed child exists. External callers can
@@ -189,6 +211,7 @@ impl Cancellation {
     }
 }
 
+#[cfg(unix)]
 fn cancellation_descriptor(value: &std::ffi::OsStr) -> io::Result<AsyncFd<OwnedFd>> {
     let invalid = || {
         io::Error::new(
@@ -241,6 +264,7 @@ fn cancellation_descriptor(value: &std::ffi::OsStr) -> io::Result<AsyncFd<OwnedF
     AsyncFd::with_interest(file.into(), Interest::READABLE)
 }
 
+#[cfg(unix)]
 async fn control_request(control: &Option<AsyncFd<OwnedFd>>) -> io::Result<&'static str> {
     let Some(control) = control else {
         return std::future::pending().await;
@@ -289,7 +313,10 @@ pub async fn main() -> Result<(), Failure> {
 }
 
 async fn execute(configuration: Configuration, output: &mut dyn Write) -> Result<(), Failure> {
+    #[cfg(unix)]
     let mut cancellation = Cancellation::new()?;
+    #[cfg(windows)]
+    let mut cancellation = Cancellation::new().await?;
     execute_cancellable(configuration, output, cancellation.request()).await
 }
 
@@ -524,10 +551,16 @@ mod tests {
         let spec = configuration.spec();
         assert!(spec.env.remove.contains(OsStr::new(WORKSPACE_LEASE_ENV)));
         assert!(spec.env.remove.contains(OsStr::new(CANCEL_ENV)));
+        assert!(
+            spec.env
+                .remove
+                .contains(OsStr::new("FAILFORGE_CLI_CANCEL_PIPE"))
+        );
         assert!(!spec.env.set.contains_key(OsStr::new(WORKSPACE_LEASE_ENV)));
         assert!(spec.validate().is_ok());
     }
 
+    #[cfg(unix)]
     fn control_pipe() -> (OwnedFd, File) {
         let mut descriptors = [-1; 2];
         // SAFETY: descriptors is writable storage for the two returned fds.
@@ -541,6 +574,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn private_control_pipe_buffers_signals_and_controller_eof() {
         for (byte, reason) in [(b'I', "SIGINT"), (b'T', "SIGTERM")] {
@@ -568,6 +602,7 @@ mod tests {
         assert_eq!(control_request(&control).await.unwrap(), "controller_eof");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn private_control_rejects_invalid_capabilities_and_request_bytes() {
         for text in [
@@ -665,7 +700,13 @@ mod tests {
             .unwrap();
         let sdk = root.join(".toolchain/flutter/bin/cache/dart-sdk");
         Configuration {
-            dart: sdk.join("bin/dart").into_os_string(),
+            dart: sdk
+                .join(if cfg!(windows) {
+                    "bin/dart.exe"
+                } else {
+                    "bin/dart"
+                })
+                .into_os_string(),
             adapter: root.join("adapters/dart"),
             package: fixture.0.clone(),
             payload: json!({"workspaceRoot":fixture.0,"packageRoot":".","dartSdkPath":sdk,"rules":{"operators":[operator]},"limits":{"maxMutants":max}}),

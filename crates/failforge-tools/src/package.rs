@@ -6,9 +6,11 @@ use crate::common::{self, Result, Temporary, ensure};
 use clap::Args;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+#[cfg(unix)]
 use std::ffi::CString;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
+#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -89,7 +91,8 @@ fn host(verbose: &str, os: &str, arch: &str) -> Result<String> {
     let platform = match os {
         "macos" => "-apple-darwin",
         "linux" => "-unknown-linux-",
-        _ => return Err("packaging supports Linux and macOS".into()),
+        "windows" => "-pc-windows-msvc",
+        _ => return Err("packaging supports Linux, macOS and Windows MSVC".into()),
     };
     ensure(
         target.starts_with(architecture) && target.contains(platform),
@@ -148,7 +151,10 @@ fn artifacts(raw: &[u8], cache: &Path) -> Result<BTreeMap<String, PathBuf>> {
         )?;
         let path = PathBuf::from(executable).canonicalize()?;
         ensure(
-            path.starts_with(cache) && path.file_name().is_some_and(|value| value == name),
+            path.starts_with(cache)
+                && path.file_name().is_some_and(|value| {
+                    value == failforge_config::platform::binary_name(name).as_ref()
+                }),
             "unexpected Cargo executable location",
         )?;
         ensure(
@@ -178,6 +184,20 @@ fn binary_format(path: &Path, target: &str) -> Result<()> {
         header[..4] == [0xcf, 0xfa, 0xed, 0xfe]
             && u32::from_le_bytes(header[4..8].try_into()?)
                 == if arm { 0x0100000c } else { 0x01000007 }
+    } else if target.contains("-pc-windows-") {
+        if header[..2] != *b"MZ" {
+            false
+        } else {
+            file.seek(SeekFrom::Start(0x3c))?;
+            let mut offset = [0; 4];
+            file.read_exact(&mut offset)?;
+            file.seek(SeekFrom::Start(u32::from_le_bytes(offset).into()))?;
+            let mut pe = [0; 26];
+            file.read_exact(&mut pe)?;
+            pe[..4] == *b"PE\0\0"
+                && u16::from_le_bytes(pe[4..6].try_into()?) == if arm { 0xaa64 } else { 0x8664 }
+                && u16::from_le_bytes(pe[24..26].try_into()?) == 0x20b
+        }
     } else {
         header[..6] == [0x7f, b'E', b'L', b'F', 2, 1]
             && u16::from_le_bytes(header[18..20].try_into()?) == if arm { 183 } else { 62 }
@@ -188,6 +208,7 @@ fn binary_format(path: &Path, target: &str) -> Result<()> {
     )
 }
 
+#[cfg(unix)]
 fn publish(source: &Path, output: &Path) -> Result<()> {
     let source = CString::new(source.as_os_str().as_bytes())?;
     let output = CString::new(output.as_os_str().as_bytes())?;
@@ -212,6 +233,11 @@ fn publish(source: &Path, output: &Path) -> Result<()> {
             std::io::Error::last_os_error()
         ),
     )
+}
+
+#[cfg(windows)]
+fn publish(source: &Path, output: &Path) -> Result<()> {
+    common::publish_directory(source, output)
 }
 
 fn fresh_output(path: &Path) -> Result<PathBuf> {
@@ -380,9 +406,9 @@ pub fn run(options: Options) -> Result<()> {
     for (name, executable) in &executables {
         let file = assets::copy(
             executable.parent().unwrap(),
-            name,
+            failforge_config::platform::binary_name(name).as_ref(),
             &payload,
-            &format!("bin/{name}"),
+            &format!("bin/{}", failforge_config::platform::binary_name(name)),
             true,
         )?;
         ensure(
@@ -444,6 +470,54 @@ pub fn run(options: Options) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "package_tests.rs"]
 mod tests;
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    #[test]
+    fn native_windows_target_is_not_mislabeled_as_another_platform() {
+        assert_eq!(
+            host("host: x86_64-pc-windows-msvc\n", "windows", "x86_64").unwrap(),
+            "x86_64-pc-windows-msvc"
+        );
+        assert!(host("host: x86_64-unknown-linux-gnu\n", "windows", "x86_64").is_err());
+        assert!(host("host: aarch64-pc-windows-msvc\n", "windows", "x86_64").is_err());
+    }
+    #[test]
+    fn pe64_signature_machine_and_optional_header_are_all_required() {
+        let temporary = Temporary::new("ff-pe").unwrap();
+        let path = temporary.0.join("native.exe");
+        let mut bytes = vec![0; 256];
+        bytes[..2].copy_from_slice(b"MZ");
+        bytes[0x3c..0x40].copy_from_slice(&128_u32.to_le_bytes());
+        bytes[128..132].copy_from_slice(b"PE\0\0");
+        bytes[132..134].copy_from_slice(&0x8664_u16.to_le_bytes());
+        bytes[152..154].copy_from_slice(&0x20b_u16.to_le_bytes());
+        fs::write(&path, &bytes).unwrap();
+        binary_format(&path, "x86_64-pc-windows-msvc").unwrap();
+        assert!(binary_format(&path, "aarch64-pc-windows-msvc").is_err());
+        bytes[152..154].copy_from_slice(&0x10b_u16.to_le_bytes());
+        fs::write(&path, &bytes).unwrap();
+        assert!(binary_format(&path, "x86_64-pc-windows-msvc").is_err());
+        bytes[152..154].copy_from_slice(&0x20b_u16.to_le_bytes());
+        bytes[128] = b'X';
+        fs::write(&path, &bytes).unwrap();
+        assert!(binary_format(&path, "x86_64-pc-windows-msvc").is_err());
+    }
+    #[test]
+    fn directory_publication_never_replaces_existing_output() {
+        let temporary = Temporary::new("ff-publish").unwrap();
+        let source = temporary.0.join("source");
+        let output = temporary.0.join("output");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("payload"), "new").unwrap();
+        fs::create_dir(&output).unwrap();
+        fs::write(output.join("keep"), "old").unwrap();
+        assert!(publish(&source, &output).is_err());
+        assert_eq!(fs::read(output.join("keep")).unwrap(), b"old");
+        assert_eq!(fs::read(source.join("payload")).unwrap(), b"new");
+    }
+}

@@ -17,7 +17,7 @@ use serde::Deserialize;
 use crate::args::TestReporter;
 use crate::test_evidence::AttemptEvidence;
 
-const PRIVATE_ENV: [&str; 9] = [
+const PRIVATE_ENV: [&str; 11] = [
     "FAILFORGE_WORKSPACE_LEASE_FD",
     "FAILFORGE_ADAPTER_CANCEL_FD",
     "FAILFORGE_RUNNER_READY_FD",
@@ -27,6 +27,8 @@ const PRIVATE_ENV: [&str; 9] = [
     "FAILFORGE_WORKSPACE_HANDOFF_FD",
     "FAILFORGE_WORKSPACE_CAPS_FDS",
     "FAILFORGE_REPORT_FDS",
+    "FAILFORGE_CLI_CANCEL_PIPE",
+    "FAILFORGE_ADAPTER_CANCEL_PIPE",
 ];
 
 #[derive(Debug, Clone, Deserialize)]
@@ -44,7 +46,7 @@ pub(crate) struct ExecutedAttempt {
     /// Compatibility report argv. The actual child is its suffix after `--`;
     /// the virtual `failforge run` prefix does not start another process.
     pub command: Vec<String>,
-    pub exit_code: u8,
+    pub exit_code: crate::ProcessCode,
     pub native_ok: bool,
     pub result: Option<CommandResult>,
     pub evidence: Option<AttemptEvidence>,
@@ -98,20 +100,27 @@ fn specification(
             .flutter_sdk
             .as_ref()
             .ok_or_else(|| invalid("Flutter test execution requires its SDK"))?;
-        vec![
-            path_text(&sdk.join("bin/flutter"))?,
-            "--suppress-analytics".into(),
-            "test".into(),
-            "--no-pub".into(),
-            "--machine".into(),
-        ]
+        #[cfg(unix)]
+        let prefix = vec![path_text(
+            &sdk.join(failforge_config::platform::FLUTTER_BIN),
+        )?];
+        #[cfg(windows)]
+        let prefix = vec![
+            path_text(&config.dart_sdk.join(failforge_config::platform::DART_BIN))?,
+            "--disable-dart-dev".into(),
+            path_text(&sdk.join("bin/cache/flutter_tools.snapshot"))?,
+        ];
+        prefix
+            .into_iter()
+            .chain(["--suppress-analytics", "test", "--no-pub", "--machine"].map(str::to_owned))
+            .collect()
     } else {
         let test = project
             .packages
             .get("test")
             .ok_or_else(|| invalid("test execution requires the prepared test package"))?;
         vec![
-            path_text(&config.dart_sdk.join("bin/dart"))?,
+            path_text(&config.dart_sdk.join(failforge_config::platform::DART_BIN))?,
             format!(
                 "--packages={}",
                 path_text(&copied.join(".dart_tool/package_config.json"))?
@@ -130,14 +139,31 @@ fn specification(
         config.test_timeout.clone(),
     ]);
     command.extend(child.iter().cloned());
+    let env = EnvSpec {
+        remove: PRIVATE_ENV.into_iter().map(Into::into).collect(),
+        ..EnvSpec::default()
+    };
+    #[cfg(windows)]
+    let env = {
+        let mut env = env;
+        if project.flutter {
+            env.set.insert(
+                "FLUTTER_ROOT".into(),
+                config
+                    .flutter_sdk
+                    .as_ref()
+                    .expect("Flutter SDK validated above")
+                    .clone()
+                    .into(),
+            );
+        }
+        env
+    };
     let spec = CommandSpec {
         program: child[0].clone().into(),
         args: child.into_iter().skip(1).map(Into::into).collect(),
         cwd: copied.to_owned(),
-        env: EnvSpec {
-            remove: PRIVATE_ENV.into_iter().map(Into::into).collect(),
-            ..EnvSpec::default()
-        },
+        env,
         timeout_policy: TimeoutPolicy {
             timeout: Some(Duration::from_millis(timeout)),
             ..TimeoutPolicy::default()
@@ -269,6 +295,60 @@ pub(crate) async fn execute(
     Ok(attempt)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "attempt_execution_tests.rs"]
 mod tests;
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+    #[test]
+    fn flutter_launches_native_dart_snapshot_with_literal_arguments() {
+        let root = std::env::temp_dir().canonicalize().unwrap();
+        let config = ExecutionConfig {
+            runner: root.join("failforge.exe"),
+            dart_sdk: root.join("flutter/bin/cache/dart-sdk"),
+            flutter_sdk: Some(root.join("flutter")),
+            command_timeout: "30s".into(),
+            test_timeout: "1s".into(),
+        };
+        let project = PreparedProject {
+            root: root.join("subject"),
+            name: "subject".into(),
+            packages: BTreeMap::new(),
+            graph: serde_json::Value::Null,
+            flutter: true,
+            framework_collision: false,
+        };
+        let (spec, _, reporter) =
+            specification(&config, &project, &root.join("copy"), &root.join("capture")).unwrap();
+        assert_eq!(reporter, TestReporter::Flutter);
+        assert_eq!(
+            spec.program,
+            config
+                .dart_sdk
+                .join(failforge_config::platform::DART_BIN)
+                .as_os_str()
+        );
+        assert_eq!(spec.args[0], "--disable-dart-dev");
+        assert_eq!(
+            spec.args[1],
+            root.join("flutter/bin/cache/flutter_tools.snapshot")
+                .as_os_str()
+        );
+        assert_eq!(spec.args[2], "--suppress-analytics");
+        assert!(
+            spec.args
+                .windows(3)
+                .any(|args| args == ["test", "--no-pub", "--machine"])
+        );
+        assert_eq!(
+            spec.env.set.get(std::ffi::OsStr::new("FLUTTER_ROOT")),
+            Some(&root.join("flutter").into_os_string())
+        );
+        for name in PRIVATE_ENV {
+            assert!(spec.env.remove.contains(std::ffi::OsStr::new(name)));
+        }
+    }
+}

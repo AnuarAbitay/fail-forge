@@ -6,7 +6,7 @@ fn record(family: &str, id: &str, outcome: &str, reason: &str) -> Value {
 }
 
 fn family(name: &str, records: Vec<Value>) -> Value {
-    json!({
+    crate::test_support::paths(json!({
         "family":name, "language":if name == "language_specific" {json!("dart")} else {Value::Null},
         "output":format!("/reports/families/{name}"),
         "status":if records.is_empty() {"no_mutants"} else {"completed"},
@@ -14,7 +14,7 @@ fn family(name: &str, records: Vec<Value>) -> Value {
         "baseline":{"outcome":"SURVIVED","opaque":{"retained":true}},
         "originalControls":[{"outcome":"SURVIVED","opaque":[1,2,3]}],
         "timings":{"baseline":0.25},"wallSeconds":0.75
-    })
+    }))
 }
 
 fn request(mode: &str, families: Vec<Value>) -> Value {
@@ -22,7 +22,7 @@ fn request(mode: &str, families: Vec<Value>) -> Value {
         .iter()
         .map(|family| family["expectedMutants"].as_u64().unwrap())
         .sum::<u64>();
-    json!({
+    crate::test_support::paths(json!({
         "operation":"campaign-report","mode":mode,"runId":"0123456789abcdef0123456789abcdef",
         "output":"/reports","status":if total == 0 {"no_mutants"} else {"completed"},
         "error":null,"expectedMutants":total,"timings":{"snapshot":0.5},"wallSeconds":1.5,
@@ -30,7 +30,7 @@ fn request(mode: &str, families: Vec<Value>) -> Value {
             "workspaceCleanupDeferred":false,"workspaceDirectory":"/registry/campaign-original",
             "workspaceRecovery":{"recovered":["campaign-old"],"skipped":[{"name":"foreign","reason":"unknown_name"}]}},
         "families":families
-    })
+    }))
 }
 
 fn one() -> Value {
@@ -53,7 +53,7 @@ fn direct_summary_matches_existing_schema_and_preserves_opaque_evidence() {
     let value = build_value(&input).unwrap();
     assert_eq!(
         value,
-        json!({
+        crate::test_support::paths(json!({
             "version":1,"runId":"0123456789abcdef0123456789abcdef",
             "output":"/reports/families/classic","family":"classic",
             "status":"completed","complete":true,"error":null,
@@ -68,7 +68,7 @@ fn direct_summary_matches_existing_schema_and_preserves_opaque_evidence() {
             "mutationScore":{"family":"classic","killed":1,"survived":0,"denominator":1,
                 "percent":100.0,"excluded":{}},
             "failureModeScore":null
-        })
+        }))
     );
     assert!(value.get("languageSpecificScore").is_none());
     assert!(value.get("profileComplete").is_none());
@@ -163,7 +163,10 @@ fn profile_orders_families_and_records_and_never_invents_a_combined_score() {
     );
     assert_eq!(value["kind"], "profile");
     assert_eq!(value["version"], 2);
-    assert_eq!(value["output"], "/reports");
+    assert_eq!(
+        value["output"],
+        json!(crate::test_support::absolute("/reports"))
+    );
     assert_eq!(value["completedMutants"], 6);
     assert_eq!(value["outcomeCounts"], json!({"KILLED":3,"SURVIVED":3}));
     assert_eq!(value["reasonCounts"], json!({"killed":3,"passed":3}));

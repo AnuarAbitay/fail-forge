@@ -1,17 +1,34 @@
 //! Private, leased Dart namespace operations for the transitional controller.
+#[cfg(unix)]
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
+#[cfg(unix)]
 use std::process::ExitCode;
 
-use failforge_dart::namespace::{NamespaceError, isolate_subject};
+#[cfg(unix)]
+use crate::signals::{SignalKind, signal};
+use failforge_dart::namespace::NamespaceError;
+#[cfg(unix)]
+use failforge_dart::namespace::isolate_subject;
+#[cfg(unix)]
 use failforge_runner::WorkspaceLease;
-use failforge_workspace::{Cancellation, parse_json};
+#[cfg(unix)]
+use failforge_workspace::Cancellation;
+#[cfg(unix)]
+use failforge_workspace::parse_json;
+#[cfg(unix)]
 use serde::Deserialize;
-use serde_json::{Value, json};
-use tokio::signal::unix::{SignalKind, signal};
+#[cfg(unix)]
+use serde_json::Value;
+#[cfg(unix)]
+use serde_json::json;
 
+#[cfg(unix)]
 use crate::namespace_planner::{PlanProject, PlanRuntime};
 
+#[cfg(unix)]
 #[derive(Debug, Deserialize)]
 #[serde(
     tag = "operation",
@@ -46,6 +63,7 @@ pub(crate) fn absolute(path: &Path) -> Result<(), NamespaceError> {
     }
 }
 
+#[cfg(unix)]
 fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
     let request: Request = serde_json::from_value(parse_json(raw)?)
         .map_err(|_| invalid("invalid private namespace request"))?;
@@ -84,6 +102,7 @@ fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
     Ok(request)
 }
 
+#[cfg(unix)]
 async fn process(
     request: Request,
     lease: Option<WorkspaceLease>,
@@ -164,6 +183,7 @@ async fn process(
     publication
 }
 
+#[cfg(unix)]
 pub(crate) fn execute() -> ExitCode {
     let result = (|| {
         for key in [
@@ -200,7 +220,7 @@ pub(crate) fn execute() -> ExitCode {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

@@ -1,19 +1,24 @@
 //! One owner from original-project preflight through the final workspace close.
 use std::future::Future;
-use std::io::{self, Write};
+use std::io;
+#[cfg(unix)]
+use std::io::Write;
+#[cfg(unix)]
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+#[cfg(unix)]
+use crate::signals::{SignalKind, signal};
 use failforge_dart::namespace::NamespaceError;
 use failforge_workspace::Cancellation;
 use serde_json::{Value, json};
-use tokio::signal::unix::{SignalKind, signal};
 
 use crate::campaign_execution::CampaignEvents;
 use crate::campaign_progress::{State as ProgressState, Writer as ProgressWriter};
 use crate::campaign_workspace::{self as workspace, Preflight, Request, Workspace};
 use crate::dart_namespace::invalid;
+#[cfg(any(unix, test))]
 use crate::family_stream::{FrameWriter, Stream};
 
 type Owner = Arc<Mutex<Option<Workspace>>>;
@@ -30,6 +35,7 @@ pub(crate) trait SessionEvents {
     fn finish_session(&mut self, status: &str, error: Option<&str>) -> io::Result<()>;
 }
 
+#[cfg(any(unix, test))]
 impl<W: FrameWriter> SessionEvents for Stream<W> {
     fn emit_session(&mut self, event: Value) -> io::Result<()> {
         Stream::emit_session(self, event)
@@ -469,6 +475,7 @@ pub(crate) async fn run_owned(
     Ok(())
 }
 
+#[cfg(unix)]
 async fn process(
     request: Request,
     ready: Option<crate::readiness::Readiness>,
@@ -495,6 +502,7 @@ async fn process(
     result
 }
 
+#[cfg(unix)]
 pub(crate) fn execute() -> ExitCode {
     let result = (|| {
         for key in [

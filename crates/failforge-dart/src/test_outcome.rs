@@ -4,6 +4,7 @@
 //! loading failures stay unattributed until campaign-level causal replay.
 
 use std::collections::{BTreeMap, HashMap};
+#[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 
 use failforge_runner::{CommandResult, CompletionCause};
@@ -151,7 +152,16 @@ pub fn parse_cli_summary(stderr: &[u8]) -> Result<BTreeMap<String, String>, Runn
                 if matches!(value.as_str(), "unknown" | "unavailable") {
                     true
                 } else if let Some(code) = value.strip_prefix("exit:") {
+                    #[cfg(unix)]
                     decimal(code, 255)?;
+                    #[cfg(windows)]
+                    if code
+                        .parse::<i32>()
+                        .ok()
+                        .is_none_or(|value| value.to_string() != code)
+                    {
+                        return Err(RunnerSummaryError("invalid CLI summary exit code"));
+                    }
                     true
                 } else if let Some(signal) = value.strip_prefix("signal:") {
                     decimal(signal, i32::MAX as u128)? != 0
@@ -295,11 +305,22 @@ fn classify_capture(
 /// before accepting it as a mutation result.
 pub fn classify_dart_result(stdout: &[u8], result: &CommandResult, mode: ReporterMode) -> Value {
     let status = match result.status {
-        Some(status) => match (status.code(), status.signal()) {
-            (Some(code), _) => format!("exit:{code}"),
-            (_, Some(signal)) => format!("signal:{signal}"),
-            _ => "unknown".to_owned(),
-        },
+        Some(status) => {
+            if let Some(code) = status.code() {
+                format!("exit:{code}")
+            } else {
+                #[cfg(unix)]
+                if let Some(signal) = status.signal() {
+                    format!("signal:{signal}")
+                } else {
+                    "unknown".to_owned()
+                }
+                #[cfg(windows)]
+                {
+                    "unknown".to_owned()
+                }
+            }
+        }
         None => "unavailable".to_owned(),
     };
     let receipt = RunnerReceipt {
@@ -371,6 +392,10 @@ fn classify(
         let Some(code) = receipt.status.strip_prefix("exit:") else {
             return fail(&reporter, "no_normal_child_exit");
         };
+        #[cfg(windows)]
+        if code.parse::<i32>().is_ok_and(|value| value < 0) {
+            return fail(&reporter, "no_normal_child_exit");
+        }
         if code.parse::<i32>().ok() != Some(exit) {
             return fail(&reporter, "child_exit_code_mismatch");
         }

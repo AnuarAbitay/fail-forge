@@ -1,16 +1,34 @@
 //! Native profile generation; this CLI owns cancellation until cleanup finishes.
+#[cfg(unix)]
 use std::io::Write;
 use std::path::Path;
 use std::process::ExitCode;
 
+use crate::signals::{SignalKind, signal};
 use failforge_config::Context;
 use failforge_profile::ProfileError;
 use failforge_profile::analysis::{Cancellation, analyze_profile};
 use failforge_profile::output::write_profile;
 use failforge_profile::preparation::{apply_applicability, prepare_profile};
-use tokio::signal::unix::{SignalKind, signal};
 
 use crate::args::ProfileGenerateArgs;
+
+fn emit(stderr: bool, bytes: &[u8]) -> Result<(), ProfileError> {
+    #[cfg(unix)]
+    {
+        if stderr {
+            std::io::stderr().write_all(bytes)?;
+        } else {
+            std::io::stdout().write_all(bytes)?;
+        }
+    }
+    #[cfg(windows)]
+    {
+        crate::windows_output::Writer::stdio(stderr, std::time::Duration::from_secs(2))?
+            .write_all_with_timeout(bytes, std::time::Duration::from_secs(2))?;
+    }
+    Ok(())
+}
 
 fn context(
     arguments: &ProfileGenerateArgs,
@@ -40,14 +58,21 @@ fn context(
 }
 
 fn shell_quote(value: &str) -> String {
-    if !value.is_empty()
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"_@%+=:,./-".contains(&byte))
+    #[cfg(windows)]
     {
-        value.to_owned()
-    } else {
-        format!("'{}'", value.replace('\'', "'\"'\"'"))
+        format!("'{}'", value.replace('\'', "''"))
+    }
+    #[cfg(unix)]
+    {
+        if !value.is_empty()
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"_@%+=:,./-".contains(&byte))
+        {
+            value.to_owned()
+        } else {
+            format!("'{}'", value.replace('\'', "'\"'\"'"))
+        }
     }
 }
 
@@ -70,9 +95,9 @@ async fn generate(arguments: &ProfileGenerateArgs, context: &Context) -> Result<
         let evidence = if arguments.template {
             None
         } else {
-            writeln!(
-                std::io::stderr(),
-                "failforge: analysing applicable mutation operators"
+            emit(
+                true,
+                b"failforge: analysing applicable mutation operators\n",
             )?;
             let executable = std::env::current_exe()?.canonicalize()?;
             let helper = executable
@@ -80,16 +105,21 @@ async fn generate(arguments: &ProfileGenerateArgs, context: &Context) -> Result<
                 .ok_or_else(|| {
                     ProfileError::Analysis("cannot locate the native analysis helper".into())
                 })?
-                .join("failforge-adapter-campaign");
+                .join(
+                    failforge_config::platform::binary_name("failforge-adapter-campaign").as_ref(),
+                );
             let result = analyze_profile(&draft, context, &helper, &cancellation).await?;
             apply_applicability(&mut draft, &result, context)?;
             for row in &result.families {
-                writeln!(
-                    std::io::stderr(),
-                    "failforge: {}: {} applicable operators ({} statically valid mutants)",
-                    row.family,
-                    row.active_operators.len(),
-                    row.statically_valid_candidates
+                emit(
+                    true,
+                    format!(
+                        "failforge: {}: {} applicable operators ({} statically valid mutants)\n",
+                        row.family,
+                        row.active_operators.len(),
+                        row.statically_valid_candidates
+                    )
+                    .as_bytes(),
                 )?;
             }
             Some(result)
@@ -99,7 +129,7 @@ async fn generate(arguments: &ProfileGenerateArgs, context: &Context) -> Result<
         }
         cancellation.check()?;
         if arguments.dry_run {
-            std::io::stdout().write_all(draft.text.as_bytes())?;
+            emit(false, draft.text.as_bytes())?;
         } else {
             write_profile(
                 &draft.project,
@@ -116,12 +146,14 @@ async fn generate(arguments: &ProfileGenerateArgs, context: &Context) -> Result<
                 .installation
                 .to_str()
                 .ok_or_else(|| ProfileError::Config("installation must be Unicode".into()))?;
-            writeln!(std::io::stdout(), "Profile: {output}")?;
-            writeln!(
-                std::io::stdout(),
-                "Run: failforge mutate --config {} --installation {}",
-                shell_quote(output),
-                shell_quote(installation)
+            emit(
+                false,
+                format!(
+                    "Profile: {output}\nRun: failforge mutate --config {} --installation {}\n",
+                    shell_quote(output),
+                    shell_quote(installation)
+                )
+                .as_bytes(),
             )?;
         }
         Ok(())
@@ -144,7 +176,7 @@ pub(crate) fn execute(arguments: ProfileGenerateArgs, invocation_cwd: &Path) -> 
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            let _ = writeln!(std::io::stderr(), "failforge: {error}");
+            let _ = emit(true, format!("failforge: {error}\n").as_bytes());
             ExitCode::from(error.exit_code())
         }
     }

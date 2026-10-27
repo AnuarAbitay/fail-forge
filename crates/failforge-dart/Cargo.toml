@@ -17,6 +17,9 @@ thiserror.workspace = true
 libc.workspace = true
 regex = { version = "=1.13.1", default-features = false, features = ["std", "perf", "unicode"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes"] }
+
 [[bin]]
 name = "failforge-adapter-fixture"
 path = "tests/support/adapter_fixture.rs"

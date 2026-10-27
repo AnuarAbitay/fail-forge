@@ -1,6 +1,8 @@
 use super::*;
+#[cfg(unix)]
+use crate::test_support::symlink;
 use std::fs;
-use std::os::unix::fs::symlink;
+#[cfg(unix)]
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -35,7 +37,7 @@ impl Drop for Fixture {
 }
 
 fn request() -> Value {
-    json!({
+    crate::test_support::paths(json!({
         "operation":"attempt",
         "project":{"root":"/subject", "name":"subject", "packages":{"test":"/deps/test"}, "graph":{}, "flutter":false, "frameworkCollision":false},
         "case":"/reports/baseline", "runtime":{"runner":"/tools/failforge", "dartSdk":"/sdk", "flutterSdk":null, "adapterRoot":"/adapter"},
@@ -43,7 +45,7 @@ fn request() -> Value {
         "workspace":{"root":"/workspaces", "campaign":"campaign-00000000000000000000000000000000"},
         "context":{"expected":null,"baseline":null,"mutant":null,"alias":"subject","initialization":null},
         "patchSha256":null, "namespacePlan":null,
-    })
+    }))
 }
 
 #[test]
@@ -115,13 +117,13 @@ fn decoded_value_and_wire_requests_share_binding_validation() {
 #[test]
 fn explicit_replay_framework_requires_isolated_alias_even_without_name_collision() {
     let mut value = request();
-    value["frameworkRoot"] = "/archive/pristine".into();
+    value["frameworkRoot"] = json!(crate::test_support::absolute("/archive/pristine"));
     assert!(decoded(&value).is_err());
     value["context"]["alias"] = "failforge_subject".into();
     let replay = decoded(&value).unwrap();
     assert_eq!(
         replay.framework_root,
-        Some(PathBuf::from("/archive/pristine"))
+        Some(crate::test_support::absolute("/archive/pristine"))
     );
     assert!(!replay.project.framework_collision);
     value["frameworkRoot"] = "relative".into();
@@ -436,6 +438,7 @@ fn initial_infrastructure_verdict_never_retains_private_capabilities() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn report_binding_detects_retargeted_existing_parent_alias_before_capture_creation() {
     let fixture = Fixture::new();
