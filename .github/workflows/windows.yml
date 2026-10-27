@@ -169,3 +169,25 @@ jobs:
           $moved = Join-Path $env:RUNNER_TEMP 'moved Windows installation'
           Move-Item (Join-Path $extracted $manifest.archiveRoot) $moved
           & target/debug/failforge-tools.exe package-smoke --installation $moved --dart-sdk (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk') --output (Join-Path $env:RUNNER_TEMP 'windows-package-smoke')
+      - name: Show bounded regression diagnostics on failure
+        if: failure()
+        run: |
+          $ErrorActionPreference = 'Continue'
+          foreach ($name in @('dart-semantic-windows', 'native-regression-windows', 'windows-package-smoke')) {
+            $root = Join-Path $env:RUNNER_TEMP $name
+            if (-not (Test-Path $root)) { continue }
+            $files = Get-ChildItem $root -File -Recurse |
+              Where-Object { $_.Name -in @('command.json', 'summary.json', 'stderr.log', 'stdout.log') } |
+              Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 16
+            foreach ($file in $files) {
+              Write-Output "Diagnostic: $($file.FullName)"
+              $stream = [IO.File]::OpenRead($file.FullName)
+              try {
+                $length = [int][Math]::Min(8192, $stream.Length)
+                [void]$stream.Seek(-$length, [IO.SeekOrigin]::End)
+                $bytes = [byte[]]::new($length)
+                $count = $stream.Read($bytes, 0, $length)
+                Write-Output ([Text.Encoding]::UTF8.GetString($bytes, 0, $count))
+              } finally { $stream.Dispose() }
+            }
+          }
