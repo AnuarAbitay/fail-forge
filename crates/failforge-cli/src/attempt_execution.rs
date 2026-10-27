@@ -154,14 +154,17 @@ fn specification(
     let env = {
         let mut env = env;
         if project.flutter {
+            // Flutter derives frontend-server SDK arguments from this value;
+            // its URI conversion rejects verbatim paths with an appended '/'.
             env.set.insert(
                 "FLUTTER_ROOT".into(),
-                config
-                    .flutter_sdk
-                    .as_ref()
-                    .expect("Flutter SDK validated above")
-                    .clone()
-                    .into(),
+                failforge_runner::windows_process_path(
+                    config
+                        .flutter_sdk
+                        .as_ref()
+                        .expect("Flutter SDK validated above"),
+                )
+                .into(),
             );
         }
         env
@@ -310,6 +313,7 @@ mod tests;
 mod windows_tests {
     use super::*;
     use std::collections::BTreeMap;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
     #[test]
     fn flutter_launches_native_dart_snapshot_with_literal_arguments() {
         let root = PathBuf::from(r"\\?\C:\native fixtures\#topic%");
@@ -356,6 +360,68 @@ mod windows_tests {
         for name in PRIVATE_ENV {
             assert!(spec.env.remove.contains(std::ffi::OsStr::new(name)));
         }
+    }
+
+    #[test]
+    fn flutter_root_uses_verified_runtime_spelling_while_config_stays_canonical() {
+        let root = std::env::temp_dir().join(format!(
+            "ff-flutter-root-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(root.clone());
+        let sdk = root.join("flutter SDK #%");
+        std::fs::create_dir(&sdk).unwrap();
+        let sdk = sdk.canonicalize().unwrap();
+        assert!(matches!(
+            sdk.components().next(),
+            Some(std::path::Component::Prefix(prefix))
+                if matches!(prefix.kind(), std::path::Prefix::VerbatimDisk(_))
+        ));
+        let wide: Vec<_> = sdk.as_os_str().encode_wide().collect();
+        let ordinary = std::ffi::OsString::from_wide(&wide[4..]);
+        let config = ExecutionConfig {
+            runner: root.join("failforge.exe"),
+            dart_sdk: sdk.join("bin/cache/dart-sdk"),
+            flutter_sdk: Some(sdk.clone()),
+            command_timeout: "60s".into(),
+            test_timeout: "10s".into(),
+        };
+        let project = PreparedProject {
+            root: root.join("subject"),
+            name: "subject".into(),
+            packages: BTreeMap::new(),
+            graph: serde_json::Value::Null,
+            flutter: true,
+            framework_collision: false,
+        };
+        let copied = root.join("copy");
+        let (spec, _, reporter) =
+            specification(&config, &project, &copied, &root.join("capture")).unwrap();
+        assert_eq!(reporter, TestReporter::Flutter);
+        assert_eq!(
+            spec.env.set.get(std::ffi::OsStr::new("FLUTTER_ROOT")),
+            Some(&ordinary)
+        );
+        assert_eq!(std::fs::canonicalize(&ordinary).unwrap(), sdk);
+        assert_eq!(config.flutter_sdk.as_ref(), Some(&sdk));
+        assert_eq!(config.dart_sdk, sdk.join("bin/cache/dart-sdk"));
+        assert_eq!(spec.cwd, copied);
+        assert_eq!(spec.timeout_policy.timeout, Some(Duration::from_secs(60)));
+        assert_eq!(
+            spec.program,
+            config.dart_sdk.join("bin/dart.exe").as_os_str()
+        );
     }
 
     #[test]

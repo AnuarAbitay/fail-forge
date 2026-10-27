@@ -63,7 +63,7 @@ pub(crate) fn prepare(spec: &CommandSpec, invocation: &Path) -> io::Result<Prepa
         .find(|(key, _)| env_keys_equal(key, OsStr::new("PATH")))
         .map(|(_, value)| value);
     let canonical_program = resolve_program(&spec.program, &cwd, path)?;
-    let program = launch_spelling(&canonical_program);
+    let program = windows_process_path(&canonical_program);
     let mut command_line = Vec::new();
     quote_argument(&mut command_line, program.as_os_str());
     for arg in &spec.args {
@@ -81,7 +81,7 @@ pub(crate) fn prepare(spec: &CommandSpec, invocation: &Path) -> io::Result<Prepa
     let env = serialize_env(&environment);
     // Keep canonical paths for resolution above; runtimes also consume the
     // current-directory spelling returned by GetCurrentDirectoryW.
-    let launch_cwd = launch_spelling(&cwd);
+    let launch_cwd = windows_process_path(&cwd);
     Ok(PreparedCommand {
         program,
         command_line,
@@ -190,10 +190,14 @@ fn resolve_program(program: &OsStr, cwd: &Path, path: Option<&OsString>) -> io::
     Err(io::ErrorKind::NotFound.into())
 }
 
-/// Some Windows runtimes reject verbatim module or current-directory paths.
-/// Use an ordinary spelling only when native Win32 lookup proves that it names
-/// the same file or directory as the canonical resolution above.
-fn launch_spelling(canonical: &Path) -> PathBuf {
+/// Choose a spelling for a Windows path passed to a process or its runtime.
+///
+/// Some runtimes reject verbatim module, current-directory or SDK paths. A short
+/// ordinary drive/UNC spelling is returned only when native Win32 lookup proves
+/// that it identifies the same file or directory. Otherwise the original path
+/// is returned, including paths with normalization-sensitive components.
+/// This function does not canonicalize its input or change filesystem bindings.
+pub fn windows_process_path(canonical: &Path) -> PathBuf {
     let Some(ordinary) = ordinary_spelling(canonical) else {
         return canonical.into();
     };
@@ -343,7 +347,7 @@ mod tests {
                 file_identity(&canonical).unwrap(),
                 file_identity(&alias).unwrap()
             );
-            assert_eq!(launch_spelling(&canonical), canonical);
+            assert_eq!(windows_process_path(&canonical), canonical);
             std::fs::remove_file(&canonical).unwrap();
 
             std::fs::hard_link(&ordinary, &canonical).unwrap();
@@ -351,7 +355,7 @@ mod tests {
                 file_identity(&canonical).unwrap(),
                 file_identity(&alias).unwrap()
             );
-            assert_eq!(launch_spelling(&canonical), canonical);
+            assert_eq!(windows_process_path(&canonical), canonical);
             std::fs::remove_file(canonical).unwrap();
         }
         std::fs::remove_file(ordinary).unwrap();

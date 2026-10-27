@@ -224,7 +224,7 @@ jobs:
             $root = Join-Path $env:RUNNER_TEMP $name
             if (-not (Test-Path $root)) { continue }
             $files = Get-ChildItem $root -File -Recurse |
-              Where-Object { $_.Name -in @('command.json', 'summary.json', 'stderr.log', 'stdout.log') } |
+              Where-Object { $_.Name -in @('command.json', 'summary.json', 'stderr.log', 'stdout.log', 'stderr.bin', 'stdout.bin') } |
               Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 16
             foreach ($file in $files) {
               Write-Output "Diagnostic: $($file.FullName)"

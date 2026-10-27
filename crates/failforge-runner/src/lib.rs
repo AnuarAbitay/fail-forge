@@ -61,6 +61,8 @@ mod workspace_lease;
 compile_error!("FailForge's first-stage process backend supports Linux, macOS and Windows only");
 
 pub use output::{OutputStream, StreamChunk, StreamReceiver};
+#[cfg(windows)]
+pub use prepare::windows_process_path;
 pub use result::{
     CancelReason, CaptureIssue, CaptureSummary, CleanupReport, CommandResult, CompletionCause,
     GroupState, RunTimings, RunnerError, SignalOutcome, SignalRecord,
