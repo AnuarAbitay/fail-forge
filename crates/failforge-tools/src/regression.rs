@@ -667,7 +667,8 @@ impl Harness {
                 "--test-timeout",
                 "1s",
                 "--command-timeout",
-                "15s",
+                // Allow Dart/test startup while preserving the inner 1s timeout.
+                "30s",
             ],
             0,
         )?;
