@@ -156,14 +156,23 @@ fn private_controls_are_removed_from_adapter_environment() {
     )
     .unwrap();
     let spec = config.spec();
-    for name in PRIVATE_ENV {
-        assert!(spec.env.remove.contains(std::ffi::OsStr::new(name)));
+    for name in [
+        "FAILFORGE_WORKSPACE_LEASE_FD",
+        "FAILFORGE_ADAPTER_CANCEL_FD",
+        "FAILFORGE_ADAPTER_CANCEL_PIPE",
+        "FAILFORGE_CLI_CANCEL_PIPE",
+        "FAILFORGE_RUNNER_READY_FD",
+        "FAILFORGE_TEST_EVIDENCE_FD",
+        "FAILFORGE_TEST_CONTEXT_FD",
+        "FAILFORGE_WORKSPACE_REQUEST_FD",
+        "FAILFORGE_WORKSPACE_HANDOFF_FD",
+        "FAILFORGE_WORKSPACE_CAPS_FDS",
+        "FAILFORGE_REPORT_FDS",
+    ] {
+        let name = std::ffi::OsStr::new(name);
+        assert!(spec.env.remove.contains(name), "private control {name:?}");
+        assert!(!spec.env.set.contains_key(name), "private control {name:?}");
     }
-    assert!(
-        spec.env
-            .remove
-            .contains(std::ffi::OsStr::new("FAILFORGE_REPORT_FDS"))
-    );
 }
 
 #[test]

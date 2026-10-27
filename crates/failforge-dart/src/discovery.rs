@@ -27,9 +27,11 @@ use validation::{candidate, candidate_limit, discovered, operator_catalogue, pac
 pub const MAX_TRANSCRIPT_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_SOURCE_BYTES: usize = 4 * 1024 * 1024;
 const CLEANUP_RESERVE: usize = 64 * 1024;
-const PRIVATE_ENV: [&str; 9] = [
+const PRIVATE_ENV: [&str; 11] = [
     "FAILFORGE_WORKSPACE_LEASE_FD",
     "FAILFORGE_ADAPTER_CANCEL_FD",
+    "FAILFORGE_ADAPTER_CANCEL_PIPE",
+    "FAILFORGE_CLI_CANCEL_PIPE",
     "FAILFORGE_RUNNER_READY_FD",
     "FAILFORGE_TEST_EVIDENCE_FD",
     "FAILFORGE_TEST_CONTEXT_FD",
