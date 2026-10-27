@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{self, Read, Write};
+use std::os::windows::fs::FileExt;
 use std::os::windows::io::AsRawHandle;
 use std::path::{Path, PathBuf};
 
@@ -55,6 +56,25 @@ fn unchanged(file: &File, before: Version) -> Result<(), NamespaceError> {
         version(file)? == before,
         "namespace input changed while reading",
     )
+}
+fn content_hash(file: &File, size: usize) -> Result<[u8; 32], NamespaceError> {
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 64 * 1024];
+    let mut offset = 0;
+    loop {
+        let limit = buffer
+            .len()
+            .min(size.saturating_sub(offset).saturating_add(1));
+        let count = file.seek_read(&mut buffer[..limit], offset as u64)?;
+        if count == 0 {
+            break;
+        }
+        offset += count;
+        require(offset <= size, "namespace source bytes changed")?;
+        digest.update(&buffer[..count]);
+    }
+    require(offset == size, "namespace source bytes changed")?;
+    Ok(digest.finalize().into())
 }
 fn hash(mut file: &File, cancel: &Cancellation) -> Result<String, NamespaceError> {
     let before = version(file)?;
@@ -135,6 +155,8 @@ impl Root {
         )?;
         unchanged(&file, info)?;
         fs::same_entry(&parent, &name, &file)?;
+        let digest = Sha256::digest(&bytes).into();
+        let size = bytes.len();
         Ok((
             bytes,
             BoundFile {
@@ -143,6 +165,8 @@ impl Root {
                 name,
                 file,
                 info,
+                digest,
+                size,
                 generation: 0,
             },
         ))
@@ -169,6 +193,8 @@ pub(crate) struct BoundFile {
     name: OsString,
     file: File,
     info: Version,
+    digest: [u8; 32],
+    size: usize,
     generation: usize,
 }
 impl BoundFile {
@@ -184,6 +210,20 @@ impl BoundFile {
         fs::same_entry(&self.parent, &self.name, &self.file)?;
         unchanged(&self.file, self.info)?;
         fs::require_private(&self.file, false)?;
+        // NTFS can defer timestamps while another handle remains open. Bind
+        // exact bytes through a fresh handle, independent of that cached state.
+        let file = fs::regular_at(&self.parent, &self.name, false, false)?;
+        require(
+            fs::identity(&file)? == self.info.identity,
+            "namespace target identity changed",
+        )?;
+        fs::require_private(&file, false)?;
+        let before = version(&file)?;
+        let digest = content_hash(&file, self.size)?;
+        unchanged(&file, before)?;
+        fs::same_entry(&self.parent, &self.name, &file)?;
+        unchanged(&self.file, self.info)?;
+        require(digest == self.digest, "namespace source bytes changed")?;
         Ok(())
     }
     pub fn replace(&mut self, root: &Root, bytes: &[u8]) -> Result<(), NamespaceError> {
@@ -221,10 +261,19 @@ impl BoundFile {
         fs::same_entry(&self.parent, &name, &file)?;
         unchanged(&file, info)?;
         fs::require_private(&file, false)?;
+        let digest = Sha256::digest(bytes).into();
+        require(
+            content_hash(&file, bytes.len())? == digest,
+            "namespace temporary bytes changed",
+        )?;
+        unchanged(&file, info)?;
+        fs::same_entry(&self.parent, &name, &file)?;
         fs::rename_handle(&file, &self.parent, &self.name, true)?;
         guard.armed = false;
         self.file = file;
         self.info = info;
+        self.digest = digest;
+        self.size = bytes.len();
         self.generation += 1;
         #[cfg(test)]
         super::isolation::stage(super::isolation::Stage::Renamed)?;

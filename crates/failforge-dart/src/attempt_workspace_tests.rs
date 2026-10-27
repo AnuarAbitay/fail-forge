@@ -259,6 +259,19 @@ fn copied_target_aliases_and_hardlinks_are_rejected_without_original_writes() {
             fs::read(fixture.project.root.join("lib/value.dart")).unwrap(),
             original
         );
+        #[cfg(windows)]
+        {
+            // Native cleanup rejects hostile reparses/hardlinks rather than
+            // following or deleting them. Remove only this test's own alias.
+            assert!(workspace.cleanup().is_err());
+            assert!(fs::symlink_metadata(&target).is_ok());
+            assert_eq!(
+                fs::read(fixture.project.root.join("lib/value.dart")).unwrap(),
+                original
+            );
+            fs::remove_file(&target).unwrap();
+            workspace.verify_original().unwrap();
+        }
         workspace.cleanup().unwrap();
     }
 }
@@ -327,7 +340,25 @@ fn replaced_allocation_is_never_removed_and_can_be_restored_for_retry() {
     let mut workspace = fixture.prepare();
     let allocation = workspace.copy_path().parent().unwrap().to_owned();
     let moved = fixture.base.join("retained original allocation");
-    fs::rename(&allocation, &moved).unwrap();
+    #[cfg(windows)]
+    let before = source_hashes(workspace.copy_path(), &Cancellation::default()).unwrap();
+    let relocated = fs::rename(&allocation, &moved);
+    #[cfg(windows)]
+    if let Err(error) = &relocated {
+        // Retained child handles can make NTFS reject this replacement attack.
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(!moved.exists());
+        workspace.copied.as_ref().unwrap().verify().unwrap();
+        assert_eq!(
+            source_hashes(workspace.copy_path(), &Cancellation::default()).unwrap(),
+            before
+        );
+        workspace.verify_original().unwrap();
+        workspace.cleanup().unwrap();
+        assert!(!allocation.exists());
+        return;
+    }
+    relocated.unwrap();
     fs::create_dir(&allocation).unwrap();
     fs::set_permissions(&allocation, crate::test_fs::permissions(0o700)).unwrap();
     fs::write(allocation.join("foreign"), b"keep").unwrap();
@@ -389,22 +420,24 @@ fn protected_input_overlap_fails_but_sibling_snapshot_in_same_registry_is_allowe
             .is_err()
     );
     workspace.cleanup().unwrap();
-    let snapshot = fixture
-        .campaign
-        .root_path
-        .join(&fixture.campaign.campaign_name)
-        .join("work/snapshot-01234567890123456789012345678901");
-    fs::create_dir(&snapshot).unwrap();
-    fs::set_permissions(&snapshot, crate::test_fs::permissions(0o700)).unwrap();
+    let mut snapshot = lifecycle::allocate_bound(
+        &fixture.campaign.root_path,
+        &fixture.campaign.campaign_name,
+        duplicate(&fixture.campaign.caps),
+        "snapshot",
+        &Cancellation::default(),
+    )
+    .unwrap();
     let project = copy_project(
         &fixture.project.root,
-        &snapshot.join("package"),
+        &snapshot.path().join("package"),
         &Cancellation::default(),
     )
     .unwrap();
     let mut workspace = fixture.allocate();
     workspace.copy(&project, &Cancellation::default()).unwrap();
     workspace.cleanup().unwrap();
+    snapshot.remove(&Cancellation::default()).unwrap();
 }
 
 #[test]
