@@ -458,9 +458,14 @@ fn generated_contract(
         &context,
         Some(&subject.join("profiles")),
     )?;
+    let expected = generation
+        .file
+        .components()
+        .map(|part| part.as_os_str().to_str().ok_or("non-UTF-8 source"))
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .join("/");
     ensure(
-        profile["rules"]["include"]
-            == json!([generation.file.to_str().ok_or("non-UTF-8 source")?]),
+        profile["rules"]["include"] == json!([expected]),
         "generated profile targets another source",
     )
 }
@@ -1023,6 +1028,39 @@ pub fn run(options: Options) -> Result<()> {
 #[cfg(all(test, unix))]
 #[path = "public_regression_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod generation_tests {
+    use super::*;
+
+    #[test]
+    fn generated_profile_matches_native_source_selection_and_rejects_another_file() {
+        let temporary = common::Temporary::new("ff-public-generation").unwrap();
+        let subject = temporary.0.join("subject");
+        let source = Path::new("lib").join("nested").join("value.dart");
+        fs::create_dir_all(subject.join(source.parent().unwrap())).unwrap();
+        fs::write(subject.join(&source), "bool value() => true;\n").unwrap();
+        fs::write(subject.join("pubspec.yaml"), "name: subject\n").unwrap();
+        let path = subject.join("profiles").join("generated.yml");
+        common::write_json(
+            &path,
+            &json!({"mutations":{"classic":{"enabled":true,"operators":{"BOOLEAN_LITERAL_FLIP":true}}},
+                "rules":{"include":["lib/nested/value.dart"]},"dart_sdk":temporary.0.join("dart-sdk")}),
+        )
+        .unwrap();
+        let mut profile =
+            failforge_config::yaml::parse_yaml(&fs::read_to_string(path).unwrap()).unwrap();
+        let generation = Generation {
+            file: source,
+            families: vec!["classic".into()],
+            operators: vec!["BOOLEAN_LITERAL_FLIP".into()],
+        };
+        assert!(relative(&generation.file));
+        generated_contract(&profile, &generation, &subject, &temporary.0).unwrap();
+        profile["rules"]["include"] = json!(["lib/nested/other.dart"]);
+        assert!(generated_contract(&profile, &generation, &subject, &temporary.0).is_err());
+    }
+}
 
 #[cfg(test)]
 #[path = "public_regression_adversarial_tests.rs"]

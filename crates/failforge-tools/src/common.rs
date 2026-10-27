@@ -247,8 +247,10 @@ pub fn tree(path: &Path) -> Result<BTreeMap<String, String>> {
                     entry
                         .path()
                         .strip_prefix(root)?
-                        .to_string_lossy()
-                        .into_owned(),
+                        .components()
+                        .map(|part| part.as_os_str().to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join("/"),
                     hash(&entry.path())?,
                 );
             } else {
@@ -705,6 +707,29 @@ pub fn account_id() -> Result<String> {
     #[cfg(windows)]
     {
         Ok(failforge_workspace::windows_fs::current_sid()?)
+    }
+}
+
+#[cfg(test)]
+mod tree_tests {
+    use super::*;
+
+    #[test]
+    fn nested_keys_allow_removing_generated_profile_without_changing_inputs() {
+        let temporary = Temporary::new("ff-tools-tree-keys").unwrap();
+        fs::create_dir(temporary.0.join("lib")).unwrap();
+        fs::write(temporary.0.join("lib").join("value.dart"), b"original").unwrap();
+        let before = tree(&temporary.0).unwrap();
+        assert_eq!(
+            before.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["lib/value.dart"]
+        );
+
+        fs::create_dir(temporary.0.join("profiles")).unwrap();
+        fs::write(temporary.0.join("profiles").join("value.yml"), b"generated").unwrap();
+        let mut after = tree(&temporary.0).unwrap();
+        assert!(after.remove("profiles/value.yml").is_some());
+        assert_eq!(after, before);
     }
 }
 
