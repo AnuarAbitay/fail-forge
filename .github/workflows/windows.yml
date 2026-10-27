@@ -63,6 +63,39 @@ jobs:
           rustup toolchain install 1.85.1 --profile minimal
           cargo +1.85.1 check --workspace --all-targets --locked
 
+  compiler-launch-probe:
+    name: Native Dart compiler launch paths
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the exact public revision without authentication
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:GIT_CONFIG_NOSYSTEM = '1'
+          $env:GIT_CONFIG_GLOBAL = Join-Path $env:RUNNER_TEMP 'anonymous-gitconfig'
+          [IO.File]::WriteAllText($env:GIT_CONFIG_GLOBAL, '')
+          $env:GIT_TERMINAL_PROMPT = '0'
+          git init --quiet $env:GITHUB_WORKSPACE
+          git -c credential.helper= -c http.extraHeader= fetch --quiet --no-tags --depth=1 "${env:GITHUB_SERVER_URL}/${env:GITHUB_REPOSITORY}.git" $env:GITHUB_SHA
+          git -c core.autocrlf=false checkout --quiet --detach FETCH_HEAD
+          if ((git rev-parse HEAD) -ne $env:GITHUB_SHA) { throw 'Checkout SHA differs from requested revision' }
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.13.5'
+      - name: Compare relative and absolute runtime startup from the same deep directory
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $dart = (Get-Command dart.exe).Source
+          $sdk = Split-Path (Split-Path $dart -Parent) -Parent
+          & $dart --version
+          & $dart --suppress-analytics pub get --enforce-lockfile --directory adapters/dart
+          $packages = ([Uri](Join-Path $env:GITHUB_WORKSPACE 'adapters/dart/.dart_tool/package_config.json')).AbsoluteUri
+          $probe = ([Uri](Join-Path $env:GITHUB_WORKSPACE 'adapters/dart/test/fixtures/windows_compiler_launch.dart')).AbsoluteUri
+          # A sibling of the SDK guarantees same-drive relative paths.
+          & $dart "--packages=$packages" $probe $sdk (Split-Path $sdk -Parent)
+
   sdk:
     name: Flutter ${{ matrix.flutter }} / windows-latest
     runs-on: windows-latest
