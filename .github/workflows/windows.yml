@@ -187,11 +187,6 @@ jobs:
           $dart = Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk/bin/dart.exe'
           & $dart --suppress-analytics analyze
           & $dart --suppress-analytics test --concurrency 1
-      - name: Run native CLI, replay, profiles, timeouts and recovery regressions
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          & target/release/failforge-tools.exe regression --binary-dir target/release --output (Join-Path $env:RUNNER_TEMP 'native-regression-windows') --dart-sdk (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk') --flutter-sdk $env:FLUTTER_ROOT
       - name: Package Windows x64 with matching runtime notices
         run: |
           $ErrorActionPreference = 'Stop'
@@ -216,6 +211,11 @@ jobs:
           $moved = Join-Path $env:RUNNER_TEMP 'moved Windows installation'
           Move-Item (Join-Path $extracted $manifest.archiveRoot) $moved
           & target/debug/failforge-tools.exe package-smoke --installation $moved --dart-sdk (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk') --output (Join-Path $env:RUNNER_TEMP 'windows-package-smoke')
+      - name: Run native CLI, replay, profiles, timeouts and recovery regressions
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          & target/release/failforge-tools.exe regression --binary-dir target/release --output (Join-Path $env:RUNNER_TEMP 'native-regression-windows') --dart-sdk (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk') --flutter-sdk $env:FLUTTER_ROOT
       - name: Show bounded regression diagnostics on failure
         if: failure()
         run: |

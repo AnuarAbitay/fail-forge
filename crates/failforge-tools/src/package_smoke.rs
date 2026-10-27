@@ -277,6 +277,38 @@ struct Harness {
     commands: Vec<Value>,
 }
 
+fn prepare_sdk_process_paths(command: &mut Command) -> Option<PathBuf> {
+    let requested_cwd = command.get_current_dir().map(Path::to_owned);
+    #[cfg(windows)]
+    {
+        if let Some(cwd) = &requested_cwd {
+            command.current_dir(failforge_runner::windows_process_path(cwd));
+        }
+        // Pub turns cache and state paths into file URIs. Apply the same verified
+        // spelling at this final boundary, after callers have overridden cwd.
+        let paths: Vec<_> = command
+            .get_envs()
+            .filter(|(key, _)| {
+                ["PUB_CACHE", "TMPDIR", "TMP", "TEMP", "XDG_CONFIG_HOME"]
+                    .iter()
+                    .any(|name| key.eq_ignore_ascii_case(name))
+            })
+            .filter_map(|(key, value)| {
+                value.map(|value| {
+                    (
+                        key.to_owned(),
+                        failforge_runner::windows_process_path(Path::new(value)),
+                    )
+                })
+            })
+            .collect();
+        for (key, path) in paths {
+            command.env(key, path);
+        }
+    }
+    requested_cwd
+}
+
 impl Harness {
     fn command(&self, program: &Path) -> Command {
         let mut command = common::command(program);
@@ -295,6 +327,7 @@ impl Harness {
     fn execute(&mut self, name: &str, command: &mut Command, seconds: u64) -> Result<()> {
         let directory = self.output.join("commands").join(name);
         let started = timestamp()?;
+        let requested_cwd = prepare_sdk_process_paths(command);
         let result = common::execute(command, &directory, Duration::from_secs(seconds), 0);
         let mut receipt = if directory.join("command.json").is_file() {
             common::read_json(&directory.join("command.json"))?
@@ -304,7 +337,7 @@ impl Harness {
         receipt["name"] = name.into();
         receipt["startedUnixMillis"] = started.into();
         receipt["finishedUnixMillis"] = timestamp()?.into();
-        receipt["cwd"] = json!(command.get_current_dir());
+        receipt["cwd"] = json!(requested_cwd);
         common::write_json(&directory.join("command.json"), &receipt)?;
         self.commands.push(receipt);
         result.map(|_| ())
@@ -603,3 +636,7 @@ pub fn run(options: Options) -> Result<()> {
 #[cfg(all(test, unix))]
 #[path = "package_smoke_tests.rs"]
 mod tests;
+
+#[cfg(all(test, windows))]
+#[path = "package_smoke_windows_tests.rs"]
+mod windows_tests;

@@ -274,6 +274,7 @@ dependencies = [
  "clap",
  "failforge-config",
  "failforge-dart",
+ "failforge-runner",
  "failforge-workspace",
  "libc",
  "serde",
