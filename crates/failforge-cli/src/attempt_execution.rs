@@ -66,6 +66,13 @@ fn path_text(path: &Path) -> Result<String, NamespaceError> {
         .ok_or_else(|| invalid("test execution paths must be absolute Unicode paths"))
 }
 
+fn dart_path_text(path: &Path) -> Result<String, NamespaceError> {
+    path_text(path)?;
+    Ok(failforge_workspace::dart_vm_argument(path)?
+        .to_string_lossy()
+        .into_owned())
+}
+
 fn specification(
     config: &ExecutionConfig,
     project: &PreparedProject,
@@ -108,7 +115,7 @@ fn specification(
         let prefix = vec![
             path_text(&config.dart_sdk.join(failforge_config::platform::DART_BIN))?,
             "--disable-dart-dev".into(),
-            path_text(&sdk.join("bin/cache/flutter_tools.snapshot"))?,
+            dart_path_text(&sdk.join("bin/cache/flutter_tools.snapshot"))?,
         ];
         prefix
             .into_iter()
@@ -123,9 +130,9 @@ fn specification(
             path_text(&config.dart_sdk.join(failforge_config::platform::DART_BIN))?,
             format!(
                 "--packages={}",
-                path_text(&copied.join(".dart_tool/package_config.json"))?
+                dart_path_text(&copied.join(".dart_tool/package_config.json"))?
             ),
-            path_text(&test.join("bin/test.dart"))?,
+            dart_path_text(&test.join("bin/test.dart"))?,
             "--reporter".into(),
             "json".into(),
             "--platform".into(),
@@ -305,7 +312,7 @@ mod windows_tests {
     use std::collections::BTreeMap;
     #[test]
     fn flutter_launches_native_dart_snapshot_with_literal_arguments() {
-        let root = std::env::temp_dir().canonicalize().unwrap();
+        let root = PathBuf::from(r"\\?\C:\native fixtures\#topic%");
         let config = ExecutionConfig {
             runner: root.join("failforge.exe"),
             dart_sdk: root.join("flutter/bin/cache/dart-sdk"),
@@ -334,8 +341,7 @@ mod windows_tests {
         assert_eq!(spec.args[0], "--disable-dart-dev");
         assert_eq!(
             spec.args[1],
-            root.join("flutter/bin/cache/flutter_tools.snapshot")
-                .as_os_str()
+            "file:///C:/native%20fixtures/%23topic%25/flutter/bin/cache/flutter_tools.snapshot"
         );
         assert_eq!(spec.args[2], "--suppress-analytics");
         assert!(
@@ -350,5 +356,39 @@ mod windows_tests {
         for name in PRIVATE_ENV {
             assert!(spec.env.remove.contains(std::ffi::OsStr::new(name)));
         }
+    }
+
+    #[test]
+    fn dart_script_and_packages_are_uris_while_program_and_cwd_stay_native() {
+        let root = PathBuf::from(r"\\?\C:\native fixtures\#topic%");
+        let config = ExecutionConfig {
+            runner: root.join("failforge.exe"),
+            dart_sdk: root.join("dart-sdk"),
+            flutter_sdk: None,
+            command_timeout: "30s".into(),
+            test_timeout: "1s".into(),
+        };
+        let project = PreparedProject {
+            root: root.join("subject"),
+            name: "subject".into(),
+            packages: BTreeMap::from([("test".into(), root.join("test package"))]),
+            graph: serde_json::Value::Null,
+            flutter: false,
+            framework_collision: false,
+        };
+        let copied = root.join("copy");
+        let (spec, _, reporter) =
+            specification(&config, &project, &copied, &root.join("capture")).unwrap();
+        assert_eq!(reporter, TestReporter::Dart);
+        assert_eq!(spec.program, root.join("dart-sdk/bin/dart.exe").as_os_str());
+        assert_eq!(spec.cwd, copied);
+        assert_eq!(
+            spec.args[0],
+            "--packages=file:///C:/native%20fixtures/%23topic%25/copy/.dart_tool/package_config.json"
+        );
+        assert_eq!(
+            spec.args[1],
+            "file:///C:/native%20fixtures/%23topic%25/test%20package/bin/test.dart"
+        );
     }
 }

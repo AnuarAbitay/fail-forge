@@ -112,6 +112,10 @@ fn vm(cli: &Path, dart: &Path, project: &Path, directory: &Path, source: &[u8]) 
     let source_file = directory.join("case.dart");
     fs::write(&source_file, source)?;
     let capture = directory.join("capture");
+    let mut packages = std::ffi::OsString::from("--packages=");
+    packages.push(failforge_workspace::dart_vm_argument(
+        &project.join(".dart_tool/package_config.json"),
+    )?);
     let mut cmd = common::command(cli);
     cmd.arg("run")
         .args(["--timeout", "5s", "--cwd"])
@@ -120,11 +124,8 @@ fn vm(cli: &Path, dart: &Path, project: &Path, directory: &Path, source: &[u8]) 
         .arg(&capture)
         .arg("--")
         .arg(dart)
-        .arg(format!(
-            "--packages={}",
-            project.join(".dart_tool/package_config.json").display()
-        ))
-        .arg(&source_file);
+        .arg(packages)
+        .arg(failforge_workspace::dart_vm_argument(&source_file)?);
     // The VM is allowed to report its fixture assertion. Retain its actual exit
     // rather than treating a nonzero code as an infrastructure verdict.
     let start = Instant::now();

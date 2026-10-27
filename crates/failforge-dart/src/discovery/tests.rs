@@ -155,7 +155,7 @@ fn private_controls_are_removed_from_adapter_environment() {
         MutationFamily::Classic,
     )
     .unwrap();
-    let spec = config.spec();
+    let spec = config.spec().unwrap();
     for name in [
         "FAILFORGE_WORKSPACE_LEASE_FD",
         "FAILFORGE_ADAPTER_CANCEL_FD",
@@ -173,6 +173,39 @@ fn private_controls_are_removed_from_adapter_environment() {
         assert!(spec.env.remove.contains(name), "private control {name:?}");
         assert!(!spec.env.set.contains_key(name), "private control {name:?}");
     }
+}
+
+#[cfg(windows)]
+#[test]
+fn adapter_vm_paths_use_escaped_file_uris_without_changing_native_identity_roots() {
+    let fixture = Fixture::new();
+    let adapter = fixture.0.join("adapter # % Ж");
+    std::fs::create_dir(&adapter).unwrap();
+    let adapter = adapter.canonicalize().unwrap();
+    let dart = fixture.0.join("dart.exe").into_os_string();
+    let config = DiscoveryConfig::new(
+        dart.clone(),
+        adapter.clone(),
+        fixture.payload(),
+        MutationFamily::Classic,
+    )
+    .unwrap();
+    let spec = config.spec().unwrap();
+    assert_eq!(spec.program, dart);
+    assert_eq!(spec.cwd, adapter);
+    let packages = spec.args[0]
+        .to_str()
+        .unwrap()
+        .strip_prefix("--packages=")
+        .unwrap();
+    let script = spec.args[1].to_str().unwrap();
+    for argument in [packages, script] {
+        assert!(argument.starts_with("file:///"), "{argument}");
+        assert!(argument.contains("/adapter%20%23%20%25%20%D0%96/"));
+        assert!(!argument.contains('\\'));
+    }
+    assert!(packages.ends_with("/.dart_tool/package_config.json"));
+    assert!(script.ends_with("/bin/failforge_dart_adapter.dart"));
 }
 
 #[test]

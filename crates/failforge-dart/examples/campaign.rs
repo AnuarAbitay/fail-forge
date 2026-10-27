@@ -63,7 +63,7 @@ impl Configuration {
         })
     }
 
-    fn spec(&self) -> CommandSpec {
+    fn spec(&self) -> Result<CommandSpec, Failure> {
         let mut environment = EnvSpec::default();
         environment.remove.insert(WORKSPACE_LEASE_ENV.into());
         environment
@@ -75,25 +75,23 @@ impl Configuration {
         environment
             .remove
             .insert("FAILFORGE_CLI_CANCEL_PIPE".into());
-        CommandSpec {
+        let mut packages = OsString::from("--packages=");
+        packages.push(failforge_workspace::dart_vm_argument(
+            &self.adapter.join(".dart_tool/package_config.json"),
+        )?);
+        Ok(CommandSpec {
             program: self.dart.clone(),
             args: vec![
-                format!(
-                    "--packages={}",
-                    self.adapter
-                        .join(".dart_tool/package_config.json")
-                        .display()
-                )
-                .into(),
-                self.adapter
-                    .join("bin/failforge_dart_adapter.dart")
-                    .into_os_string(),
+                packages,
+                failforge_workspace::dart_vm_argument(
+                    &self.adapter.join("bin/failforge_dart_adapter.dart"),
+                )?,
             ],
             cwd: self.adapter.clone(),
             env: environment,
             timeout_policy: Default::default(),
             capture_policy: Default::default(),
-        }
+        })
     }
 }
 
@@ -375,7 +373,7 @@ async fn session(
 ) -> Result<(), Failure> {
     let mut client = AdapterClient::start(
         runner.clone(),
-        configuration.spec(),
+        configuration.spec()?,
         ClientOptions {
             request_timeout: Duration::from_secs(60),
             ..Default::default()
@@ -541,14 +539,15 @@ mod tests {
 
     #[test]
     fn adapter_spec_removes_private_workspace_control_environment() {
+        let root = std::env::current_dir().unwrap();
         let configuration = Configuration {
-            dart: "/dart/bin/dart".into(),
-            adapter: "/adapter".into(),
-            package: "/subject".into(),
+            dart: root.join("dart").into_os_string(),
+            adapter: root.join("adapter"),
+            package: root.join("subject"),
             payload: json!({}),
             candidate_limit: 0,
         };
-        let spec = configuration.spec();
+        let spec = configuration.spec().unwrap();
         assert!(spec.env.remove.contains(OsStr::new(WORKSPACE_LEASE_ENV)));
         assert!(spec.env.remove.contains(OsStr::new(CANCEL_ENV)));
         assert!(
@@ -558,6 +557,18 @@ mod tests {
         );
         assert!(!spec.env.set.contains_key(OsStr::new(WORKSPACE_LEASE_ENV)));
         assert!(spec.validate().is_ok());
+        assert_eq!(spec.program, configuration.dart);
+        assert_eq!(spec.cwd, configuration.adapter);
+        #[cfg(windows)]
+        {
+            assert!(
+                spec.args[0]
+                    .to_str()
+                    .unwrap()
+                    .starts_with("--packages=file:///")
+            );
+            assert!(spec.args[1].to_str().unwrap().starts_with("file:///"));
+        }
     }
 
     #[cfg(unix)]

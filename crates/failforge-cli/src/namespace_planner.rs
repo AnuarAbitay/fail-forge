@@ -104,12 +104,14 @@ fn command(
     let args = vec![
         format!(
             "--packages={}",
-            runtime
-                .adapter_root
-                .join(".dart_tool/package_config.json")
-                .display()
+            failforge_workspace::dart_vm_argument(
+                &runtime.adapter_root.join(".dart_tool/package_config.json")
+            )?
+            .to_string_lossy()
         ),
-        tool.to_string_lossy().into_owned(),
+        failforge_workspace::dart_vm_argument(&tool)?
+            .to_string_lossy()
+            .into_owned(),
         canonical
             .join("payload.json")
             .to_string_lossy()
@@ -346,3 +348,80 @@ pub(crate) async fn prepare(
 #[cfg(all(test, unix))]
 #[path = "namespace_planner_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod vm_argument_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn planner_encodes_vm_paths_and_preserves_native_payload_program_and_cwd() {
+        let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "ff-namespace-vm-{}-{} #%",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let runtime = PlanRuntime {
+            dart_sdk: root.join("sdk"),
+            flutter_sdk: None,
+            adapter_root: root.join("adapter"),
+        };
+        fs::create_dir_all(runtime.adapter_root.join("bin")).unwrap();
+        let script = runtime
+            .adapter_root
+            .join("bin/failforge_dart_namespace.dart");
+        fs::write(&script, b"void main() {}\n").unwrap();
+        let project = PlanProject {
+            root: root.join("subject"),
+            name: "subject".into(),
+            flutter: false,
+        };
+        let report = create_report_directory(&root.join("report"), &[]).unwrap();
+        let (spec, _) = command(&project, &report, &runtime, &[]).unwrap();
+        assert_eq!(
+            spec.program,
+            runtime.dart_sdk.join(failforge_config::platform::DART_BIN)
+        );
+        assert_eq!(spec.cwd, runtime.adapter_root);
+        let payload_path = report.canonical_path().unwrap().join("payload.json");
+        assert_eq!(spec.args[2], payload_path);
+        assert_eq!(
+            parse_json(&fs::read(payload_path).unwrap()).unwrap()["workspaceRoot"],
+            json!(project.root)
+        );
+        #[cfg(windows)]
+        {
+            let packages = spec.args[0].to_str().unwrap();
+            let script = spec.args[1].to_str().unwrap();
+            assert!(packages.starts_with("--packages=file:///"));
+            assert!(packages.ends_with("/adapter/.dart_tool/package_config.json"));
+            assert!(script.starts_with("file:///"));
+            assert!(script.ends_with("/adapter/bin/failforge_dart_namespace.dart"));
+            for argument in [packages, script] {
+                assert!(argument.contains("%23%25"));
+                assert!(!argument.contains('?'));
+                assert!(!argument.contains('\\'));
+            }
+        }
+        #[cfg(unix)]
+        {
+            assert_eq!(spec.args[1], script);
+            assert_eq!(
+                spec.args[0].to_str().unwrap(),
+                format!(
+                    "--packages={}",
+                    runtime
+                        .adapter_root
+                        .join(".dart_tool/package_config.json")
+                        .display()
+                )
+            );
+        }
+        drop(report);
+        fs::remove_dir_all(root).unwrap();
+    }
+}

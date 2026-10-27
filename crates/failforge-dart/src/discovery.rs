@@ -92,7 +92,7 @@ impl DiscoveryConfig {
             },
         };
         config
-            .spec()
+            .spec()?
             .validate()
             .map_err(|_| DiscoveryError::Invalid("invalid adapter command"))?;
         Ok(config)
@@ -126,23 +126,18 @@ impl DiscoveryConfig {
         &self.package
     }
 
-    fn spec(&self) -> CommandSpec {
+    fn spec(&self) -> Result<CommandSpec, DiscoveryError> {
         let mut env = EnvSpec::default();
         env.remove.extend(PRIVATE_ENV.into_iter().map(Into::into));
-        CommandSpec {
+        let argument = |relative: &str| {
+            failforge_workspace::dart_vm_argument(&self.adapter.join(relative))
+                .map_err(|_| DiscoveryError::Invalid("invalid adapter VM argument"))
+        };
+        let mut packages = OsString::from("--packages=");
+        packages.push(argument(".dart_tool/package_config.json")?);
+        Ok(CommandSpec {
             program: self.dart.clone(),
-            args: vec![
-                format!(
-                    "--packages={}",
-                    self.adapter
-                        .join(".dart_tool/package_config.json")
-                        .display()
-                )
-                .into(),
-                self.adapter
-                    .join("bin/failforge_dart_adapter.dart")
-                    .into_os_string(),
-            ],
+            args: vec![packages, argument("bin/failforge_dart_adapter.dart")?],
             cwd: self.adapter.clone(),
             env,
             timeout_policy: Default::default(),
@@ -150,7 +145,7 @@ impl DiscoveryConfig {
                 capture_dir: self.capture_dir.clone(),
                 ..Default::default()
             },
-        }
+        })
     }
 }
 
@@ -327,7 +322,7 @@ async fn session(
     evidence: &mut SessionEvidence,
     cancel: &Cancellation,
 ) -> Result<(Value, Value), DiscoveryError> {
-    let mut client = AdapterClient::start(runner.clone(), config.spec(), config.options)
+    let mut client = AdapterClient::start(runner.clone(), config.spec()?, config.options)
         .map_err(|error| adapter_error(&error))?;
     let mut outcome = tokio::select! {
         biased;

@@ -1,5 +1,6 @@
 //! Run a persistent adapter session; emit evidence without mutating originals.
 use std::error::Error;
+use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -45,17 +46,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         payload["rules"] = rules;
     }
+    let mut packages = OsString::from("--packages=");
+    packages.push(failforge_workspace::dart_vm_argument(
+        &adapter.join(".dart_tool/package_config.json"),
+    )?);
     let spec = CommandSpec {
         program: args[0].clone().into(),
         args: vec![
-            format!(
-                "--packages={}",
-                adapter.join(".dart_tool/package_config.json").display()
-            )
-            .into(),
-            adapter
-                .join("bin/failforge_dart_adapter.dart")
-                .into_os_string(),
+            packages,
+            failforge_workspace::dart_vm_argument(
+                &adapter.join("bin/failforge_dart_adapter.dart"),
+            )?,
         ],
         cwd: adapter,
         env: Default::default(),
