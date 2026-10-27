@@ -275,7 +275,7 @@ fn cleanup_recovers_after_each_committed_control_transition() {
 
 #[test]
 fn missing_controls_and_invalid_cleanup_marker_never_authorize_payload_removal() {
-    for corrupt_marker in [false, true] {
+    for (corrupt_marker, truncate_lease) in [(false, false), (true, false), (false, true)] {
         let f = Fixture::new();
         let root = f.0.join("registry");
         let cancel = Cancellation::default();
@@ -297,11 +297,63 @@ fn missing_controls_and_invalid_cleanup_marker_never_authorize_payload_removal()
             write_marker(&metadata, b"invalid cleanup proof").unwrap();
         } else {
             let lease = regular(&campaign.caps.campaign, LEASE, true, false).unwrap();
-            win::remove_handle(&lease).unwrap();
+            if truncate_lease {
+                lease.set_len(0).unwrap();
+            } else {
+                win::remove_handle(&lease).unwrap();
+            }
         }
         drop(campaign.caps);
         let observer = start(&root, &cancel).unwrap();
         assert!(observer.skipped.iter().any(|skip| skip.name == name));
         assert_eq!(std::fs::read(&payload).unwrap(), b"retained payload");
     }
+}
+
+#[test]
+fn recovery_retries_after_another_crash_restoring_the_unlinked_lease() {
+    let f = Fixture::new();
+    let root = f.0.join("registry");
+    let cancel = Cancellation::default();
+    let mut campaign = start(&root, &cancel).unwrap();
+    let name = campaign.campaign_name.clone();
+    std::fs::write(root.join(&name).join(WORK).join("payload"), "owned payload").unwrap();
+    campaign.caps.lease.take();
+    drop(campaign.caps);
+    let directory = win::directory(&root).unwrap();
+    let guard = global_lock(&root, &directory, &cancel).unwrap();
+
+    for interrupted in ["lease_removed", "lease_restored"] {
+        let result = reap_with_hook(&directory, &name, &cancel, &mut |stage| {
+            if stage == interrupted {
+                Err(failure("simulated_repeated_cleanup_crash"))
+            } else {
+                Ok(())
+            }
+        });
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("simulated_repeated_cleanup_crash")
+        );
+        assert!(root.join(&name).join(CLEANUP).is_file());
+        assert!(!root.join(&name).join(WORK).exists());
+    }
+    assert_eq!(std::fs::read(root.join(&name).join(LEASE)).unwrap(), b"");
+    drop(guard);
+
+    let mut recovered = start(&root, &cancel).unwrap();
+    assert!(
+        recovered.recovered.contains(&name),
+        "{:?}",
+        recovered.skipped
+    );
+    assert!(!root.join(&name).exists());
+    recovered.caps.lease.take();
+    assert!(
+        !close(&root, &recovered.campaign_name, recovered.caps, &cancel)
+            .unwrap()
+            .cleanup_deferred
+    );
 }

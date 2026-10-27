@@ -354,7 +354,13 @@ fn reap_with_hook(
         win::try_lock_at(&lease, false, WORKSPACE_LEASE_LOCK_OFFSET)?,
         "active_lease",
     )?;
-    read_marker(&lease, LEASE_MAGIC, pending || missing_lease)?;
+    // An interrupted recovery can leave its freshly restored lease empty (or
+    // with a valid prefix). The exact protected cleanup marker was proven
+    // above; ordinary live campaign leases still require the complete magic.
+    read_marker(&lease, LEASE_MAGIC, pending || cleaning || missing_lease)?;
+    if missing_lease {
+        hook("lease_restored")?;
+    }
     if entries.iter().any(|name| name == METADATA) {
         read_marker(
             &regular(&campaign, METADATA, false, false)?,
