@@ -160,7 +160,14 @@ fn progress_failure_cancels_new_work_without_losing_late_worker_events() {
             .unwrap()
             .as_nanos()
     ));
+    #[cfg(unix)]
     fs::create_dir(&root).unwrap();
+    #[cfg(windows)]
+    {
+        use failforge_workspace::windows_fs as win;
+        let parent = win::directory(root.parent().unwrap()).unwrap();
+        drop(win::create_directory_at(&parent, root.file_name().unwrap()).unwrap());
+    }
     let mut progress = LiveProgress {
         state: ProgressState::new(
             "direct",

@@ -95,7 +95,11 @@ mod tests {
         report.write_private("result.json", b"complete").unwrap();
         win::require_private(&win::directory(&path).unwrap(), true).unwrap();
         assert!(create(&path, &[]).is_err());
-        assert!(create(&root.join("a/../bad"), &[]).is_err());
+        // PathBuf::join normalizes traversal beneath verbatim Windows roots.
+        // Preserve the actual external spelling so validation sees the input.
+        let mut traversal = root.as_os_str().to_os_string();
+        traversal.push(r"\a\..\bad");
+        assert!(create(std::path::Path::new(&traversal), &[]).is_err());
         assert!(
             create(
                 &root.join("protected/reports/attempt"),

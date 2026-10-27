@@ -84,6 +84,16 @@ void main() {
     },
   );
 
+  test('verbatim Windows payload roots match package-config file URIs', () {
+    final project = SafeProject.open({
+      ...payload,
+      'workspaceRoot': '\\\\?\\$workspace',
+      'dartSdkPath': '\\\\?\\$sdk',
+    });
+    expect(project.packageRoot, Directory(package).resolveSymbolicLinksSync());
+    expect(project.discoverFiles().single.relativePath, 'lib/a.dart');
+  }, skip: !Platform.isWindows);
+
   test(
     'workspace package config and analysis options resolve without pub get',
     () {
@@ -206,6 +216,17 @@ void main() {
       SafeProject.open(selected).flutterSdkPath,
       Directory(flutter).resolveSymbolicLinksSync(),
     );
+    if (Platform.isWindows) {
+      expect(
+        SafeProject.open({
+          ...selected,
+          'workspaceRoot': '\\\\?\\$workspace',
+          'dartSdkPath': '\\\\?\\$bundled',
+          'flutterSdkPath': '\\\\?\\$flutter',
+        }).flutterSdkPath,
+        Directory(flutter).resolveSymbolicLinksSync(),
+      );
+    }
     expect(
       () => SafeProject.open({...selected, 'dartSdkPath': sdk}),
       throwsA(

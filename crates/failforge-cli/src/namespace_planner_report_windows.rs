@@ -169,6 +169,9 @@ mod tests {
         for invalid in ["../outside", "x\\outside", "name:stream", ".", ".."] {
             assert!(report.write_private(invalid, b"x").is_err());
         }
+        // Windows cannot rename an ancestor while a descendant is held open.
+        // Keep the report directory handle, which is the capability under test.
+        drop(file);
         std::fs::rename(&path, temp.0.join("moved")).unwrap();
         std::fs::create_dir(&path).unwrap();
         assert!(report.write_private("after", b"secret").is_err());

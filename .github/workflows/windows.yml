@@ -53,7 +53,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          cargo test --workspace --all-targets --locked -- --test-threads=1
+          cargo test --workspace --all-targets --locked --no-fail-fast -- --test-threads=1
           cargo run -p failforge-cli --bin failforge --locked -- --version
 
       - name: Check all native targets on Rust 1.85.1

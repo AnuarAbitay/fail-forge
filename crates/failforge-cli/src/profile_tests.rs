@@ -68,14 +68,25 @@ fn unavailable_installation_has_redacted_error() {
 
 #[test]
 fn printed_command_quotes_paths_as_single_literal_arguments() {
-    for (input, expected) in [
+    #[cfg(unix)]
+    let cases = [
         ("a/b.yml", "a/b.yml"),
         ("", "''"),
         ("a b", "'a b'"),
         ("a'b", "'a'\"'\"'b'"),
         ("$(touch x);echo", "'$(touch x);echo'"),
         ("профиль.yml", "'профиль.yml'"),
-    ] {
+    ];
+    #[cfg(windows)]
+    let cases = [
+        ("a/b.yml", "'a/b.yml'"),
+        ("", "''"),
+        ("a b", "'a b'"),
+        ("a'b", "'a''b'"),
+        ("$(touch x);echo", "'$(touch x);echo'"),
+        ("профиль.yml", "'профиль.yml'"),
+    ];
+    for (input, expected) in cases {
         assert_eq!(shell_quote(input), expected);
     }
 }

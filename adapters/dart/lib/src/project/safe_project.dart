@@ -485,7 +485,12 @@ String _directory(String path, String kind) {
   }
   try {
     final directory = Directory(path);
-    final canonical = directory.resolveSymbolicLinksSync();
+    final resolved = directory.resolveSymbolicLinksSync();
+    // Package-config file URIs use ordinary Windows paths, even when the
+    // controller supplied the same directory with a verbatim path prefix.
+    final canonical = Platform.isWindows
+        ? Uri.file(resolved).toFilePath()
+        : resolved;
     if (!Directory(canonical).existsSync()) {
       throw AdapterException('resource_missing', '$kind directory is missing');
     }

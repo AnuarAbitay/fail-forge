@@ -1,11 +1,12 @@
 use super::*;
+use crate::test_support::absolute;
 
 fn spec(values: &[&str]) -> Result<CommandSpec, clap::Error> {
     let cli = Cli::try_parse_from(values)?;
     let Commands::Run(run) = cli.command else {
         panic!("expected run subcommand");
     };
-    run.into_spec(Path::new("/invocation"))
+    run.into_spec(&absolute("/invocation"))
 }
 
 #[test]
@@ -18,7 +19,7 @@ fn defaults_match_runner_contract() {
     let command = spec(&["failforge", "run", "--", "tool"]).unwrap();
     assert_eq!(command.program, "tool");
     assert!(command.args.is_empty());
-    assert_eq!(command.cwd, Path::new("/invocation"));
+    assert_eq!(command.cwd, absolute("/invocation"));
     assert!(!command.env.clear);
     assert_eq!(command.timeout_policy.timeout, None);
     assert_eq!(command.timeout_policy.grace_period, Duration::from_secs(2));
@@ -86,7 +87,7 @@ fn expanded_options_build_the_spec() {
         "test",
     ])
     .unwrap();
-    assert_eq!(command.cwd, Path::new("/invocation/example"));
+    assert_eq!(command.cwd, absolute("/invocation").join("example"));
     assert_eq!(
         command.timeout_policy.timeout,
         Some(Duration::from_secs(30))
@@ -95,7 +96,7 @@ fn expanded_options_build_the_spec() {
     assert_eq!(command.capture_policy.mode, OutputMode::StreamAndCapture);
     assert_eq!(
         command.capture_policy.capture_dir,
-        Some(PathBuf::from("/invocation/artifacts/run-001"))
+        Some(absolute("/invocation").join("artifacts").join("run-001"))
     );
     assert_eq!(
         command.env.set.get(std::ffi::OsStr::new("CI")),
@@ -111,22 +112,21 @@ fn expanded_options_build_the_spec() {
 
 #[test]
 fn absolute_paths_override_invocation_directory() {
+    let child = absolute("/child");
+    let capture = absolute("/capture");
     let command = spec(&[
         "failforge",
         "run",
         "--cwd",
-        "/child",
+        child.to_str().unwrap(),
         "--capture-dir",
-        "/capture",
+        capture.to_str().unwrap(),
         "--",
         "tool",
     ])
     .unwrap();
-    assert_eq!(command.cwd, Path::new("/child"));
-    assert_eq!(
-        command.capture_policy.capture_dir,
-        Some(PathBuf::from("/capture"))
-    );
+    assert_eq!(command.cwd, child);
+    assert_eq!(command.capture_policy.capture_dir, Some(capture));
 }
 
 #[test]
@@ -312,16 +312,14 @@ fn native_arguments_paths_and_environment_are_preserved() {
     let Commands::Run(run) = cli.command else {
         panic!("expected run subcommand");
     };
-    let command = run.into_spec(Path::new("/invocation")).unwrap();
+    let invocation = absolute("/invocation");
+    let command = run.into_spec(&invocation).unwrap();
     assert_eq!(command.program, raw(b"./tool-\xfa"));
     assert_eq!(command.args, [raw(b"arg-\xf9")]);
-    assert_eq!(
-        command.cwd,
-        Path::new("/invocation").join(raw(b"child-\xff"))
-    );
+    assert_eq!(command.cwd, invocation.join(raw(b"child-\xff")));
     assert_eq!(
         command.capture_policy.capture_dir.unwrap(),
-        Path::new("/invocation").join(raw(b"capture-\xfe"))
+        invocation.join(raw(b"capture-\xfe"))
     );
     assert_eq!(
         command.env.set.get(raw(b"KEY-\xfd").as_os_str()),
@@ -345,7 +343,7 @@ fn invalid_native_configuration_does_not_echo_raw_arguments() {
         let Commands::Run(run) = cli.command else {
             panic!("expected run subcommand");
         };
-        let error = match run.into_spec(Path::new("/invocation")) {
+        let error = match run.into_spec(&absolute("/invocation")) {
             Err(error) => error,
             Ok(_) => panic!("invalid native environment accepted"),
         };

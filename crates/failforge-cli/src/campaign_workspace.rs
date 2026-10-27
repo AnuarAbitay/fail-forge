@@ -919,7 +919,9 @@ mod windows_tests {
         guard.verify().unwrap();
         win::require_private(&win::directory(&path).unwrap(), true).unwrap();
         assert!(create_directory(&path).is_err());
-        assert!(no_symlink_ancestors(&root.join("a/../b"), true).is_err());
+        let mut traversal = root.as_os_str().to_os_string();
+        traversal.push(r"\a\..\b");
+        assert!(no_symlink_ancestors(Path::new(&traversal), true).is_err());
         fs::remove_dir_all(root).unwrap();
     }
     #[test]

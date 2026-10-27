@@ -2,6 +2,7 @@ use super::*;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::{PermissionsExt, symlink};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const RUN: &str = "0123456789abcdef0123456789abcdef";
@@ -22,7 +23,19 @@ impl Fixture {
         ));
         fs::create_dir(&base).unwrap();
         let output = base.join("output");
+        #[cfg(unix)]
         fs::create_dir(&output).unwrap();
+        #[cfg(windows)]
+        {
+            let parent = failforge_workspace::windows_fs::directory(&base).unwrap();
+            drop(
+                failforge_workspace::windows_fs::create_directory_at(
+                    &parent,
+                    output.file_name().unwrap(),
+                )
+                .unwrap(),
+            );
+        }
         if mode == "profile" {
             for family in families {
                 fs::create_dir_all(output.join("families").join(family)).unwrap();
@@ -30,13 +43,13 @@ impl Fixture {
         }
         let mut reports = Reports::new(
             mode,
-            json!({"project":"/project","source":"lib/source.dart"}),
+            json!({"project":base.join("project"),"source":"lib/source.dart"}),
             families
                 .iter()
                 .map(|family| {
                     (
                         (*family).into(),
-                        json!({"family":family,"project":"/project"}),
+                        json!({"family":family,"project":base.join("project")}),
                     )
                 })
                 .collect(),
@@ -98,6 +111,69 @@ impl Fixture {
     }
     fn read(&self, path: &str) -> Value {
         serde_json::from_slice(&fs::read(self.output.join(path)).unwrap()).unwrap()
+    }
+    fn assert_generation(&self, prefix: &str) {
+        #[cfg(unix)]
+        let generation = {
+            let relative = fs::read_link(self.output.join(".profile-reports-current")).unwrap();
+            assert!(
+                relative
+                    .to_str()
+                    .unwrap()
+                    .starts_with(&format!(".profile-reports/{prefix}"))
+            );
+            self.output.join(relative)
+        };
+        #[cfg(windows)]
+        let generation = {
+            assert!(!self.output.join(".profile-reports-current").exists());
+            let matching: Vec<_> = fs::read_dir(self.output.join(".profile-reports"))
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| {
+                    path.file_name()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .starts_with(prefix)
+                })
+                .collect();
+            assert_eq!(matching.len(), 1);
+            matching.into_iter().next().unwrap()
+        };
+        for relative in std::iter::once("summary.json".to_owned()).chain(
+            self.families
+                .iter()
+                .map(|family| format!("families/{family}/summary.json")),
+        ) {
+            let public = self.output.join(&relative);
+            #[cfg(windows)]
+            {
+                let metadata = fs::symlink_metadata(&public).unwrap();
+                assert!(metadata.is_file());
+                assert!(!failforge_workspace::windows_fs::is_reparse(&metadata));
+            }
+            assert_eq!(
+                fs::read(public).unwrap(),
+                fs::read(generation.join(relative)).unwrap()
+            );
+        }
+    }
+}
+fn rename_directory(from: &Path, to: &Path) {
+    #[cfg(unix)]
+    fs::rename(from, to).unwrap();
+    #[cfg(windows)]
+    {
+        let directory = failforge_workspace::windows_fs::directory(from).unwrap();
+        let parent = failforge_workspace::windows_fs::directory(to.parent().unwrap()).unwrap();
+        failforge_workspace::windows_fs::rename_handle(
+            &directory,
+            &parent,
+            to.file_name().unwrap(),
+            false,
+        )
+        .unwrap();
     }
 }
 impl Drop for Fixture {
@@ -330,10 +406,6 @@ fn direct_metadata_initial_report_and_full_final_evidence_are_native() {
 fn profile_layout_and_all_family_scores_commit_together() {
     let mut fixture = Fixture::new("profile", &FAMILIES);
     fixture.prepare();
-    assert_eq!(
-        fs::read_link(fixture.output.join(".profile-reports-current")).unwrap(),
-        PathBuf::from(".profile-reports/pending")
-    );
     assert_eq!(fixture.read("manifest.json")["kind"], "profile");
     for family in FAMILIES {
         assert_eq!(
@@ -342,6 +414,7 @@ fn profile_layout_and_all_family_scores_commit_together() {
         );
     }
     fixture.discover(1);
+    fixture.assert_generation("pending");
     for family in FAMILIES {
         assert_eq!(
             fixture.read(&format!("families/{family}/input-bindings.json")),
@@ -352,13 +425,7 @@ fn profile_layout_and_all_family_scores_commit_together() {
     let summary = fixture.reports.finish("completed", None).unwrap().summary;
     assert_eq!(summary["completedMutants"], 3);
     assert!(summary["mutationScore"].is_null());
-    assert!(
-        fs::read_link(fixture.output.join(".profile-reports-current"))
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .starts_with(".profile-reports/final-")
-    );
+    fixture.assert_generation("final-");
     for (family, score) in [
         ("classic", "mutationScore"),
         ("failure_mode", "failureModeScore"),
@@ -382,7 +449,7 @@ fn journal_sequence_and_utf8_fields_remain_readable() {
         .reports
         .event(&json!({"kind":"stage_finished","stage":"snapshot","wallSeconds":0.25}))
         .unwrap();
-    fixture.reports.event(&json!({"kind":"workspace","directory":"/tmp/workspace","recovered":["old"],"skipped":[{"name":"имя","nameBytes":[1],"reason":"locked"}]})).unwrap();
+    fixture.reports.event(&json!({"kind":"workspace","directory":fixture.base.join("workspace"),"recovered":["old"],"skipped":[{"name":"имя","nameBytes":[1],"reason":"locked"}]})).unwrap();
     fixture.discover(1);
     fixture.complete(1);
     let summary = fixture.reports.finish("completed", None).unwrap().summary;
@@ -460,13 +527,7 @@ fn persistent_progress_failure_publishes_partial_without_touching_foreign_direct
         "foreign"
     );
     assert_eq!(fixture.read("summary.json"), summary);
-    assert!(
-        fs::read_link(fixture.output.join(".profile-reports-current"))
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .starts_with(".profile-reports/partial-")
-    );
+    fixture.assert_generation("partial-");
 }
 #[test]
 fn journal_failure_latches_and_keeps_late_worker_records() {
@@ -603,7 +664,7 @@ fn replacement_report_root_is_never_written() {
     fixture.prepare();
     fixture.discover(1);
     fixture.complete(1);
-    fs::rename(&fixture.output, fixture.base.join("held-output")).unwrap();
+    rename_directory(&fixture.output, &fixture.base.join("held-output"));
     fs::create_dir(&fixture.output).unwrap();
     fs::write(fixture.output.join("sentinel"), "foreign").unwrap();
     assert!(fixture.reports.finish("completed", None).is_err());
@@ -613,11 +674,10 @@ fn replacement_report_root_is_never_written() {
 fn replacement_family_directory_cannot_receive_metadata_or_final_report() {
     let mut fixture = Fixture::new("profile", &["classic"]);
     fixture.prepare();
-    fs::rename(
-        fixture.output.join("families/classic"),
-        fixture.output.join("families/held"),
-    )
-    .unwrap();
+    rename_directory(
+        &fixture.output.join("families/classic"),
+        &fixture.output.join("families/held"),
+    );
     fs::create_dir(fixture.output.join("families/classic")).unwrap();
     assert!(
         fixture
