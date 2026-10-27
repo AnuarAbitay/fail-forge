@@ -509,11 +509,7 @@ mod tests {
 
     fn context() -> Context {
         let cwd = std::env::current_dir().unwrap();
-        Context {
-            installation: cwd.join("installation-does-not-need-python"),
-            cwd,
-            sdk_search_path: None,
-        }
+        Context::new(&cwd, &cwd.join("installation-does-not-need-python")).unwrap()
     }
     fn direct(value: Value) -> Result<CampaignConfig, ConfigError> {
         from_mapping(&value, &context(), None)

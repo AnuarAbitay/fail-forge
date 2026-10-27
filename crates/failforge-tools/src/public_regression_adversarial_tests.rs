@@ -29,12 +29,20 @@ fn healthy_profile_summary() -> Value {
     })
 }
 
-const STDOUT: &[u8] = b"FailForge profile summary\n/tmp/public-regression-report/summary.json\n";
+fn terminal(summary: &Value) -> Vec<u8> {
+    format!(
+        "FailForge profile summary\n{}\n",
+        Path::new(summary["output"].as_str().unwrap())
+            .join("summary.json")
+            .display()
+    )
+    .into_bytes()
+}
 
 #[test]
 fn aggregate_cannot_disagree_with_family_verdict_even_when_each_score_is_consistent() {
     let mut summary = healthy_profile_summary();
-    report_contract(&summary, STDOUT, false).unwrap();
+    report_contract(&summary, &terminal(&summary), false).unwrap();
     let family = &mut summary["families"]["classic"]["summary"];
     family["records"][0]["outcome"] = "SURVIVED".into();
     family["outcomeCounts"] = json!({"SURVIVED":1});
@@ -43,7 +51,7 @@ fn aggregate_cannot_disagree_with_family_verdict_even_when_each_score_is_consist
         "excluded":{}, "percent":0.0
     });
     assert!(
-        report_contract(&summary, STDOUT, false).is_err(),
+        report_contract(&summary, &terminal(&summary), false).is_err(),
         "individually consistent scores cannot authenticate conflicting verdicts"
     );
 }
@@ -60,7 +68,7 @@ fn aggregate_cannot_disagree_with_family_identity_or_patch_metadata() {
         let mut summary = healthy_profile_summary();
         summary["families"]["classic"]["summary"]["records"][0][field] = changed;
         assert!(
-            report_contract(&summary, STDOUT, false).is_err(),
+            report_contract(&summary, &terminal(&summary), false).is_err(),
             "aggregate must retain family {field}"
         );
     }
@@ -123,7 +131,7 @@ fn cancelled_profile_retains_completed_child_without_publishing_any_score() {
         summary["families"]["classic"]["summary"]["completedMutants"],
         1
     );
-    report_contract(&summary, STDOUT, true).unwrap();
+    report_contract(&summary, &terminal(&summary), true).unwrap();
 }
 
 #[test]
@@ -132,7 +140,7 @@ fn partial_child_or_enclosing_profile_cannot_publish_even_an_accurate_score() {
     let score = healthy["families"]["classic"]["summary"]["mutationScore"].clone();
     let mut summary = cancelled_profile_with_completed_child();
     summary["families"]["classic"]["summary"]["mutationScore"] = score.clone();
-    assert!(report_contract(&summary, STDOUT, true).is_err());
+    assert!(report_contract(&summary, &terminal(&summary), true).is_err());
     for complete in [false, true] {
         let mut child = healthy["families"]["classic"]["summary"].clone();
         child["complete"] = complete.into();
@@ -149,13 +157,13 @@ fn partial_child_or_enclosing_profile_cannot_publish_even_an_accurate_score() {
 fn completed_report_still_requires_score_and_cannot_forge_parent_completion() {
     let mut complete = healthy_profile_summary();
     complete["families"]["classic"]["summary"]["mutationScore"] = Value::Null;
-    assert!(report_contract(&complete, STDOUT, false).is_err());
+    assert!(report_contract(&complete, &terminal(&complete), false).is_err());
     complete["families"]["classic"]["summary"]["profileComplete"] = false.into();
-    assert!(report_contract(&complete, STDOUT, false).is_err());
+    assert!(report_contract(&complete, &terminal(&complete), false).is_err());
 
     let mut partial = cancelled_profile_with_completed_child();
     partial["families"]["classic"]["summary"]["profileComplete"] = true.into();
-    assert!(report_contract(&partial, STDOUT, true).is_err());
+    assert!(report_contract(&partial, &terminal(&partial), true).is_err());
     for value in [Value::Null, json!(0), json!("false")] {
         let mut child = partial["families"]["classic"]["summary"].clone();
         child["profileComplete"] = value;
@@ -165,11 +173,7 @@ fn completed_report_still_requires_score_and_cannot_forge_parent_completion() {
 
 fn native_profile(text: &str) -> (Value, Vec<u8>) {
     let summary: Value = serde_json::from_str(text).unwrap();
-    let stdout = format!(
-        "FailForge profile summary\n{}/summary.json\n",
-        summary["output"].as_str().unwrap()
-    )
-    .into_bytes();
+    let stdout = terminal(&summary);
     (summary, stdout)
 }
 

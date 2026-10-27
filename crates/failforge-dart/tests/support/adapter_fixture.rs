@@ -3,7 +3,9 @@ use failforge_dart::{AdapterFailure, RequestEnvelope, ResponseEnvelope, Response
 use serde_json::json;
 #[cfg(windows)]
 use std::fs::File as ControlStream;
-use std::io::{self, BufRead, Read, Write};
+#[cfg(unix)]
+use std::io::Read;
+use std::io::{self, BufRead, Write};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream as ControlStream;
 
@@ -98,15 +100,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(windows)]
         let group = std::process::id();
         writeln!(stream, "READY {} {}", std::process::id(), group)?;
-        let mut watchdog = stream.try_clone()?;
+        let watchdog = stream.try_clone()?;
         std::thread::spawn(move || {
+            #[cfg(unix)]
+            let mut watchdog = watchdog;
+            #[cfg(unix)]
             let mut byte = [0];
             loop {
+                #[cfg(unix)]
                 match watchdog.read(&mut byte) {
                     Ok(0) => std::process::exit(0),
                     Ok(_) => {}
                     Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                     Err(_) => std::process::exit(0),
+                }
+                #[cfg(windows)]
+                {
+                    use std::os::windows::io::AsRawHandle;
+                    // A blocking read on this synchronous pipe would serialize
+                    // REQUEST writes on its cloned file object. Only probe EOF.
+                    let connected = unsafe {
+                        windows_sys::Win32::System::Pipes::PeekNamedPipe(
+                            watchdog.as_raw_handle(),
+                            std::ptr::null_mut(),
+                            0,
+                            std::ptr::null_mut(),
+                            std::ptr::null_mut(),
+                            std::ptr::null_mut(),
+                        )
+                    };
+                    if connected == 0 {
+                        std::process::exit(0);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
                 }
             }
         });

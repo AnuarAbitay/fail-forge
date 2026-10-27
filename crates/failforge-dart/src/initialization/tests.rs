@@ -129,7 +129,7 @@ fn malformed_native_capture_never_grants_an_initialization_control() {
     let mut classification = json!({"outcome":"SURVIVED", "reason":"user_tests_passed"});
     let handoff = initialization_handoff(
         b"broken",
-        Path::new("/work"),
+        &crate::test_fs::absolute("/work"),
         ReporterMode::Dart,
         &mut classification,
         &SelectionContext::default(),
@@ -148,7 +148,7 @@ fn failed_native_control_terminates_the_opaque_continuation() {
     let mut classification = json!({"outcome":"INFRA_ERROR", "reason":"capture_changed"});
     let handoff = initialization_handoff(
         b"",
-        Path::new("/work"),
+        &crate::test_fs::absolute("/work"),
         ReporterMode::Dart,
         &mut classification,
         &context,
@@ -208,7 +208,7 @@ fn completed_timeout_control_is_a_failed_original_and_never_a_kill() {
         let mut classification = json!({"outcome":outcome, "reason":"primary_failure"});
         let handoff = initialization_handoff(
             &completed_reporter(),
-            Path::new("/work"),
+            &crate::test_fs::absolute("/work"),
             ReporterMode::Dart,
             &mut classification,
             &context,
@@ -237,7 +237,7 @@ fn incomplete_timeout_preserves_primary_outcome_without_proving_suite_selection(
     let mut classification = json!({"outcome":"TIMEOUT", "reason":"runner_timeout"});
     let handoff = initialization_handoff(
         &bytes,
-        Path::new("/work"),
+        &crate::test_fs::absolute("/work"),
         ReporterMode::Dart,
         &mut classification,
         &context,

@@ -360,9 +360,11 @@ mod tests {
         ] {
             assert!(validate_relative_target(invalid).is_err(), "{invalid:?}");
         }
-        for valid in ["lib/a b.dart", "lib/кириллица.dart", "lib/a:b.dart"] {
+        for valid in ["lib/a b.dart", "lib/кириллица.dart"] {
             validate_relative_target(valid).unwrap();
         }
+        #[cfg(unix)]
+        validate_relative_target("lib/a:b.dart").unwrap();
     }
     #[cfg(windows)]
     #[test]

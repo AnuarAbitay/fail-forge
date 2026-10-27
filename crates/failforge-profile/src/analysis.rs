@@ -557,14 +557,24 @@ mod tests {
             .unwrap();
             for relative in [
                 "helper",
-                "flutter/bin/flutter",
                 "flutter/bin/cache/flutter_tools.snapshot",
                 "flutter/bin/cache/artifacts/engine/runtime",
-                "flutter/bin/cache/dart-sdk/bin/dart",
                 "flutter/bin/cache/dart-sdk/lib/core.dart",
             ] {
                 fs::write(root.join(relative), "original bytes").unwrap();
             }
+            fs::write(
+                root.join("flutter")
+                    .join(failforge_config::platform::FLUTTER_BIN),
+                "original bytes",
+            )
+            .unwrap();
+            fs::write(
+                root.join("flutter/bin/cache/dart-sdk")
+                    .join(failforge_config::platform::DART_BIN),
+                "original bytes",
+            )
+            .unwrap();
             let original =
                 inputs::inspect_project(&root.join("package"), &Cancellation::default()).unwrap();
             let runtime = Runtime {
@@ -611,7 +621,7 @@ mod tests {
             assert!(!binding.files.contains_key(&flutter.join(relative)));
         }
         for relative in [
-            "bin/flutter",
+            failforge_config::platform::FLUTTER_BIN,
             "bin/cache/flutter_tools.snapshot",
             "bin/cache/artifacts/engine/runtime",
         ] {
@@ -646,7 +656,7 @@ mod tests {
         }
         binding.verify(&Cancellation::default()).unwrap();
         for relative in [
-            "bin/flutter",
+            failforge_config::platform::FLUTTER_BIN,
             "bin/cache/flutter_tools.snapshot",
             "bin/cache/artifacts/engine/runtime",
         ] {

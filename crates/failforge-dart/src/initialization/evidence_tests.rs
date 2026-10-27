@@ -306,10 +306,11 @@ fn symlink_cwd_preserves_logical_frames_but_checks_physical_containment() {
     let _cleanup = Cleanup(temporary.clone());
     let logical = temporary.join("logical");
     symlink(temporary.join("project"), &logical).unwrap();
-    let suite = format!("{}/test/author_test.dart", logical.display());
+    let suite = logical.join("test").join("author_test.dart");
+    let suite = suite.to_str().unwrap();
     let stack = format!("package:subject/subject.dart 2:1 init\n{suite} 3:1 main\n");
     let raw = capture(
-        &[(&suite, Some(("StateError: failed", &stack, false)))],
+        &[(suite, Some(("StateError: failed", &stack, false)))],
         false,
     );
     let actual = analyze_initialization_evidence(

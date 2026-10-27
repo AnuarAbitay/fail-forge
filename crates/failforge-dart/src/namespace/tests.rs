@@ -797,6 +797,8 @@ fn replaced_temporary_is_neither_committed_nor_removed_by_cleanup() {
         assert!(
             error.contains(if injected_failure {
                 "injected temporary failure"
+            } else if cfg!(windows) {
+                "workspace directory entry changed"
             } else {
                 "namespace temporary inode changed"
             }),

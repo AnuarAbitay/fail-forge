@@ -84,10 +84,7 @@ fn catalogue_preserves_duplicate_multiplicity_and_reporter_order() {
     let capture = raw(&original);
     let first = snapshot(&original);
     assert_eq!(first.raw_sha256, format!("{:x}", Sha256::digest(&capture)));
-    assert_eq!(
-        first.cwd,
-        crate::test_fs::absolute("/work").to_str().unwrap()
-    );
+    assert_eq!(Path::new(&first.cwd), crate::test_fs::absolute("/work"));
     assert_eq!(
         first.identities,
         [["test/a.dart", "a author"], ["test/a.dart", "z author"]]

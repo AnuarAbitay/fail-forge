@@ -343,13 +343,24 @@ mod tests {
         std::fs::write(&path, b"const value = null;\r\n").unwrap();
         assert!(target.verify(&root).is_err());
         let (_, target) = root.read("lib/Ж 😀.dart", 100, true).unwrap();
-        std::fs::rename(fixture.0.join("lib"), fixture.0.join("moved")).unwrap();
-        std::fs::create_dir(fixture.0.join("lib")).unwrap();
-        assert!(target.verify(&root).is_err());
-        assert_eq!(
-            std::fs::read(fixture.0.join("moved/Ж 😀.dart")).unwrap(),
-            b"const value = null;\r\n"
-        );
+        match std::fs::rename(fixture.0.join("lib"), fixture.0.join("moved")) {
+            Ok(()) => {
+                std::fs::create_dir(fixture.0.join("lib")).unwrap();
+                assert!(target.verify(&root).is_err());
+                assert_eq!(
+                    std::fs::read(fixture.0.join("moved/Ж 😀.dart")).unwrap(),
+                    b"const value = null;\r\n"
+                );
+            }
+            Err(error) => {
+                // NTFS can forbid renaming a directory with retained children.
+                // The rejected attack must preserve the bound source instead.
+                assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+                target.verify(&root).unwrap();
+                assert!(!fixture.0.join("moved").exists());
+                assert_eq!(std::fs::read(&path).unwrap(), b"const value = null;\r\n");
+            }
+        }
     }
     #[test]
     fn reparse_target_cannot_redirect_an_owned_read() {
