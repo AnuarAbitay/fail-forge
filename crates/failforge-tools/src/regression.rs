@@ -1382,8 +1382,10 @@ pub fn run(options: Options) -> Result<()> {
         TESTS,
     )?;
     let all = options.suite == Suite::All;
-    // Check attribution before the longer profile catalogue so unsupported
-    // native reporter locations fail early without dropping any scenarios.
+    // Check SDK interop and attribution before the longer profile catalogue.
+    if options.suite == Suite::Flutter || (all && harness.flutter.is_some()) {
+        harness.flutter()?;
+    }
     if all || options.suite == Suite::Classification {
         harness.classification()?;
     }
@@ -1404,9 +1406,6 @@ pub fn run(options: Options) -> Result<()> {
     }
     if all || options.suite == Suite::Applicability {
         harness.applicability()?;
-    }
-    if options.suite == Suite::Flutter || (all && harness.flutter.is_some()) {
-        harness.flutter()?;
     }
     if all || options.suite == Suite::Replay {
         harness.replay()?;

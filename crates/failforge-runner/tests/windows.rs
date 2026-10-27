@@ -7,9 +7,9 @@ use failforge_runner::{
 use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::os::windows::ffi::OsStringExt;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::io::{AsHandle, AsRawHandle, FromRawHandle, OwnedHandle};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf, Prefix};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
@@ -49,6 +49,14 @@ fn hex(value: &OsStr) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+fn ordinary_drive_path(canonical: &Path) -> PathBuf {
+    assert!(matches!(
+        canonical.components().next(),
+        Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::VerbatimDisk(_))
+    ));
+    let wide: Vec<_> = canonical.as_os_str().encode_wide().collect();
+    PathBuf::from(OsString::from_wide(&wide[4..]))
 }
 struct Directory(PathBuf);
 impl Directory {
@@ -96,13 +104,12 @@ async fn canonical_program_uses_verified_ordinary_loaded_module_and_argv0_spelli
     let path = directory.0.join("native module #%.exe");
     std::fs::copy(env!("CARGO_BIN_EXE_failforge-process-fixture"), &path).unwrap();
     let canonical = path.canonicalize().unwrap();
-    let ordinary = canonical.to_str().unwrap().strip_prefix(r"\\?\").unwrap();
-    assert!(!ordinary.starts_with("UNC\\"));
+    let ordinary = ordinary_drive_path(&canonical);
     let mut command = spec(&["module-path"]);
     command.program = canonical.as_os_str().into();
     let result = run(command).await;
     assert!(result.status.unwrap().success());
-    let expected = hex(OsStr::new(ordinary));
+    let expected = hex(ordinary.as_os_str());
     assert_eq!(
         result.stdout.tail,
         format!("{expected}\n{expected}\n").as_bytes()
@@ -180,12 +187,42 @@ async fn cwd_and_capture_paths_with_spaces_are_preserved() {
     let result = run(command).await;
     let expected = format!(
         "{}\n",
-        hex(std::fs::canonicalize(&directory.0).unwrap().as_os_str())
+        hex(ordinary_drive_path(&std::fs::canonicalize(&directory.0).unwrap()).as_os_str())
     );
     assert_eq!(result.stdout.tail, expected.as_bytes());
     assert_eq!(
         std::fs::read(result.stdout.file_path.as_ref().unwrap()).unwrap(),
         expected.as_bytes()
+    );
+}
+
+#[tokio::test]
+async fn canonical_cwd_uses_verified_ordinary_spelling_with_relative_child_path() {
+    let directory = Directory::new();
+    let cwd = directory.0.join("working #%");
+    std::fs::create_dir_all(cwd.join("relative bin")).unwrap();
+    std::fs::copy(
+        env!("CARGO_BIN_EXE_failforge-process-fixture"),
+        cwd.join("relative bin/fixture.exe"),
+    )
+    .unwrap();
+    let canonical = cwd.canonicalize().unwrap();
+    let ordinary = ordinary_drive_path(&canonical);
+    let mut command = spec(&["cwd-paths"]);
+    command.program = "fixture".into();
+    command.cwd = canonical.clone();
+    command.env.clear = true;
+    command.env.set.insert("Path".into(), "relative bin".into());
+    let result = run(command).await;
+    assert!(result.status.unwrap().success());
+    assert_eq!(
+        result.stdout.tail,
+        format!(
+            "{}\n{}\n",
+            hex(ordinary.as_os_str()),
+            hex(canonical.as_os_str())
+        )
+        .as_bytes()
     );
 }
 

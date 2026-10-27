@@ -78,6 +78,16 @@ fn run() -> io::Result<u8> {
             )?;
             Ok(0)
         }
+        "cwd-paths" => {
+            let cwd = std::env::current_dir()?;
+            writeln!(io::stdout(), "{}", hex(cwd.as_os_str().as_encoded_bytes()))?;
+            writeln!(
+                io::stdout(),
+                "{}",
+                hex(cwd.canonicalize()?.as_os_str().as_encoded_bytes())
+            )?;
+            Ok(0)
+        }
         "stdin-eof" => {
             let mut bytes = Vec::new();
             io::stdin().read_to_end(&mut bytes)?;

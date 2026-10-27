@@ -79,10 +79,13 @@ pub(crate) fn prepare(spec: &CommandSpec, invocation: &Path) -> io::Result<Prepa
         ));
     }
     let env = serialize_env(&environment);
+    // Keep canonical paths for resolution above; runtimes also consume the
+    // current-directory spelling returned by GetCurrentDirectoryW.
+    let launch_cwd = launch_spelling(&cwd);
     Ok(PreparedCommand {
         program,
         command_line,
-        cwd: wide(cwd.as_os_str()),
+        cwd: wide(launch_cwd.as_os_str()),
         env,
         environment,
         stdin: None,
@@ -187,9 +190,9 @@ fn resolve_program(program: &OsStr, cwd: &Path, path: Option<&OsString>) -> io::
     Err(io::ErrorKind::NotFound.into())
 }
 
-/// Some Windows runtimes reject verbatim module paths returned by
-/// GetModuleFileNameW. Use an ordinary spelling only when native Win32 lookup
-/// proves that it names the same file as the canonical resolution above.
+/// Some Windows runtimes reject verbatim module or current-directory paths.
+/// Use an ordinary spelling only when native Win32 lookup proves that it names
+/// the same file or directory as the canonical resolution above.
 fn launch_spelling(canonical: &Path) -> PathBuf {
     let Some(ordinary) = ordinary_spelling(canonical) else {
         return canonical.into();
