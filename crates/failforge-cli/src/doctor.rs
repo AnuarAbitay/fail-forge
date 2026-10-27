@@ -301,6 +301,13 @@ fn selected(config: &RunConfig) -> Option<&CampaignConfig> {
     }
 }
 
+fn native_helper(executable: &Path) -> Option<std::path::PathBuf> {
+    executable.parent().map(|directory| {
+        directory
+            .join(failforge_config::platform::binary_name("failforge-adapter-campaign").as_ref())
+    })
+}
+
 pub(crate) fn execute(arguments: DoctorArgs, invocation_cwd: &Path) -> ExitCode {
     let result = (|| -> Result<(Report, u8), (u8, String)> {
         let installation = crate::installation::resolve(arguments.installation.as_deref())
@@ -317,12 +324,11 @@ pub(crate) fn execute(arguments: DoctorArgs, invocation_cwd: &Path) -> ExitCode 
             .map_err(|error| (2, error.to_string()))?;
         let config = selected(&configuration)
             .ok_or((2, "profile has no selected mutation families".into()))?;
-        let helper = std::env::current_exe()
+        let executable = std::env::current_exe()
             .and_then(|path| path.canonicalize())
-            .map_err(|_| (125, "cannot locate the running executable".into()))?
-            .parent()
-            .ok_or((125, "cannot locate the native analysis helper".into()))?
-            .join("failforge-adapter-campaign");
+            .map_err(|_| (125, "cannot locate the running executable".into()))?;
+        let helper = native_helper(&executable)
+            .ok_or((125, "cannot locate the native analysis helper".into()))?;
         let selections = match &configuration {
             RunConfig::Campaign(config) => vec![config.as_ref()],
             RunConfig::Profile(profile) => profile.campaigns.iter().collect(),
@@ -353,3 +359,44 @@ pub(crate) fn execute(arguments: DoctorArgs, invocation_cwd: &Path) -> ExitCode 
 #[cfg(all(test, unix))]
 #[path = "doctor_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod native_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn helper_readiness_uses_native_sibling_filename_without_running_it() {
+        let root = std::env::temp_dir().join(format!(
+            "failforge-doctor-helper-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir(&root).unwrap();
+        let name = if cfg!(windows) {
+            "failforge-adapter-campaign.exe"
+        } else {
+            "failforge-adapter-campaign"
+        };
+        let expected = root.join(name);
+        fs::write(&expected, b"this helper must never be executed").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&expected, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let helper = native_helper(&root.join("running-cli")).unwrap();
+        assert_eq!(helper, expected);
+        assert!(executable(&helper));
+        assert_eq!(
+            fs::read(&helper).unwrap(),
+            b"this helper must never be executed"
+        );
+        fs::remove_file(&expected).unwrap();
+        assert!(!executable(&helper));
+        fs::remove_dir(root).unwrap();
+    }
+}
