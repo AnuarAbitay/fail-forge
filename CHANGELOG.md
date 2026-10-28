@@ -12,6 +12,8 @@ downloads and their verification results.
   with Job Object process ownership, private handle-based workspaces, named-pipe
   cancellation, Windows SDK discovery and native CI coverage. See the Windows
   source build guide; these changes are not part of the beta.3 downloads.
+- Manual Windows x64 release packaging with exact-source Linux/macOS and Windows
+  CI checks before upload to an existing draft release.
 
 ## 0.1.0-beta.3 — 2026-10-24
 

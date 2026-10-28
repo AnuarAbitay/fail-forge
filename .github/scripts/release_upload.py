@@ -2,7 +2,7 @@
 """Upload verified native packages to an existing draft with a personal token."""
 
 import argparse
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 import hashlib
 import json
@@ -19,7 +19,7 @@ import urllib.request
 ACCOUNT = 'AnuarAbitay'
 REPOSITORY = 'AnuarAbitay/fail-forge'
 API_BASE = 'https://api.github.com'
-TARGETS = {'x86_64-unknown-linux-gnu', 'aarch64-apple-darwin'}
+TARGETS = {'x86_64-unknown-linux-gnu', 'aarch64-apple-darwin', 'x86_64-pc-windows-msvc'}
 NUMBER = r'(?:0|[1-9][0-9]*)'
 VERSION = re.compile(rf'{NUMBER}\.{NUMBER}\.{NUMBER}-beta\.{NUMBER}')
 SHA = re.compile(r'[0-9a-f]{40}')
@@ -30,6 +30,14 @@ CI_JOBS = {
     'Flutter 3.47.7 / ubuntu-latest', 'Flutter 3.47.7 / macos-latest',
     'Flutter stable / ubuntu-latest', 'Flutter stable / macos-latest',
 }
+WINDOWS_JOBS = {
+    'Native Rust / windows-latest', 'Native Dart compiler launch paths',
+    'Flutter 3.47.7 / windows-latest', 'Flutter stable / windows-latest',
+}
+CI_WORKFLOWS = (
+    ('ci.yml', 'CI', CI_JOBS),
+    ('windows.yml', 'Windows native', WINDOWS_JOBS),
+)
 
 
 class ReleaseError(Exception):
@@ -41,9 +49,75 @@ def require(condition, message):
         raise ReleaseError(message)
 
 
+def _open_windows_descriptor(path):
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+
+    class AttributeTagInfo(ctypes.Structure):
+        _fields_ = [('attributes', wintypes.DWORD), ('tag', wintypes.DWORD)]
+
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+        wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.GetFileType.argtypes = (wintypes.HANDLE,)
+    kernel.GetFileType.restype = wintypes.DWORD
+    kernel.GetFileInformationByHandleEx.argtypes = (wintypes.HANDLE, ctypes.c_int,
+        wintypes.LPVOID, wintypes.DWORD)
+    kernel.GetFileInformationByHandleEx.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel.CloseHandle.restype = wintypes.BOOL
+    # Deny writes/deletion while hashing and streaming this exact retained file.
+    # OPEN_REPARSE_POINT opens a final alias itself so it can be rejected.
+    handle = kernel.CreateFileW(str(path), 0x80000000, 0x1, None, 3, 0x00200000, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        require(kernel.GetFileType(handle) == 1, 'Upload input is not a disk file.')
+        info = AttributeTagInfo()
+        if not kernel.GetFileInformationByHandleEx(handle, 9, ctypes.byref(info), ctypes.sizeof(info)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        require(not info.attributes & (0x10 | 0x400), 'Package input is a directory or reparse point.')
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        handle = None  # The CRT descriptor now owns the native handle.
+        return descriptor
+    finally:
+        if handle is not None:
+            kernel.CloseHandle(handle)
+
+
+def _open_descriptor(path):
+    if sys.platform == 'win32':
+        return _open_windows_descriptor(path)
+    return os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+
+
+def _regular(metadata):
+    return stat.S_ISREG(metadata.st_mode) and not getattr(metadata, 'st_file_attributes', 0) & 0x400
+
+
+@contextmanager
+def regular_file(path):
+    expected = path.lstat()
+    require(_regular(expected), 'Package input is not a regular file or is a reparse point.')
+    descriptor = _open_descriptor(path)
+    try:
+        stream = os.fdopen(descriptor, 'rb')
+    except BaseException:
+        os.close(descriptor)
+        raise
+    with stream:
+        opened = os.fstat(stream.fileno())
+        require(_regular(opened) and opened.st_ino != 0
+            and (opened.st_dev, opened.st_ino) == (expected.st_dev, expected.st_ino),
+            'Opened package input is not the verified directory entry.')
+        yield stream
+
+
 def digest(path):
     result = hashlib.sha256()
-    with path.open('rb') as stream:
+    with regular_file(path) as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b''):
             result.update(block)
     return result.hexdigest()
@@ -51,8 +125,8 @@ def digest(path):
 
 def read_json(path):
     try:
-        with path.open(encoding='utf-8') as stream:
-            value = json.load(stream)
+        with regular_file(path) as stream:
+            value = json.loads(stream.read().decode('utf-8'))
     except (OSError, ValueError):
         raise ReleaseError(f'Cannot read JSON file: {path.name}') from None
     require(isinstance(value, dict), f'Expected an object in {path.name}')
@@ -101,7 +175,8 @@ def local_assets(options):
     sums_path = package / 'SHA256SUMS'
     require(sums_path.is_file() and not sums_path.is_symlink(), 'Missing regular package checksums.')
     try:
-        lines = sums_path.read_text(encoding='ascii').splitlines()
+        with regular_file(sums_path) as stream:
+            lines = stream.read().decode('ascii').splitlines()
     except (OSError, ValueError):
         raise ReleaseError('Cannot read original package checksums.') from None
     actual = {}
@@ -166,8 +241,7 @@ class GitHub:
         if asset is not None:
             headers.update({'Content-Type': asset.content_type, 'Content-Length': str(asset.size)})
             if isinstance(asset.body, Path):
-                descriptor = os.open(asset.body, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-                body_context = os.fdopen(descriptor, 'rb')
+                body_context = regular_file(asset.body)
             else:
                 body_context = nullcontext(asset.body)
         try:
@@ -196,37 +270,55 @@ class GitHub:
         print('Verified GitHub account: AnuarAbitay', flush=True)
 
     def verify_ci(self, source_sha):
-        workflow = self.request(f'/repos/{REPOSITORY}/actions/workflows/ci.yml')
+        for filename, name, jobs in CI_WORKFLOWS:
+            self.verify_workflow(source_sha, filename, name, jobs)
+
+    def verify_workflow(self, source_sha, filename, name, required_jobs):
+        path = f'.github/workflows/{filename}'
+        workflow = self.request(f'/repos/{REPOSITORY}/actions/workflows/{filename}')
         require(
             isinstance(workflow, dict)
-            and workflow.get('name') == 'CI'
-            and workflow.get('path') == '.github/workflows/ci.yml'
-            and isinstance(workflow.get('id'), int),
-            'Expected the repository CI workflow.',
+            and workflow.get('name') == name
+            and workflow.get('path') == path
+            and type(workflow.get('id')) is int and workflow['id'] > 0,
+            f'Expected the repository {filename} workflow.',
         )
         query = urllib.parse.urlencode({'head_sha': source_sha, 'status': 'success', 'per_page': 100})
         response = self.request(f"/repos/{REPOSITORY}/actions/workflows/{workflow['id']}/runs?{query}")
-        require(isinstance(response, dict) and isinstance(response.get('workflow_runs'), list), 'Unexpected CI run inventory.')
+        require(isinstance(response, dict) and isinstance(response.get('workflow_runs'), list)
+            and all(isinstance(run, dict) for run in response['workflow_runs']), 'Unexpected CI run inventory.')
         runs = [run for run in response['workflow_runs'] if (
-            run.get('name') == 'CI'
+            run.get('name') == name
+            and run.get('path') == path
+            and type(run.get('workflow_id')) is int
             and run.get('workflow_id') == workflow['id']
+            and type(run.get('id')) is int and run['id'] > 0
             and run.get('head_sha') == source_sha
             and run.get('status') == 'completed'
             and run.get('conclusion') == 'success'
             and run.get('event') in ('push', 'workflow_dispatch')
-            and run.get('head_repository', {}).get('full_name') == REPOSITORY
+            and isinstance(run.get('head_repository'), dict)
+            and run['head_repository'].get('full_name') == REPOSITORY
+            and isinstance(run.get('repository'), dict)
+            and run['repository'].get('full_name') == REPOSITORY
         )]
         for run in runs:
             response = self.request(f"/repos/{REPOSITORY}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")
-            require(isinstance(response, dict) and isinstance(response.get('jobs'), list), 'Unexpected CI job inventory.')
+            require(isinstance(response, dict) and isinstance(response.get('jobs'), list)
+                and all(isinstance(job, dict) for job in response['jobs']), 'Unexpected CI job inventory.')
             jobs = response['jobs']
-            if (response.get('total_count') == len(CI_JOBS)
-                    and len(jobs) == len(CI_JOBS)
-                    and {job.get('name') for job in jobs} == CI_JOBS
-                    and all(job.get('status') == 'completed' and job.get('conclusion') == 'success' for job in jobs)):
-                print(json.dumps({'verifiedCiRun': run['id'], 'sourceSha': source_sha, 'successfulJobs': len(jobs)}), flush=True)
+            if (type(response.get('total_count')) is int
+                    and response['total_count'] == len(required_jobs)
+                    and len(jobs) == len(required_jobs)
+                    and all(isinstance(job.get('name'), str) for job in jobs)
+                    and {job.get('name') for job in jobs} == required_jobs
+                    and all(job.get('status') == 'completed' and job.get('conclusion') == 'success'
+                        and type(job.get('run_id')) is int and job['run_id'] == run['id']
+                        and job.get('head_sha') == source_sha for job in jobs)):
+                print(json.dumps({'workflow': filename, 'verifiedCiRun': run['id'],
+                    'sourceSha': source_sha, 'successfulJobs': len(jobs)}), flush=True)
                 return
-        raise ReleaseError('The exact source SHA must have a successful CI run with all 10 required jobs.')
+        raise ReleaseError(f'The exact source SHA must have a successful {filename} run with all {len(required_jobs)} required jobs.')
 
     def verify_tag(self, tag, source_sha):
         ref = self.request(f'/repos/{REPOSITORY}/git/ref/tags/{tag}')

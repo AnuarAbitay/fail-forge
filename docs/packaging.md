@@ -17,7 +17,9 @@ This page is for preparing and checking the archive.
 
 - Build on Linux or macOS on an `aarch64` or `x86_64` host with Rust/Cargo, a C
   linker, Git and `tar`. The package command targets the native Rust host; it is not a
-  cross-compilation interface.
+  cross-compilation interface. Windows x64 uses the MSVC toolchain and PowerShell
+  requirements in the [Windows guide](windows.md); the shell examples below are
+  for Linux and macOS.
 - Install the matching `rust-src` and `rust-docs` components for that toolchain.
   Packaging retains their Rust runtime license notices and fails if the required
   notice files are missing; it does not download these components itself.
@@ -97,6 +99,9 @@ release keeps the archive name above and names the external manifest
 contains two entries: that target's archive and renamed external manifest.
 These names let users download and verify one platform's files independently.
 The local packager continues to emit `SHA256SUMS` and `package-manifest.json`.
+The manual release workflow also supports `x86_64-pc-windows-msvc` for future
+releases, with the same archive, manifest and checksum naming. The published
+beta.3 assets remain unchanged.
 
 The archive has one top-level directory:
 
@@ -238,4 +243,8 @@ not a successful regression run or a completed license review of the binary.
   archive with a fresh-cache smoke check, and uploads only to a pre-created
   draft release. Uploads require the repository's explicitly verified
   `AnuarAbitay` personal credential; the workflow does not publish the draft.
-  The final release is published after checking both targets' uploaded files.
+  Each upload requires successful `ci.yml` (10 jobs) and `windows.yml` (4 jobs)
+  runs for the exact source SHA. Windows packaging, checksum verification,
+  relocation, fresh-cache smoke and credential-free uploader validation share
+  the same PowerShell script between native CI and the release workflow.
+  The final release is published after checking all three targets' uploaded files.

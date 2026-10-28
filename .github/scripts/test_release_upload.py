@@ -20,10 +20,28 @@ module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
+CI_JOBS = {
+    'Stable / ubuntu-latest', 'Stable / macos-latest',
+    'Rust 1.85.1 / ubuntu-latest', 'Rust 1.85.1 / macos-latest',
+    'Documentation', 'Dart 3.13.0 minimum / ubuntu-latest',
+    'Flutter 3.47.7 / ubuntu-latest', 'Flutter 3.47.7 / macos-latest',
+    'Flutter stable / ubuntu-latest', 'Flutter stable / macos-latest',
+}
+WINDOWS_JOBS = {
+    'Native Rust / windows-latest', 'Native Dart compiler launch paths',
+    'Flutter 3.47.7 / windows-latest', 'Flutter stable / windows-latest',
+}
+WORKFLOWS = {
+    'ci': ('ci.yml', 'CI', 11, 22, CI_JOBS),
+    'windows': ('windows.yml', 'Windows native', 33, 44, WINDOWS_JOBS),
+}
+
 
 class GitHubFixture(module.GitHub):
-    def __init__(self, scenario='success'):
+    def __init__(self, scenario='success', *, workflow=None, defect=None):
         self.scenario = scenario
+        self.workflow = workflow
+        self.defect = defect
         self.calls = []
 
     def request(self, path, *, asset=None):
@@ -33,18 +51,63 @@ class GitHubFixture(module.GitHub):
         if asset:
             return {'id': 123, 'name': asset.name, 'state': 'uploaded', 'size': asset.size,
                     'uploader': {'login': module.ACCOUNT}, 'digest': f'sha256:{asset.sha256}'}
-        if path.endswith('/actions/workflows/ci.yml'):
-            return {'id': 11, 'name': 'other' if self.scenario == 'workflow' else 'CI', 'path': '.github/workflows/ci.yml'}
-        if '/actions/workflows/11/runs?' in path:
-            return {'workflow_runs': [{'id': 22, 'name': 'CI', 'workflow_id': 11,
-                'head_sha': 'b' * 40 if self.scenario == 'ci-sha' else 'a' * 40,
-                'status': 'completed', 'conclusion': 'failure' if self.scenario == 'ci-failure' else 'success',
-                'event': 'push', 'head_repository': {'full_name': module.REPOSITORY}}]}
-        if '/actions/runs/22/jobs?' in path:
-            jobs = [{'name': name, 'status': 'completed', 'conclusion': 'success'} for name in sorted(module.CI_JOBS)]
-            if self.scenario == 'ci-skipped':
-                jobs[0]['conclusion'] = 'skipped'
-            return {'total_count': len(jobs), 'jobs': jobs}
+        legacy = {'workflow': 'workflow-name', 'ci-sha': 'sha',
+            'ci-failure': 'failure', 'ci-skipped': 'job-skipped'}
+        for scope, (filename, name, workflow_id, run_id, required) in WORKFLOWS.items():
+            defect = self.defect if scope == self.workflow else None
+            if scope == 'ci' and self.scenario in legacy:
+                defect = legacy[self.scenario]
+            workflow_path = f'.github/workflows/{filename}'
+            if path.endswith(f'/actions/workflows/{filename}'):
+                value = {'id': workflow_id, 'name': name, 'path': workflow_path}
+                if defect == 'workflow-name':
+                    value['name'] = 'other'
+                if defect == 'workflow-path':
+                    value['path'] = '.github/workflows/other.yml'
+                if defect == 'workflow-id':
+                    value['id'] = 0
+                if defect == 'workflow-bool-id':
+                    value['id'] = True
+                return value
+            if f'/actions/workflows/{workflow_id}/runs?' in path:
+                run = {'id': run_id, 'name': name, 'path': workflow_path,
+                    'workflow_id': workflow_id, 'head_sha': 'a' * 40,
+                    'status': 'completed', 'conclusion': 'success', 'event': 'push',
+                    'head_repository': {'full_name': module.REPOSITORY},
+                    'repository': {'full_name': module.REPOSITORY}}
+                for field, bad in [('name', 'other'), ('path', 'other.yml'),
+                        ('workflow_id', 999), ('id', None), ('head_sha', 'b' * 40),
+                        ('status', 'in_progress'), ('event', 'pull_request')]:
+                    if defect == {'head_sha': 'sha', 'workflow_id': 'run-workflow-id',
+                            'id': 'run-id', 'status': 'pending'}.get(field, f'run-{field}'):
+                        run[field] = bad
+                if defect == 'failure':
+                    run['conclusion'] = 'failure'
+                if defect == 'head-repository':
+                    run['head_repository']['full_name'] = 'other/fail-forge'
+                if defect == 'repository':
+                    run['repository']['full_name'] = 'other/fail-forge'
+                return {'workflow_runs': [] if defect == 'missing' else [run]}
+            if f'/actions/runs/{run_id}/jobs?' in path:
+                jobs = [{'name': name, 'run_id': run_id, 'head_sha': 'a' * 40,
+                    'status': 'completed', 'conclusion': 'success'} for name in sorted(required)]
+                if defect == 'job-skipped':
+                    jobs[0]['conclusion'] = 'skipped'
+                if defect == 'job-failure':
+                    jobs[0]['conclusion'] = 'failure'
+                if defect == 'job-pending':
+                    jobs[0]['status'] = 'queued'
+                if defect == 'job-name':
+                    jobs[0]['name'] = 'unexpected job'
+                if defect == 'job-duplicate':
+                    jobs[-1]['name'] = jobs[0]['name']
+                if defect == 'job-run-id':
+                    jobs[0]['run_id'] = 999
+                if defect == 'job-sha':
+                    jobs[0]['head_sha'] = 'b' * 40
+                if defect == 'job-missing':
+                    jobs.pop()
+                return {'total_count': len(jobs) + (defect == 'job-count'), 'jobs': jobs}
         if '/git/ref/tags/' in path:
             return {'ref': 'refs/tags/v0.1.0-beta.3', 'object': {
                 'type': 'tag' if self.scenario == 'annotated' else 'commit',
@@ -93,16 +156,33 @@ class ReleaseTests(unittest.TestCase):
     def write_json(self, name, value):
         (self.root / name).write_text(json.dumps(value))
 
+    def use_target(self, target):
+        self.options.target = target
+        self.archive_name = f'failforge-{self.options.version}-{target}.tar.gz'
+        (self.root / self.archive_name).write_bytes(b'fixture archive')
+        self.manifest.update(target=target, archive=self.archive_name, archiveRoot=self.archive_name[:-7])
+        self.write_json('package-manifest.json', self.manifest)
+        self.manifest_hash = module.digest(self.root / 'package-manifest.json')
+        (self.root / 'SHA256SUMS').write_text(
+            f'{module.digest(self.root / self.archive_name)}  {self.archive_name}\n'
+            f'{self.manifest_hash}  package-manifest.json\n')
+        self.smoke['results']['packageManifestSha256'] = self.manifest_hash
+        self.write_json('smoke.json', self.smoke)
+
     def test_validation_only_needs_no_credentials_or_network(self):
-        result = subprocess.run([sys.executable, str(SOURCE), '--version', self.options.version,
-            '--source-sha', self.options.source_sha, '--target', self.options.target,
-            '--package-dir', str(self.root), '--smoke-summary', str(self.options.smoke_summary),
-            '--validate-only'], capture_output=True, text=True, check=True)
-        self.assertEqual(len(json.loads(result.stdout)['assets']), 3)
+        for target in ['x86_64-unknown-linux-gnu', 'aarch64-apple-darwin', 'x86_64-pc-windows-msvc']:
+            self.use_target(target)
+            with self.subTest(target=target):
+                result = subprocess.run([sys.executable, str(SOURCE), '--version', self.options.version,
+                    '--source-sha', self.options.source_sha, '--target', self.options.target,
+                    '--package-dir', str(self.root), '--smoke-summary', str(self.options.smoke_summary),
+                    '--validate-only'], capture_output=True, text=True, check=True)
+                self.assertEqual(len(json.loads(result.stdout)['assets']), 3)
 
     def test_actual_workflow_input_and_actor_guards(self):
         workflow = SOURCE.parent.parent / 'workflows' / 'release.yml'
-        match = re.search(r"python3 - <<'PY'\n(.*?)\n\s*PY\n", workflow.read_text(), re.DOTALL)
+        match = re.search(r'^        shell: python\n        run: \|\n((?:          [^\n]*\n|\s*\n)+)',
+            workflow.read_text(), re.MULTILINE)
         self.assertIsNotNone(match)
         validation = textwrap.dedent(match[1])
         environment = {'RELEASE_VERSION': self.options.version, 'RELEASE_SOURCE_SHA': self.options.source_sha,
@@ -122,6 +202,14 @@ class ReleaseTests(unittest.TestCase):
         assets = module.local_assets(self.options)
         self.assertEqual(assets[1].name, 'package-manifest-x86_64-unknown-linux-gnu.json')
         self.assertEqual(assets[2].name, 'SHA256SUMS-x86_64-unknown-linux-gnu')
+        self.assertEqual(assets[2].body.decode().splitlines(), [
+            f'{assets[0].sha256}  {assets[0].name}', f'{assets[1].sha256}  {assets[1].name}'])
+
+    def test_windows_target_has_distinct_archive_manifest_and_checksum_names(self):
+        self.use_target('x86_64-pc-windows-msvc')
+        assets = module.local_assets(self.options)
+        self.assertEqual([asset.name for asset in assets], [self.archive_name,
+            'package-manifest-x86_64-pc-windows-msvc.json', 'SHA256SUMS-x86_64-pc-windows-msvc'])
         self.assertEqual(assets[2].body.decode().splitlines(), [
             f'{assets[0].sha256}  {assets[0].name}', f'{assets[1].sha256}  {assets[1].name}'])
 
@@ -169,6 +257,84 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(captured['body'], (self.root / self.archive_name).read_bytes())
         self.assertEqual(captured['headers']['Authorization'], 'Bearer test-token')
 
+    def test_windows_transport_does_not_fall_back_to_missing_posix_flags(self):
+        asset = module.local_assets(self.options)[0]
+        native_open = lambda path: os.open(path, os.O_RDONLY | (os.O_BINARY if os.name == 'nt' else 0))
+        github = module.GitHub('test-token')
+        response = io.BytesIO(b'{}')
+        response.status = 201
+        github.opener = SimpleNamespace(open=lambda request, timeout: response)
+        with patch.object(module.sys, 'platform', 'win32'), \
+                patch.object(module.os, 'O_NOFOLLOW', None, create=True), \
+                patch.object(module.os, 'O_NONBLOCK', None, create=True), \
+                patch.object(module, '_open_windows_descriptor', side_effect=native_open, create=True) as opened:
+            github.request(f'https://uploads.github.com/repos/{module.REPOSITORY}/releases/99/assets', asset=asset)
+        opened.assert_called_once_with(asset.body)
+
+    def test_transport_rejects_same_bytes_replaced_file_before_streaming(self):
+        asset = module.local_assets(self.options)[0]
+        replacement = self.root / 'replacement'
+        replacement.write_bytes(asset.body.read_bytes())
+        original_open = getattr(module, '_open_descriptor', None)
+        sent = []
+
+        def swap_then_open(path):
+            os.replace(replacement, path)
+            return original_open(path)
+
+        github = module.GitHub('test-token')
+
+        def send(*args, **kwargs):
+            sent.append(True)
+            response = io.BytesIO(b'{}')
+            response.status = 201
+            return response
+
+        github.opener = SimpleNamespace(open=send)
+        with patch.object(module, '_open_descriptor', side_effect=swap_then_open, create=True):
+            with self.assertRaises(module.ReleaseError):
+                github.request(f'https://uploads.github.com/repos/{module.REPOSITORY}/releases/99/assets', asset=asset)
+        self.assertFalse(sent)
+
+    def test_transport_rejects_alias_swapped_after_metadata_check(self):
+        asset = module.local_assets(self.options)[0]
+        original_open = module._open_descriptor
+        original = self.root / 'original-archive'
+        sent = []
+
+        def replace_with_alias(path):
+            path.rename(original)
+            path.symlink_to(original.name)
+            return original_open(path)
+
+        github = module.GitHub('test-token')
+        github.opener = SimpleNamespace(open=lambda *args, **kwargs: sent.append(True))
+        with patch.object(module, '_open_descriptor', side_effect=replace_with_alias):
+            with self.assertRaises(module.ReleaseError):
+                github.request(f'https://uploads.github.com/repos/{module.REPOSITORY}/releases/99/assets', asset=asset)
+        self.assertFalse(sent)
+        asset.body.unlink()  # A rejected native reparse handle must already be closed.
+
+    @unittest.skipUnless(sys.platform == 'win32', 'native Windows file-sharing semantics')
+    def test_windows_transport_retains_handle_against_write_and_rename_during_send(self):
+        asset = module.local_assets(self.options)[0]
+        expected = asset.body.read_bytes()
+        github = module.GitHub('test-token')
+
+        def send(request, timeout):
+            with self.assertRaises(OSError):
+                with asset.body.open('r+b'):
+                    pass
+            with self.assertRaises(OSError):
+                asset.body.rename(self.root / 'renamed')
+            self.assertEqual(request.data.read(), expected)
+            response = io.BytesIO(b'{}')
+            response.status = 201
+            return response
+
+        github.opener = SimpleNamespace(open=send)
+        github.request(f'https://uploads.github.com/repos/{module.REPOSITORY}/releases/99/assets', asset=asset)
+
     def test_http_failure_does_not_expose_response_body_or_token(self):
         github = module.GitHub('private-test-token')
 
@@ -208,16 +374,45 @@ class ReleaseTests(unittest.TestCase):
                     github.upload(self.options, assets)
             self.assertFalse(any(asset for _, asset in github.calls))
 
+    def test_every_target_requires_both_exact_source_workflows_before_upload(self):
+        defects = ['workflow-name', 'workflow-path', 'workflow-id', 'workflow-bool-id',
+            'missing', 'sha', 'failure', 'pending', 'head-repository', 'repository',
+            'run-name', 'run-path', 'run-workflow-id', 'run-id', 'run-event',
+            'job-skipped', 'job-failure', 'job-pending', 'job-name', 'job-duplicate',
+            'job-run-id', 'job-sha', 'job-missing', 'job-count']
+        for target in ['x86_64-unknown-linux-gnu', 'aarch64-apple-darwin', 'x86_64-pc-windows-msvc']:
+            self.use_target(target)
+            assets = module.local_assets(self.options)
+            for workflow in WORKFLOWS:
+                for defect in defects:
+                    github = GitHubFixture(workflow=workflow, defect=defect)
+                    with self.subTest(target=target, workflow=workflow, defect=defect), \
+                            contextlib.redirect_stdout(io.StringIO()):
+                        with self.assertRaises(module.ReleaseError):
+                            github.upload(self.options, assets)
+                        self.assertFalse(any(asset for _, asset in github.calls))
+
+    def test_successful_both_workflows_are_checked_before_first_upload(self):
+        github = GitHubFixture()
+        with contextlib.redirect_stdout(io.StringIO()):
+            github.upload(self.options, module.local_assets(self.options))
+        first_upload = next(index for index, (_, asset) in enumerate(github.calls) if asset)
+        verified = [path for path, _ in github.calls[:first_upload]]
+        self.assertTrue(any('/actions/runs/22/jobs?' in path for path in verified))
+        self.assertTrue(any('/actions/runs/44/jobs?' in path for path in verified))
+
     def test_success_and_annotated_tag_upload_three_assets_without_publish(self):
-        assets = module.local_assets(self.options)
-        for scenario in ['success', 'annotated']:
-            github = GitHubFixture(scenario)
-            with contextlib.redirect_stdout(io.StringIO()):
-                github.upload(self.options, assets)
-            self.assertEqual(sum(asset is not None for _, asset in github.calls), 3)
-            self.assertEqual(github.calls[0][0], '/user')
-            self.assertTrue(all('/assets?name=' in path for path, asset in github.calls if asset))
-            self.assertFalse(any('/releases/tags/' in path for path, _ in github.calls))
+        for target in ['x86_64-unknown-linux-gnu', 'aarch64-apple-darwin', 'x86_64-pc-windows-msvc']:
+            self.use_target(target)
+            assets = module.local_assets(self.options)
+            for scenario in ['success', 'annotated']:
+                github = GitHubFixture(scenario)
+                with self.subTest(target=target, scenario=scenario), contextlib.redirect_stdout(io.StringIO()):
+                    github.upload(self.options, assets)
+                self.assertEqual(sum(asset is not None for _, asset in github.calls), 3)
+                self.assertEqual(github.calls[0][0], '/user')
+                self.assertTrue(all('/assets?name=' in path for path, asset in github.calls if asset))
+                self.assertFalse(any('/releases/tags/' in path for path, _ in github.calls))
 
     def test_package_change_after_validation_stops_before_upload(self):
         assets = module.local_assets(self.options)

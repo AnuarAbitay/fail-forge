@@ -33,6 +33,8 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: macos-latest
             target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
     env:
       RELEASE_VERSION: ${{ inputs.version }}
       RELEASE_SOURCE_SHA: ${{ inputs.source_ref }}
@@ -40,11 +42,9 @@ jobs:
       CARGO_TERM_COLOR: always
       FLUTTER_SUPPRESS_ANALYTICS: 'true'
     steps:
-      - name: Validate release inputs and check out the exact public tag revision
-        shell: bash
+      - name: Validate release inputs and account
+        shell: python
         run: |
-          set -euo pipefail
-          python3 - <<'PY'
           import os
           import re
           version = os.environ['RELEASE_VERSION']
@@ -60,7 +60,11 @@ jobs:
               raise SystemExit('Only AnuarAbitay may dispatch native release uploads.')
           if os.environ['GITHUB_REF'] not in ('refs/heads/main', f'refs/tags/v{version}'):
               raise SystemExit('Dispatch must use main or the expected release tag.')
-          PY
+      - name: Check out the exact public tag revision on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
           public_git() {
             GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
               GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false \
@@ -74,17 +78,43 @@ jobs:
           public_git fetch --quiet --no-tags --depth=1 \
             "https://github.com/AnuarAbitay/fail-forge.git" "refs/tags/v$RELEASE_VERSION"
           test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$RELEASE_SOURCE_SHA"
+      - name: Check out the exact public tag revision on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:GIT_CONFIG_NOSYSTEM = '1'
+          $env:GIT_CONFIG_GLOBAL = Join-Path $env:RUNNER_TEMP 'anonymous-gitconfig'
+          [IO.File]::WriteAllText($env:GIT_CONFIG_GLOBAL, '')
+          $env:GIT_TERMINAL_PROMPT = '0'
+          git init --quiet $env:GITHUB_WORKSPACE
+          git -c credential.helper= -c http.extraHeader= fetch --quiet --no-tags --depth=1 'https://github.com/AnuarAbitay/fail-forge.git' $env:RELEASE_SOURCE_SHA
+          git -c core.autocrlf=false checkout --quiet --detach FETCH_HEAD
+          if ((git rev-parse HEAD) -ne $env:RELEASE_SOURCE_SHA) { throw 'Checkout SHA differs from release source' }
+          git -c credential.helper= -c http.extraHeader= fetch --quiet --no-tags --depth=1 'https://github.com/AnuarAbitay/fail-forge.git' "refs/tags/v$env:RELEASE_VERSION"
+          if ((git rev-parse 'FETCH_HEAD^{commit}') -ne $env:RELEASE_SOURCE_SHA) { throw 'Release tag differs from source SHA' }
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rust-src, rust-docs
       - name: Install the pinned Flutter SDK and verify its archive
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
           cargo run -p failforge-tools --locked -- install-test-flutter \
             --version 3.47.7 --destination "$RUNNER_TEMP"
           echo "PUB_CACHE=$RUNNER_TEMP/pub-cache" >> "$GITHUB_ENV"
+      - name: Install the pinned Windows Flutter SDK and verify its archive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          cargo run -p failforge-tools --locked -- install-test-flutter --version 3.47.7 --destination $env:RUNNER_TEMP
+          "PUB_CACHE=$(Join-Path $env:RUNNER_TEMP 'pub-cache')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Build the native archive with the exact embedded version
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
@@ -93,6 +123,7 @@ jobs:
             --expected-version "$RELEASE_VERSION" \
             --output "$RUNNER_TEMP/release-package"
       - name: Verify checksums and smoke-test the relocated archive with a fresh cache
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
@@ -106,7 +137,15 @@ jobs:
             --installation "$RUNNER_TEMP/moved release installation" \
             --dart-sdk "$RUNNER_TEMP/flutter/bin/cache/dart-sdk" \
             --output "$RUNNER_TEMP/release-smoke"
+      - name: Build and verify the relocated Windows archive with a fresh cache
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          & .github/scripts/windows_release_package.ps1 -Installation $env:GITHUB_WORKSPACE -DartSdk (Join-Path $env:RUNNER_TEMP 'flutter/bin/cache/dart-sdk') -PackageDirectory (Join-Path $env:RUNNER_TEMP 'release-package') -SmokeOutput (Join-Path $env:RUNNER_TEMP 'release-smoke') -ExpectedVersion $env:RELEASE_VERSION
       - name: Verify the personal account and upload only to the existing draft release
+        if: runner.os != 'Windows'
         env:
           RELEASE_UPLOAD_TOKEN: ${{ secrets.RELEASE_UPLOAD_TOKEN }}
         shell: bash
@@ -118,3 +157,12 @@ jobs:
             --target "$EXPECTED_TARGET" \
             --package-dir "$RUNNER_TEMP/release-package" \
             --smoke-summary "$RUNNER_TEMP/release-smoke/summary.json"
+      - name: Verify the personal account and upload Windows only to the existing draft release
+        if: runner.os == 'Windows'
+        env:
+          RELEASE_UPLOAD_TOKEN: ${{ secrets.RELEASE_UPLOAD_TOKEN }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          python .github/scripts/release_upload.py --version $env:RELEASE_VERSION --source-sha $env:RELEASE_SOURCE_SHA --target $env:EXPECTED_TARGET --package-dir (Join-Path $env:RUNNER_TEMP 'release-package') --smoke-summary (Join-Path $env:RUNNER_TEMP 'release-smoke/summary.json')
