@@ -8,11 +8,16 @@ or build the tagged source. The historical beta.3 downloads are Linux/macOS only
 
 - Windows 10 version 1809 or newer, x64, with a local NTFS working directory.
 - PowerShell and the Windows `tar.exe` utility for archive installation.
+- Native archives require the latest supported
+  [Microsoft Visual C++ v14 Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
+  for x64. Install it before first running either FailForge executable;
+  [Microsoft's x64 installer](https://aka.ms/vc14/vc_redist.x64.exe) supplies the runtime.
 - A prepared stable Dart SDK `>=3.13.0 <4.0.0`, or Flutter containing that SDK.
   Flutter projects require the Flutter SDK and prepared Flutter dependencies.
 - Source builds additionally require Git, Rust 1.85.1 or newer using
   `x86_64-pc-windows-msvc`, Visual Studio Build Tools with the Desktop development
-  with C++ workload and a Windows SDK. Archive users do not need Rust or Cargo.
+  with C++ workload and a Windows SDK. Archive users do not need Rust, Cargo or
+  MSVC build tools.
 
 Windows ARM64, network shares, and filesystems without the required file ID,
 locking, ACL, hard-link and atomic rename operations are outside this port's
