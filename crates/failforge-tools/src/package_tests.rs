@@ -26,6 +26,7 @@ fn tracked() -> Vec<String> {
         "target/debug/fixture",
         "docs/private.md",
         "docs/doctor.md",
+        "docs/windows.md",
         ".env",
         "AGENTS.md",
     ]
@@ -53,6 +54,10 @@ fn payload_allowlist_excludes_tests_tool_state_secrets_and_untracked_sources() {
     assert!(selected.contains("adapters/dart/lib/engine.dart"));
     assert!(selected.contains("third-party/inventory.json"));
     assert!(selected.contains("docs/doctor.md"));
+    assert!(
+        selected.contains("docs/windows.md"),
+        "shipped installation documentation links to the Windows guide"
+    );
     for path in [
         "adapters/dart/lib/untracked.dart",
         "adapters/dart/lib/.env",
