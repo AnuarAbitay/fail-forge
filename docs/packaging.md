@@ -1,12 +1,9 @@
 # Build a local beta archive
 
-For the unreleased native Windows port, use the [Windows source build guide](windows.md).
-The published beta.3 archives remain Linux/macOS only.
-
 `failforge-tools package` builds a native FailForge archive for the machine on
-which it runs. The examples package source version `0.1.0-beta.3`. Published
+which it runs. The examples package source version `0.1.0-beta.4`. Published
 archives and verification files belong to the
-[beta.3 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.3).
+[beta.4 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.4).
 Creating a local archive does not publish a GitHub release or establish that
 other platforms have passed.
 
@@ -49,7 +46,7 @@ From the source checkout:
 rustup component add rust-src rust-docs
 cargo run -p failforge-tools --locked -- package \
   --output /absolute/new-beta-output \
-  --expected-version 0.1.0-beta.3
+  --expected-version 0.1.0-beta.4
 ```
 
 If the tool is already built, select the source checkout explicitly:
@@ -58,7 +55,7 @@ If the tool is already built, select the source checkout explicitly:
 target/debug/failforge-tools package \
   --installation /absolute/path/to/fail-forge-source \
   --output /absolute/another-new-beta-output \
-  --expected-version 0.1.0-beta.3
+  --expected-version 0.1.0-beta.4
 ```
 
 For this developer command, `--installation` identifies the source checkout to
@@ -83,7 +80,7 @@ A successful macOS arm64 package of this version produces:
 
 ```text
 new-beta-output/
-  failforge-0.1.0-beta.3-aarch64-apple-darwin.tar.gz
+  failforge-0.1.0-beta.4-aarch64-apple-darwin.tar.gz
   SHA256SUMS
   package-manifest.json
 ```
@@ -91,22 +88,21 @@ new-beta-output/
 The target component changes for other native hosts. Keep the checksum file and
 manifest with the corresponding archive.
 
-Beta.3 release assets use the verified targets `x86_64-unknown-linux-gnu`
-(Linux x86_64) and `aarch64-apple-darwin` (macOS arm64). For each target, the
-release keeps the archive name above and names the external manifest
-`package-manifest-<target>.json`. Its bytes match the packager's
+Beta.4 release assets use `x86_64-unknown-linux-gnu` (Linux x86_64),
+`aarch64-apple-darwin` (macOS arm64) and `x86_64-pc-windows-msvc` (Windows x64).
+For each target, the release keeps the archive name above and names the external
+manifest `package-manifest-<target>.json`. Its bytes match the packager's
 `package-manifest.json`. A release checksum file named `SHA256SUMS-<target>`
 contains two entries: that target's archive and renamed external manifest.
 These names let users download and verify one platform's files independently.
 The local packager continues to emit `SHA256SUMS` and `package-manifest.json`.
-The manual release workflow also supports `x86_64-pc-windows-msvc` for future
-releases, with the same archive, manifest and checksum naming. The published
-beta.3 assets remain unchanged.
+Each target has three release assets. Historical beta.3 assets remain
+Linux/macOS only.
 
 The archive has one top-level directory:
 
 ```text
-failforge-0.1.0-beta.3-aarch64-apple-darwin/
+failforge-0.1.0-beta.4-aarch64-apple-darwin/
   bin/
     failforge
     failforge-adapter-campaign
@@ -126,6 +122,8 @@ failforge-0.1.0-beta.3-aarch64-apple-darwin/
   THIRD_PARTY_NOTICES.md
   third-party/
 ```
+
+Windows uses `failforge.exe` and `failforge-adapter-campaign.exe` in `bin/`.
 
 `package-manifest.json` records the version, target, source revision and dirty
 state, toolchain/build information, and the paths, sizes and hashes of packaged
@@ -148,7 +146,7 @@ Run the generated checksum check from its output directory:
 ```sh
 cd /absolute/new-beta-output
 shasum -a 256 -c SHA256SUMS
-tar -tzf failforge-0.1.0-beta.3-aarch64-apple-darwin.tar.gz
+tar -tzf failforge-0.1.0-beta.4-aarch64-apple-darwin.tar.gz
 ```
 
 On systems providing `sha256sum`, `sha256sum -c SHA256SUMS` is an alternative.
@@ -173,9 +171,9 @@ new directory outside the installation and SDK. Supply a stable Dart SDK
 SDK still needs its own compatibility checks. The command prepares
 the adapter and its own small Dart test fixture with `pub get --enforce-lockfile`,
 using a fresh Pub cache in its output directory. It invokes the installed CLI
-through a symlink from another working directory, checks help/version, generates
-a profile and runs one classical boolean mutant through both direct and YAML
-commands. It checks matching mutant identities, the selected installation,
+from another working directory (through a symlink on Unix), checks help/version,
+generates a profile and runs one classical boolean mutant through both direct
+and YAML commands. It checks matching mutant identities, the selected installation,
 source preservation, reports and working-copy cleanup. It also checks the CLI
 version against the package manifest and verifies the listed payload files'
 hashes, sizes and executable permissions before and after the run.

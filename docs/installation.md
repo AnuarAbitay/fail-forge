@@ -1,23 +1,21 @@
 # Installation and first run
 
-For the unreleased native Windows port, use the [Windows source build guide](windows.md).
-The published beta.3 archives remain Linux/macOS only.
-
-This guide covers FailForge `0.1.0-beta.3`. Obtain a native archive and matching
+This guide covers FailForge `0.1.0-beta.4`. Obtain a native archive and matching
 verification files from the
-[beta.3 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.3),
+[beta.4 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.4),
 or build the tagged source. Choose the operating system and architecture listed
 for the archive. Developers can also
 produce a local archive with the [packaging command](packaging.md).
 Read the [beta limitations](beta-limitations.md) before running a campaign.
-The broader Dart SDK range below is included in beta.3; older releases retain
+For PowerShell commands, follow the [Windows installation guide](windows.md).
+The broader Dart SDK range below was introduced in beta.3; older releases retain
 their original SDK constraints.
 
 ## Requirements
 
 | Requirement | Current support |
 | --- | --- |
-| Operating system | Linux or macOS. Windows is unsupported. Platform support does not imply that every distribution or architecture has been tested. |
+| Operating system | Linux, macOS, or Windows 10 version 1809 or newer on x64 with local NTFS. Platform support does not imply that every distribution or architecture has been tested. See the [Windows scope](windows.md#requirements). |
 | Rust for source builds | Rust and Cargo 1.85.1 or newer, with the platform's C linker. Not required when using a prepared native archive. |
 | Dart adapter SDK | Stable Dart `>=3.13.0 <4.0.0`. A Flutter installation may supply this Dart SDK. |
 | Target package | One standalone Dart or Flutter package with a passing `test` or `flutter_test` suite and prepared dependencies. |
@@ -44,14 +42,15 @@ permissions; working-copy isolation is not a security sandbox.
 ### Install from an archive
 
 Choose one target and obtain its three matching files from the
-[release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.3).
+[release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.4).
 
 | Platform | Target |
 | --- | --- |
 | Linux x86_64 | `x86_64-unknown-linux-gnu` |
 | macOS arm64 | `aarch64-apple-darwin` |
+| Windows x64 | `x86_64-pc-windows-msvc` |
 
-- `failforge-0.1.0-beta.3-<target>.tar.gz`
+- `failforge-0.1.0-beta.4-<target>.tar.gz`
 - `package-manifest-<target>.json`
 - `SHA256SUMS-<target>`
 
@@ -59,8 +58,9 @@ Check that the release's version and target match your installation. GitHub's
 automatically generated source archives do not contain the native executables;
 use the named `.tar.gz` asset or follow [Build from source](#build-from-source).
 
-Verify the checksum in the directory containing those files, then extract into
-a new parent directory:
+Windows users should follow the [PowerShell archive steps](windows.md#install-from-an-archive).
+On Linux or macOS, verify the checksum in the directory containing those files,
+then extract into a new parent directory:
 
 ```sh
 cd /absolute/path/to/archive-directory
@@ -72,9 +72,9 @@ Continue only when every checksum reports `OK`:
 
 ```sh
 mkdir /absolute/path/to/new-install-parent
-tar -xzf "failforge-0.1.0-beta.3-$FAILFORGE_TARGET.tar.gz" \
+tar -xzf "failforge-0.1.0-beta.4-$FAILFORGE_TARGET.tar.gz" \
   -C /absolute/path/to/new-install-parent
-export FAILFORGE_HOME="/absolute/path/to/new-install-parent/failforge-0.1.0-beta.3-$FAILFORGE_TARGET"
+export FAILFORGE_HOME="/absolute/path/to/new-install-parent/failforge-0.1.0-beta.4-$FAILFORGE_TARGET"
 export PATH="$FAILFORGE_HOME/bin:$PATH"
 failforge --version
 failforge --help
@@ -83,7 +83,7 @@ failforge --help
 On Linux, set `FAILFORGE_TARGET=x86_64-unknown-linux-gnu` and use
 `sha256sum -c "SHA256SUMS-$FAILFORGE_TARGET"` instead of `shasum` if preferred.
 Each target's checksum file verifies its archive and manifest, so you do not
-need the other platform's files. Obtain all three from the same trusted source;
+need the other platforms' files. Obtain all three from the same trusted source;
 a checksum is not a digital signature.
 
 The extraction example uses the macOS arm64 target; choose the Linux target
@@ -102,12 +102,13 @@ Obtain the versioned source from the
 [FailForge repository](https://github.com/AnuarAbitay/fail-forge):
 
 ```sh
-git clone --branch v0.1.0-beta.3 --depth 1 \
+git clone --branch v0.1.0-beta.4 --depth 1 \
   https://github.com/AnuarAbitay/fail-forge.git
 ```
 
-The following examples use a POSIX shell. Set `FAILFORGE_HOME` to the absolute
-path of that checkout:
+The following examples use a POSIX shell; Windows source builds use the
+[MSVC instructions](windows.md#build-from-source). Set `FAILFORGE_HOME` to the
+absolute path of that checkout:
 
 ```sh
 export FAILFORGE_HOME="/absolute/path/to/fail-forge"
@@ -289,7 +290,7 @@ selects another destination; replacing an existing file requires `--force`.
 Historical note: for the `0.1.0-beta.1` archive, add `--output
 profiles/lib/src/calculator.yml` and `--dart-sdk "$DART_SDK"` (or
 `--flutter-sdk "$FLUTTER_SDK"`). Explicit SDK options remain supported in
-`0.1.0-beta.3` as well.
+the current release as well.
 
 Generation analyzes applicability and writes explicit operator switches. It
 does not run the target's tests. If no selected operator has a statically valid
@@ -373,6 +374,8 @@ documentation and project/dependency license materials. You can also arrange it
 manually with executables built for the destination operating system and
 architecture. When distributing it, preserve the licenses, notices and inventory
 described in the [dependency license review](dependency-licenses.md#distribution-boundaries).
+Windows executables have the `.exe` suffix; see the
+[PowerShell relocation and preparation steps](windows.md#install-from-an-archive).
 
 Prepare the adapter at its final location using a compatible SDK:
 

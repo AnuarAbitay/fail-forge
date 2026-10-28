@@ -1,55 +1,133 @@
-# Windows source build
+# Windows installation and source build
 
-Native Windows support is being developed in `feature/windows-support`. It is
-not included in the published `0.1.0-beta.3` archives. No new beta is required
-to build and test this branch.
+FailForge `0.1.0-beta.4` includes a native Windows x64 archive. Use the
+[beta.4 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.4)
+or build the tagged source. The historical beta.3 downloads are Linux/macOS only.
 
 ## Requirements
 
 - Windows 10 version 1809 or newer, x64, with a local NTFS working directory.
-- Rust 1.85.1 or newer using `x86_64-pc-windows-msvc`, Visual Studio Build Tools
-  with the Desktop development with C++ workload and a Windows SDK.
-- Git and PowerShell. Packaging also uses the Windows `tar.exe` utility.
+- PowerShell and the Windows `tar.exe` utility for archive installation.
 - A prepared stable Dart SDK `>=3.13.0 <4.0.0`, or Flutter containing that SDK.
   Flutter projects require the Flutter SDK and prepared Flutter dependencies.
+- Source builds additionally require Git, Rust 1.85.1 or newer using
+  `x86_64-pc-windows-msvc`, Visual Studio Build Tools with the Desktop development
+  with C++ workload and a Windows SDK. Archive users do not need Rust or Cargo.
 
 Windows ARM64, network shares, and filesystems without the required file ID,
 locking, ACL, hard-link and atomic rename operations are outside this port's
 verification scope. Reparse points in controlled working copies and reports
-are rejected. A source checkout can use a normal directory with spaces or
-Unicode in its path.
+are rejected. An installation or source checkout can use a normal directory
+with spaces or Unicode in its path.
 
-## Build and prepare
+## Install from an archive
 
-Run these commands from the repository root in a Developer PowerShell where
-the MSVC linker is available. Adjust the SDK path to your installation:
+Download these three matching assets from the release:
+
+- `failforge-0.1.0-beta.4-x86_64-pc-windows-msvc.tar.gz`
+- `package-manifest-x86_64-pc-windows-msvc.json`
+- `SHA256SUMS-x86_64-pc-windows-msvc`
+
+In PowerShell, change to their download directory and verify both entries in the
+checksum file before extracting. Obtain all three files from the same trusted
+source; checksums are not digital signatures.
 
 ```powershell
-$env:FAILFORGE_HOME = (Get-Location).Path
-$env:DART_SDK = 'C:\tools\flutter\bin\cache\dart-sdk'
-cargo build --workspace --locked
-if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
-& "$env:DART_SDK\bin\dart.exe" --suppress-analytics pub get --enforce-lockfile --directory adapters/dart
-if ($LASTEXITCODE -ne 0) { throw 'Adapter preparation failed' }
-$env:PATH = "$env:FAILFORGE_HOME\target\debug;$env:DART_SDK\bin;$env:PATH"
+$ErrorActionPreference = 'Stop'
+Set-Location 'C:\Downloads\FailForge'
+$target = 'x86_64-pc-windows-msvc'
+$archiveRoot = "failforge-0.1.0-beta.4-$target"
+$expected = @("$archiveRoot.tar.gz", "package-manifest-$target.json")
+$checked = @{}
+foreach ($line in Get-Content "SHA256SUMS-$target") {
+    if ($line -notmatch '^([0-9a-f]{64})  ([A-Za-z0-9._-]+)$') { throw 'Invalid checksum record' }
+    $name = $Matches[2]
+    $hash = $Matches[1]
+    if ($expected -notcontains $name -or $checked.ContainsKey($name)) { throw 'Unexpected checksum entry' }
+    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $name).Hash.ToLowerInvariant() -ne $hash) { throw "Checksum mismatch: $name" }
+    $checked[$name] = $true
+}
+if ($checked.Count -ne 2) { throw 'Missing archive or manifest checksum' }
 ```
 
-Keep `failforge.exe` and `failforge-adapter-campaign.exe` together. The adapter
-sources and their prepared dependencies are also required; copying the CLI
-executable alone is insufficient.
-
-Prepare your target package's dependencies, change to its root, and check the
-installation:
+Choose new extraction and installation directories. This example moves the
+installation before preparing its adapter:
 
 ```powershell
-failforge doctor --installation "$env:FAILFORGE_HOME" --dart-sdk "$env:DART_SDK"
+$parent = 'C:\tools\failforge-extracted'
+New-Item -ItemType Directory $parent | Out-Null
+tar.exe -xzf "$archiveRoot.tar.gz" -C $parent
+if ($LASTEXITCODE -ne 0) { throw 'Archive extraction failed' }
+$env:FAILFORGE_HOME = 'C:\tools\FailForge'
+if (Test-Path -LiteralPath $env:FAILFORGE_HOME) { throw 'Choose a new installation directory' }
+Move-Item -LiteralPath (Join-Path $parent $archiveRoot) -Destination $env:FAILFORGE_HOME
+$env:PATH = "$env:FAILFORGE_HOME\bin;$env:PATH"
+failforge --version
+if ($LASTEXITCODE -ne 0) { throw 'CLI startup failed' }
+failforge --help
+```
+
+Keep the entire installation together, including `bin\failforge.exe`,
+`bin\failforge-adapter-campaign.exe`, adapter sources and license material.
+Continue with [Prepare the adapter and target](#prepare-the-adapter-and-target).
+If you move the installation again, prepare the adapter at its new location.
+The environment settings above apply to the current PowerShell session.
+
+## Build from source
+
+In a Developer PowerShell where the MSVC linker is available:
+
+```powershell
+$ErrorActionPreference = 'Stop'
+git clone --branch v0.1.0-beta.4 --depth 1 https://github.com/AnuarAbitay/fail-forge.git
+if ($LASTEXITCODE -ne 0) { throw 'Source download failed' }
+Set-Location fail-forge
+$env:FAILFORGE_HOME = (Get-Location).Path
+cargo build --workspace --locked
+if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+$env:PATH = "$env:FAILFORGE_HOME\target\debug;$env:PATH"
+```
+
+Keep `failforge.exe` and `failforge-adapter-campaign.exe` together in
+`target\debug`. The adapter sources and their prepared dependencies are also
+required; copying the CLI executable alone is insufficient.
+
+## Prepare the adapter and target
+
+Select the actual Dart SDK root. For Flutter, use its bundled Dart SDK after
+completing Flutter's normal setup. A standalone Dart SDK also works:
+
+```powershell
+$env:DART_SDK = 'C:\tools\flutter\bin\cache\dart-sdk'
+& "$env:DART_SDK\bin\dart.exe" --version
+if ($LASTEXITCODE -ne 0) { throw 'Dart startup failed' }
+& "$env:DART_SDK\bin\dart.exe" --suppress-analytics pub get --enforce-lockfile --directory "$env:FAILFORGE_HOME\adapters\dart"
+if ($LASTEXITCODE -ne 0) { throw 'Adapter preparation failed' }
+$env:PATH = "$env:DART_SDK\bin;$env:PATH"
+```
+
+Do not copy another machine's `.dart_tool` or Pub cache. Prepare your target
+package's dependencies, run its normal tests, then check the installation. For a
+Dart package:
+
+```powershell
+$env:FAILFORGE_PROJECT = 'C:\projects\your_package'
+Set-Location $env:FAILFORGE_PROJECT
+& "$env:DART_SDK\bin\dart.exe" pub get
+if ($LASTEXITCODE -ne 0) { throw 'Target preparation failed' }
+& "$env:DART_SDK\bin\dart.exe" test
+if ($LASTEXITCODE -ne 0) { throw 'Target tests failed' }
+failforge doctor --installation "$env:FAILFORGE_HOME" --project "$env:FAILFORGE_PROJECT" --dart-sdk "$env:DART_SDK"
+if ($LASTEXITCODE -ne 0) { throw 'Resolve the doctor diagnostics before running a campaign' }
 failforge mutate --installation "$env:FAILFORGE_HOME" --dart-sdk "$env:DART_SDK" --family classic --include 'lib/src/calculator.dart' --operator RELATIONAL_BOUNDARY
 ```
 
 Replace the example source path and operator with values applicable to your
-package. For Flutter, use `--flutter-sdk C:\tools\flutter` instead of
-`--dart-sdk`. The mutation engine invokes Flutter's prepared tool snapshot
-through `dart.exe`; it does not send project arguments through a batch shell.
+package. For Flutter, prepare and test the target with its normal `flutter pub get`
+and `flutter test` commands, then use `--flutter-sdk C:\tools\flutter` instead of
+`--dart-sdk` for `doctor` and `mutate`. The mutation engine invokes Flutter's
+prepared tool snapshot through `dart.exe`; it does not send project arguments
+through a batch shell.
 The existing [profile and replay commands](mutation-cli.md) use the same native
 Windows backend.
 

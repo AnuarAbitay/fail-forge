@@ -1,10 +1,10 @@
 # CLI contract
 
-The `run` subcommand runs external commands on Linux and macOS. The child can
-access files, the network, and other resources allowed by its OS credentials;
+The `run` subcommand runs external commands on Linux, macOS and Windows. The
+child can access files, the network, and other resources allowed by its OS credentials;
 `run` does not provide a system sandbox or interactive terminal. Mutation campaigns
 and their isolated working copies are handled by [`mutate`](mutation-cli.md).
-The unreleased Windows port uses native Job Objects; see the
+In `0.1.0-beta.4`, native Windows execution uses Job Objects; see the
 [Windows guide](windows.md) for process, argument and cancellation differences.
 The Unix-specific details below describe Linux/macOS behavior.
 

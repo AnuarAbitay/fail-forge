@@ -6,12 +6,14 @@ downloads and their verification results.
 
 ## Unreleased
 
+## 0.1.0-beta.4 — 2026-10-28
+
 ### Added
 
 - Native Windows x64 process execution, mutation campaigns, profiles and replay,
   with Job Object process ownership, private handle-based workspaces, named-pipe
-  cancellation, Windows SDK discovery and native CI coverage. See the Windows
-  source build guide; these changes are not part of the beta.3 downloads.
+  cancellation, Windows SDK discovery and native CI coverage. Native archives
+  are available for Windows x64 alongside Linux x86_64 and macOS arm64.
 - Manual Windows x64 release packaging with exact-source Linux/macOS and Windows
   CI checks before upload to an existing draft release.
 

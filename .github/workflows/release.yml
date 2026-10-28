@@ -6,7 +6,7 @@ on:
       version:
         description: Exact beta version already present in the source and draft release
         required: true
-        default: '0.1.0-beta.3'
+        default: '0.1.0-beta.4'
         type: string
       source_ref:
         description: Full immutable commit SHA referenced by the version tag

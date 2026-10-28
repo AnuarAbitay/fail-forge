@@ -7,7 +7,7 @@ starting a campaign:
 failforge doctor
 ```
 
-`doctor` was added in `0.1.0-beta.2` and is included in `0.1.0-beta.3`.
+`doctor` was added in `0.1.0-beta.2` and remains available in `0.1.0-beta.4`.
 The published `0.1.0-beta.1` archive predates this command.
 
 It reads local files and prepared dependency metadata. It does not run SDK

@@ -58,7 +58,7 @@ protocols; the public campaign calls the same implementations directly.
 
 ## Prepare the installation and target
 
-For FailForge `0.1.0-beta.3`, follow the [installation guide](installation.md)
+For FailForge `0.1.0-beta.4`, follow the [installation guide](installation.md)
 to install a matching native archive or build from source. For a source build,
 build the native executables and prepare the Dart adapter with a compatible SDK:
 
@@ -127,7 +127,7 @@ layout.
 
 ## Generate a profile
 
-Before generating a profile or starting a campaign, `0.1.0-beta.3` can
+Before generating a profile or starting a campaign, `0.1.0-beta.4` can
 check local prerequisites with `failforge doctor`. Use `failforge doctor
 --config PATH` to check an existing profile's environment and literal source
 selection. This reads local state without running tests or changing files;
