@@ -215,6 +215,18 @@ jobs:
           cargo build --release --workspace --bins --examples --locked
           $dartSdk = Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk'
           & target/debug/failforge.exe doctor --installation $env:GITHUB_WORKSPACE --project examples/flutter_fixture --flutter-sdk $env:FLUTTER_ROOT
+      - name: Run native CLI, replay, profiles, timeouts and recovery regressions
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          & target/release/failforge-tools.exe regression --binary-dir target/release --output (Join-Path $env:RUNNER_TEMP 'native-regression-windows') --dart-sdk (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk') --flutter-sdk $env:FLUTTER_ROOT
+          $summary = Get-Content (Join-Path $env:RUNNER_TEMP 'native-regression-windows/summary.json') -Raw | ConvertFrom-Json
+          $required = @('windows-console-ctrl-c', 'windows-console-ctrl-break', 'windows-console-ctrl-c-ignored', 'windows-controller-crash')
+          foreach ($name in $required) {
+            $cases = @($summary.cases | Where-Object { $_.name -eq $name })
+            if ($cases.Count -ne 1) { throw "Missing or duplicate native regression evidence: $name" }
+            $cases[0] | ConvertTo-Json -Depth 8
+          }
       - name: Run all 19 Dart semantic operators through the native CLI and VM
         run: |
           $ErrorActionPreference = 'Stop'
@@ -238,18 +250,6 @@ jobs:
           $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
           $version = ($metadata.packages | Where-Object { $_.name -eq 'failforge-cli' }).version
           & .github/scripts/windows_release_package.ps1 -Installation $env:GITHUB_WORKSPACE -DartSdk (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk') -PackageDirectory (Join-Path $env:RUNNER_TEMP 'windows-package') -SmokeOutput (Join-Path $env:RUNNER_TEMP 'windows-package-smoke') -ExpectedVersion $version
-      - name: Run native CLI, replay, profiles, timeouts and recovery regressions
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          & target/release/failforge-tools.exe regression --binary-dir target/release --output (Join-Path $env:RUNNER_TEMP 'native-regression-windows') --dart-sdk (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk') --flutter-sdk $env:FLUTTER_ROOT
-          $summary = Get-Content (Join-Path $env:RUNNER_TEMP 'native-regression-windows/summary.json') -Raw | ConvertFrom-Json
-          $required = @('windows-console-ctrl-c', 'windows-console-ctrl-break', 'windows-console-ctrl-c-ignored', 'windows-controller-crash')
-          foreach ($name in $required) {
-            $cases = @($summary.cases | Where-Object { $_.name -eq $name })
-            if ($cases.Count -ne 1) { throw "Missing or duplicate native regression evidence: $name" }
-            $cases[0] | ConvertTo-Json -Depth 8
-          }
       - name: Show bounded regression diagnostics on failure
         if: failure()
         run: |
