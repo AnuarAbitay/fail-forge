@@ -232,6 +232,11 @@ fn prepare_preamble_with<'a, R: BufRead>(
     allow_tag_directives: bool,
     mut reader: impl FnMut(&'a [u8]) -> R,
 ) -> Result<Cow<'a, str>, ConfigError> {
+    // Forced UTF-8 keeps a leading BOM in the stream, and libyaml's BOM skip
+    // advances the column: the first block key lands at column 1 and the next
+    // key at column 0 becomes a second root node. Drop that one signature here,
+    // so callers parse the prepared text rather than the original.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     // libyaml rejects unknown directives and versions other than 1.1/1.2;
     // SafeLoader ignores unknown directives and permits other 1.x minors.
     // Only the actual scanner's preamble tokens/errors identify rewrites.
@@ -252,8 +257,8 @@ fn prepare_preamble_with<'a, R: BufRead>(
                     }
                     if !matches!(minor, 1 | 2) {
                         // Scanner Mark.index counts original UTF-8 bytes, not
-                        // Unicode characters. Forcing UTF-8 keeps BOM bytes in
-                        // that index, so both token spans map directly to text.
+                        // Unicode characters. Forcing UTF-8 keeps that index in
+                        // bytes, so both token spans map directly to text.
                         let start = offset
                             + usize::try_from(token.start_mark.index)
                                 .map_err(|_| invalid_yaml())?;
@@ -713,6 +718,29 @@ mod tests {
             "\u{feff}# 🦀 café\r\n%UNKNOWN ignored\u{2028}%YAML 1.9\u{85}---\u{2029}a: value\n";
         assert_eq!(parse_yaml(source).unwrap(), json!({"a": "value"}));
         assert_eq!(parse_yaml("！: value\n").unwrap(), json!({"！": "value"}));
+    }
+
+    #[test]
+    fn leading_bom_does_not_shift_the_first_block_mapping_key() {
+        // Windows PowerShell 5.1 and several editors write UTF-8 with a BOM.
+        for (source, expected) in [
+            ("\u{feff}a: 1\nb: 2\n", json!({"a": 1, "b": 2})),
+            (
+                "\u{feff}a: 1\r\nb:\r\n  c: x\r\n",
+                json!({"a": 1, "b": {"c": "x"}}),
+            ),
+            ("\u{feff}- a\n- b\n", json!(["a", "b"])),
+            ("\u{feff}---\na: 1\nb: 2\n", json!({"a": 1, "b": 2})),
+            (
+                "\u{feff}%YAML 1.9\n---\na: 1\nb: 2\n",
+                json!({"a": 1, "b": 2}),
+            ),
+        ] {
+            assert_eq!(parse_yaml(source).unwrap(), expected, "{source:?}");
+        }
+        // Only one leading byte-order mark is an encoding signature.
+        assert!(parse_yaml("\u{feff}\u{feff}a: 1\nb: 2\n").is_err());
+        assert!(parse_yaml("a: 1\n\u{feff}b: 2\n").is_err());
     }
 
     #[test]
