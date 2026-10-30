@@ -125,29 +125,40 @@ pub(super) fn supported_version(bytes: &[u8]) -> Option<String> {
     (numbers[0] == 3 && numbers[1] >= 13).then(|| text.to_owned())
 }
 
-pub(super) fn adapter_dependencies(adapter: &Path) -> Result<usize, ()> {
-    let raw = failforge_workspace::read_regular(
-        &adapter.join("pubspec.yaml"),
-        failforge_config::MAX_YAML_BYTES,
-    )
-    .map_err(|_| ())?;
-    let text = std::str::from_utf8(&raw).map_err(|_| ())?;
-    let pubspec = failforge_config::yaml::parse_yaml(text).map_err(|_| ())?;
+/// Count the adapter's prepared packages, or name the file and failure.
+pub(super) fn adapter_dependencies(adapter: &Path) -> Result<usize, String> {
+    let pubspec_path = adapter.join("pubspec.yaml");
+    let config = adapter.join(".dart_tool/package_config.json");
+    let at = |path: &Path, cause: &dyn std::fmt::Display| {
+        format!("{}: {cause}", failforge_workspace::display_path(path))
+    };
+    let raw = failforge_workspace::read_regular(&pubspec_path, failforge_config::MAX_YAML_BYTES)
+        .map_err(|error| at(&pubspec_path, &error))?;
+    let text = std::str::from_utf8(&raw).map_err(|_| at(&pubspec_path, &"not UTF-8"))?;
+    let pubspec =
+        failforge_config::yaml::parse_yaml(text).map_err(|error| at(&pubspec_path, &error))?;
     let own = pubspec
         .get("name")
         .and_then(serde_json::Value::as_str)
         .filter(|name| !name.is_empty())
-        .ok_or(())?;
-    let packages =
-        dependency_roots(&adapter.join(".dart_tool/package_config.json")).map_err(|_| ())?;
-    if packages.get(own) != Some(&adapter.canonicalize().map_err(|_| ())?) {
-        return Err(());
+        .ok_or_else(|| at(&pubspec_path, &"no package name"))?;
+    let packages = dependency_roots(&config).map_err(|error| at(&config, &error))?;
+    let root = adapter
+        .canonicalize()
+        .map_err(|error| at(adapter, &error))?;
+    if packages.get(own) != Some(&root) {
+        return Err(at(
+            &config,
+            &format!("{own} does not resolve to the adapter root"),
+        ));
     }
     for key in ["dependencies", "dev_dependencies"] {
         if let Some(value) = pubspec.get(key).filter(|value| !value.is_null()) {
-            let entries = value.as_object().ok_or(())?;
-            if entries.keys().any(|name| !packages.contains_key(name)) {
-                return Err(());
+            let entries = value
+                .as_object()
+                .ok_or_else(|| at(&pubspec_path, &format!("{key} is not a mapping")))?;
+            if let Some(name) = entries.keys().find(|name| !packages.contains_key(*name)) {
+                return Err(at(&config, &format!("{key} entry {name} is not prepared")));
             }
         }
     }

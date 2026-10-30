@@ -5,7 +5,7 @@ use std::fs::{File, Metadata};
 use std::io;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use std::ptr::{null, null_mut};
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Security::Authorization::*;
@@ -55,6 +55,36 @@ unsafe extern "system" {
 
 fn invalid(message: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::PermissionDenied, message)
+}
+
+const STATUS_REPARSE_POINT_ENCOUNTERED: i32 = 0xC000_050B_u32 as i32;
+
+/// Convert a failed NTSTATUS. OBJ_DONT_REPARSE also stops at redirections made
+/// by file-system filter drivers (MSIX virtualization, sandboxes, sync clients)
+/// on entries without a reparse attribute. Their localized Windows message
+/// names neither the cause nor a remedy, so that status gets its own message.
+fn nt_error(status: i32) -> io::Error {
+    let code = unsafe { RtlNtStatusToDosError(status) };
+    if status == STATUS_REPARSE_POINT_ENCOUNTERED {
+        return io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "entry is redirected by a reparse point or file-system filter driver \
+                 (NTSTATUS 0xC000050B, Windows error {code}); FailForge never follows \
+                 redirections, so use a directory that is not virtualized or synchronized \
+                 (for the Pub cache, set PUB_CACHE)"
+            ),
+        );
+    }
+    io::Error::from_raw_os_error(code as i32)
+}
+
+/// Prefix an error with the path it concerns, keeping its kind.
+pub fn at_path(path: &Path, error: io::Error) -> io::Error {
+    io::Error::new(
+        error.kind(),
+        format!("{}: {error}", crate::display_path(path)),
+    )
 }
 fn checked(value: i32) -> io::Result<()> {
     if value == 0 {
@@ -212,6 +242,63 @@ pub fn information(file: &File) -> io::Result<BY_HANDLE_FILE_INFORMATION> {
     checked(unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) })?;
     Ok(info)
 }
+/// A file's identity with its size and NTFS write and change times. Closing a
+/// handle that wrote data leaves both times moved; while a writer stays open
+/// they may lag, so callers check for writers before trusting a stamp. Only a
+/// deliberate SetFileInformationByHandle can put the change time back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Stamp {
+    volume_serial: u64,
+    file_id: [u8; 16],
+    size: i64,
+    last_write: i64,
+    change: i64,
+}
+impl Stamp {
+    /// File times come from a system clock that advances in ticks of about
+    /// 15.6 ms, so two same-size writes within one tick share a stamp. Only a
+    /// stamp older than this margin can identify content, as in Git's racy
+    /// index entries.
+    const SETTLED: i64 = 2 * 10_000_000;
+
+    /// Whether the last write or change happened long enough before `now`
+    /// (100 ns units since 1601) that a later write must move the times.
+    pub fn settled_at(&self, now: i64) -> bool {
+        now.saturating_sub(self.last_write.max(self.change)) > Self::SETTLED
+    }
+
+    pub fn settled(&self) -> bool {
+        let mut now = FILETIME::default();
+        unsafe {
+            windows_sys::Win32::System::SystemInformation::GetSystemTimePreciseAsFileTime(&mut now)
+        };
+        self.settled_at((i64::from(now.dwHighDateTime) << 32) | i64::from(now.dwLowDateTime))
+    }
+}
+pub fn stamp(file: &File) -> io::Result<Stamp> {
+    fn query<T: Default>(file: &File, class: FILE_INFO_BY_HANDLE_CLASS) -> io::Result<T> {
+        let mut value = T::default();
+        checked(unsafe {
+            GetFileInformationByHandleEx(
+                file.as_raw_handle(),
+                class,
+                (&mut value as *mut T).cast(),
+                size_of::<T>() as u32,
+            )
+        })?;
+        Ok(value)
+    }
+    let id: FILE_ID_INFO = query(file, FileIdInfo)?;
+    let basic: FILE_BASIC_INFO = query(file, FileBasicInfo)?;
+    let standard: FILE_STANDARD_INFO = query(file, FileStandardInfo)?;
+    Ok(Stamp {
+        volume_serial: id.VolumeSerialNumber,
+        file_id: id.FileId.Identifier,
+        size: standard.EndOfFile,
+        last_write: basic.LastWriteTime,
+        change: basic.ChangeTime,
+    })
+}
 pub fn identity(file: &File) -> io::Result<Identity> {
     let info = information(file)?;
     let mut full = FILE_ID_INFO::default();
@@ -331,6 +418,29 @@ fn open_at(
     create: bool,
     delete: bool,
 ) -> io::Result<File> {
+    let sharing = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    open_sharing_at(parent, name, directory, writable, create, delete, sharing)
+}
+/// Whether another handle can currently write the regular file `name`. A data
+/// read that denies write sharing then fails with a sharing violation. The
+/// probe closes at once, so it never blocks a later writer.
+pub fn has_writer_at(parent: &File, name: &OsStr) -> io::Result<bool> {
+    let sharing = FILE_SHARE_READ | FILE_SHARE_DELETE;
+    match open_sharing_at(parent, name, Some(false), false, false, false, sharing) {
+        Ok(_) => Ok(false),
+        Err(error) if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION as i32) => Ok(true),
+        Err(error) => Err(error),
+    }
+}
+fn open_sharing_at(
+    parent: &File,
+    name: &OsStr,
+    directory: Option<bool>,
+    writable: bool,
+    create: bool,
+    delete: bool,
+    sharing: FILE_SHARE_MODE,
+) -> io::Result<File> {
     let mut text = valid_name(name)?;
     let mut unicode = UNICODE_STRING {
         Length: (text.len() * 2) as u16,
@@ -367,7 +477,7 @@ fn open_at(
             &mut status,
             null(),
             FILE_ATTRIBUTE_NORMAL,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            sharing,
             if create { 2 } else { 1 },
             0x0020_0020
                 | match directory {
@@ -380,9 +490,7 @@ fn open_at(
         )
     };
     if result < 0 {
-        return Err(io::Error::from_raw_os_error(
-            unsafe { RtlNtStatusToDosError(result) } as i32,
-        ));
+        return Err(nt_error(result));
     }
     let file = unsafe { File::from_raw_handle(handle) };
     require_kind(&file, directory)?;
@@ -428,10 +536,14 @@ pub fn directory(path: &Path) -> io::Result<File> {
     }
     let mut volume = prefix.as_os_str().to_os_string();
     volume.push("\\");
-    let mut file = root_handle(Path::new(&volume))?;
+    let mut current = PathBuf::from(volume);
+    let mut file = root_handle(&current).map_err(|error| at_path(&current, error))?;
     for part in components {
         match part {
-            Component::Normal(name) => file = directory_at(&file, name)?,
+            Component::Normal(name) => {
+                current.push(name);
+                file = directory_at(&file, name).map_err(|error| at_path(&current, error))?;
+            }
             _ => return Err(invalid("workspace root contains traversal")),
         }
     }
@@ -543,9 +655,7 @@ pub fn rename_handle(file: &File, parent: &File, to: &OsStr, replace: bool) -> i
         )
     };
     if result < 0 {
-        Err(io::Error::from_raw_os_error(
-            unsafe { RtlNtStatusToDosError(result) } as i32,
-        ))
+        Err(nt_error(result))
     } else {
         Ok(())
     }
@@ -603,9 +713,7 @@ fn reopen(file: &File, access: u32, directory: Option<bool>) -> io::Result<File>
         )
     };
     if result < 0 {
-        return Err(io::Error::from_raw_os_error(
-            unsafe { RtlNtStatusToDosError(result) } as i32,
-        ));
+        return Err(nt_error(result));
     }
     let reopened = unsafe { File::from_raw_handle(handle) };
     require_kind(&reopened, directory)?;
@@ -680,9 +788,7 @@ pub fn random_token() -> io::Result<String> {
         )
     };
     if status < 0 {
-        return Err(io::Error::from_raw_os_error(
-            unsafe { RtlNtStatusToDosError(status) } as i32,
-        ));
+        return Err(nt_error(status));
     }
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
@@ -730,9 +836,7 @@ pub fn link_handle(file: &File, parent: &File, to: &OsStr) -> io::Result<()> {
         )
     };
     if result < 0 {
-        Err(io::Error::from_raw_os_error(
-            unsafe { RtlNtStatusToDosError(result) } as i32,
-        ))
+        Err(nt_error(result))
     } else {
         Ok(())
     }
@@ -780,6 +884,60 @@ pub fn set_readonly(file: &File, readonly: bool) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_stamps_older_than_the_clock_margin_are_settled() {
+        let stamp = |last_write, change| Stamp {
+            volume_serial: 1,
+            file_id: [0; 16],
+            size: 3,
+            last_write,
+            change,
+        };
+        let now = 1_000 * 10_000_000;
+        let edge = now - Stamp::SETTLED;
+        assert!(!stamp(edge, edge).settled_at(now));
+        assert!(stamp(edge - 1, edge - 1).settled_at(now));
+        // The later of the two times decides.
+        assert!(!stamp(0, edge).settled_at(now));
+        assert!(!stamp(edge, 0).settled_at(now));
+        assert!(!stamp(now + 5, now + 5).settled_at(now));
+        // The live clock reads today, far after 1601 and long before the end.
+        assert!(stamp(0, 0).settled());
+        let year_3000 = 1_399 * 365 * 24 * 3600 * 10_000_000;
+        assert!(!stamp(year_3000, year_3000).settled());
+    }
+    #[test]
+    fn filter_redirection_status_names_cause_code_and_remedy() {
+        let error = nt_error(STATUS_REPARSE_POINT_ENCOUNTERED);
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        let text = error.to_string();
+        for part in ["0xC000050B", "Windows error 4395", "PUB_CACHE"] {
+            assert!(text.contains(part), "{text}");
+        }
+        // STATUS_OBJECT_NAME_NOT_FOUND keeps its ordinary Win32 error.
+        let missing = nt_error(0xC000_0034_u32 as i32);
+        assert_eq!(missing.raw_os_error(), Some(2));
+        assert_eq!(missing.kind(), io::ErrorKind::NotFound);
+    }
+    #[test]
+    fn directory_errors_name_the_first_component_that_cannot_open() {
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("ff-at-path-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let error = directory(&root.join("missing").join("deeper")).unwrap_err();
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        let text = error.to_string();
+        let expected = format!("{}: ", crate::display_path(&root.join("missing")));
+        assert!(!text.contains(r"\\?\"), "{text}");
+        assert!(text.starts_with(&expected), "{text}");
+        let path = Path::new(r"C:\data");
+        let wrapped = at_path(path, io::Error::from_raw_os_error(5));
+        assert_eq!(wrapped.kind(), io::ErrorKind::PermissionDenied);
+        assert!(wrapped.to_string().starts_with(r"C:\data: "), "{wrapped}");
+    }
     #[test]
     fn registry_routing_names_are_fixed_lowercase_and_account_scoped() {
         let sid = "S-1-5-21-3776380004-1005456608-3524014338-500";
