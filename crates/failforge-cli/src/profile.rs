@@ -138,12 +138,12 @@ async fn generate(arguments: &ProfileGenerateArgs, context: &Context) -> Result<
                 options.force,
                 Some(&draft.binding),
             )?;
-            let output = draft
-                .output
+            let output = crate::display::user_path(&draft.output);
+            let output = output
                 .to_str()
                 .ok_or_else(|| ProfileError::Config("profile output must be Unicode".into()))?;
-            let installation = context
-                .installation
+            let installation = crate::display::user_path(&context.installation);
+            let installation = installation
                 .to_str()
                 .ok_or_else(|| ProfileError::Config("installation must be Unicode".into()))?;
             emit(

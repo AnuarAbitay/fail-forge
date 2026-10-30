@@ -101,6 +101,7 @@ impl Report {
 /// Ordinary paths use portable single quotes; ANSI-C quoting keeps controls out
 /// of the diagnostic stream while preserving the argument when pasted.
 fn quote(path: &Path) -> String {
+    let path = crate::display::user_path(path);
     let value = path.to_string_lossy();
     let control = |character: char| {
         character.is_control()

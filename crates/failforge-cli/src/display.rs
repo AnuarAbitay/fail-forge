@@ -457,3 +457,8 @@ mod tests {
         runner.shutdown().await.unwrap();
     }
 }
+
+/// The spelling of a path shown to a user; Unix paths need no rewriting.
+pub(crate) fn user_path(path: &std::path::Path) -> std::path::PathBuf {
+    path.into()
+}
