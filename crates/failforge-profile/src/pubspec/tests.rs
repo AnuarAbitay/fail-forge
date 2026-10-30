@@ -52,6 +52,14 @@ fn author_aliases_merges_nulls_and_ordinary_scalar_spellings_are_supported() {
 }
 
 #[test]
+fn leading_bom_keeps_every_top_level_pubspec_key() {
+    let text =
+        "\u{feff}name: example\r\ndev_dependencies:\r\n  flutter_test:\r\n    sdk: flutter\r\n";
+    assert!(pubspec_flutter(text).unwrap());
+    assert!(pubspec_flutter("\u{feff}\u{feff}name: example\ndev_dependencies: {}\n").is_err());
+}
+
+#[test]
 fn explicit_values_override_merges_and_first_mapping_in_merge_sequence_wins() {
     let preamble = "dart: &dart {sdk: dart}\nflutter: &flutter {sdk: flutter}\n";
     assert!(

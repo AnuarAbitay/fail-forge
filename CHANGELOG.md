@@ -6,6 +6,12 @@ downloads and their verification results.
 
 ## Unreleased
 
+### Fixed
+
+- Accept a leading UTF-8 byte-order mark in mutation profiles and project
+  `pubspec.yaml` files, as written by Windows PowerShell 5.1 and some editors.
+  Such files previously failed with `invalid YAML configuration`.
+
 ## 0.1.0-beta.4 — 2026-10-28
 
 ### Added
