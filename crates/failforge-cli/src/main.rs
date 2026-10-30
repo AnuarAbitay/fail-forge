@@ -31,6 +31,7 @@ mod family_execution;
 mod family_queue;
 mod family_stream;
 mod installation;
+mod keep_awake;
 mod mutant_confirmation;
 mod mutant_execution;
 mod mutate;
@@ -104,8 +105,12 @@ fn main() -> ExitCode {
     let arguments = match cli.command {
         Commands::Run(arguments) => arguments,
         Commands::Doctor(arguments) => return doctor::execute(*arguments, &invocation_cwd),
-        Commands::Mutate(arguments) => return mutate::execute(*arguments, &invocation_cwd),
+        Commands::Mutate(arguments) => {
+            let _awake = keep_awake::KeepAwake::request();
+            return mutate::execute(*arguments, &invocation_cwd);
+        }
         Commands::Replay(arguments) => {
+            let _awake = keep_awake::KeepAwake::request();
             let (arguments, replay) = arguments.into_campaign(&invocation_cwd);
             return mutate::execute_replay(arguments, &invocation_cwd, replay);
         }
@@ -133,6 +138,7 @@ fn main() -> ExitCode {
         Commands::CampaignPublish => return campaign_publish::execute(),
         Commands::Profile(arguments) => match arguments.command {
             ProfileCommands::Generate(arguments) => {
+                let _awake = keep_awake::KeepAwake::request();
                 return profile::execute(*arguments, &invocation_cwd);
             }
         },
