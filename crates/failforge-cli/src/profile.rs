@@ -171,7 +171,12 @@ pub(crate) fn execute(arguments: ProfileGenerateArgs, invocation_cwd: &Path) -> 
             .worker_threads(1)
             .enable_all()
             .build()?;
-        runtime.block_on(generate(&arguments, &context))
+        let awake = failforge_runner::AwakeInstant::now();
+        let result = runtime.block_on(generate(&arguments, &context));
+        if let Some(note) = crate::keep_awake::sleep_note(awake.suspended_elapsed()) {
+            let _ = emit(true, note.as_bytes());
+        }
+        result
     })();
     match result {
         Ok(()) => ExitCode::SUCCESS,
