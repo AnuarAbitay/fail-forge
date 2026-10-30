@@ -19,22 +19,120 @@ const AUTHOR_TEST: &str = "controller crash tree";
 const READY_LIMIT: usize = 4096;
 const PROCESS_SYNCHRONIZE: u32 = 0x0010_0000;
 
+// Shared by the author and its child: an early grandchild failure must reach
+// the outer reporter with its stderr, rather than becoming an opaque EOF.
+const DART_READINESS: &str = r#"const stderrLimit = 8192;
+const readinessLimit = 4096;
+
+class StderrCapture {
+  final bytes = BytesBuilder(copy: false);
+  final done = Completer<void>();
+  int total = 0;
+  String? error;
+
+  StderrCapture(Stream<List<int>> stream) {
+    stream.listen((chunk) {
+      total += chunk.length;
+      final remaining = stderrLimit - bytes.length;
+      if (remaining > 0) {
+        bytes.add(chunk.sublist(0,
+            chunk.length < remaining ? chunk.length : remaining));
+      }
+    }, onError: (Object failure) {
+      final text = failure.toString();
+      error = text.substring(0, text.length < 512 ? text.length : 512);
+    }, onDone: () => done.complete());
+  }
+
+  Map<String, dynamic> snapshot() => {
+    'bytesRead': total,
+    'retainedBytes': bytes.length,
+    'limitBytes': stderrLimit,
+    'truncated': total > bytes.length,
+    'complete': done.isCompleted,
+    'error': error,
+    'text': utf8.decode(bytes.toBytes(), allowMalformed: true),
+  };
+}
+
+Future<String> readyLine(Process child) async {
+  final bytes = BytesBuilder(copy: false);
+  await for (final chunk in child.stdout) {
+    for (final byte in chunk) {
+      if (byte == 10) return utf8.decode(bytes.toBytes());
+      if (bytes.length == readinessLimit) {
+        throw StateError('readiness stdout exceeds its byte limit');
+      }
+      bytes.addByte(byte);
+    }
+  }
+  throw StateError('readiness stdout closed without a complete line');
+}
+
+Future<Map<String, dynamic>> ready(Process child, {
+  required String role,
+  required String program,
+  required List<String> arguments,
+  required String helperUri,
+}) async {
+  // Drain immediately and keep draining after the retained prefix is full.
+  // Success does not wait for stderr EOF: the process must stay at its barrier.
+  final stderr = StderrCapture(child.stderr);
+  try {
+    final line = await readyLine(child).timeout(const Duration(seconds: 45));
+    final value = jsonDecode(line);
+    if (value is! Map<String, dynamic>) {
+      throw StateError('readiness JSON is not an object');
+    }
+    return value;
+  } catch (failure) {
+    Object exitCode;
+    try {
+      exitCode = await child.exitCode.timeout(const Duration(seconds: 2));
+    } on TimeoutException {
+      exitCode = 'still running after exit observation deadline';
+    }
+    try {
+      await stderr.done.future.timeout(const Duration(seconds: 2));
+    } on TimeoutException {
+      // Preserve the available prefix and explicitly mark the drain incomplete.
+    }
+    Object helperExists;
+    try {
+      helperExists = File.fromUri(Uri.parse(helperUri)).existsSync();
+    } catch (_) {
+      helperExists = 'cannot inspect helper URI';
+    }
+    final text = failure.toString();
+    throw StateError('crash helper readiness failed: ${jsonEncode({
+      'role': role,
+      'program': program,
+      'arguments': arguments,
+      'directory': Directory.current.path,
+      'helperUri': helperUri,
+      'helperExists': helperExists,
+      'resolvedExecutable': Platform.resolvedExecutable,
+      'pid': child.pid,
+      'exitCode': exitCode,
+      'failure': text.substring(0, text.length < 512 ? text.length : 512),
+      'stderr': stderr.snapshot(),
+    })}');
+  }
+}
+"#;
+
 // Every descendant waits on an owned pipe, rather than sleeping for an assumed
 // startup interval. The author only announces readiness after both generations
 // and a separate background watcher have announced their own PIDs.
-const TREE_HELPER: &str = r#"import 'dart:convert';
-import 'dart:io';
-
-Future<Map<String, dynamic>> ready(Process child) async =>
-    jsonDecode(await child.stdout.transform(utf8.decoder)
-        .transform(const LineSplitter()).first) as Map<String, dynamic>;
-
-Future<void> main(List<String> arguments) async {
+const TREE_HELPER: &str = r#"Future<void> main(List<String> arguments) async {
   final role = arguments.single;
   if (role == 'child') {
-    final grandchild = await Process.start(Platform.resolvedExecutable,
-        ['--disable-dart-dev', Platform.script.toString(), 'grandchild']);
-    final observed = await ready(grandchild);
+    final program = Platform.resolvedExecutable;
+    final helper = Platform.script.toString();
+    final arguments = ['--disable-dart-dev', helper, 'grandchild'];
+    final grandchild = await Process.start(program, arguments);
+    final observed = await ready(grandchild, role: 'grandchild',
+        program: program, arguments: arguments, helperUri: helper);
     if (observed['role'] != 'grandchild' || observed['pid'] != grandchild.pid) {
       throw StateError('grandchild readiness mismatch');
     }
@@ -56,28 +154,37 @@ Future<void> main(List<String> arguments) async {
 }
 "#;
 
+fn tree_helper_source() -> String {
+    format!(
+        "import 'dart:async';\nimport 'dart:convert';\nimport 'dart:io';\nimport 'dart:typed_data';\n\n{DART_READINESS}\n{TREE_HELPER}"
+    )
+}
+
 fn author_source(port: u16, nonce: &str) -> Result<String> {
     let nonce = serde_json::to_string(nonce)?;
     Ok(format!(
-        r#"import 'dart:convert';
+        r#"import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:campaign_sample/value.dart';
 import 'package:test/test.dart';
 
-Future<Map<String, dynamic>> ready(Process child) async =>
-    jsonDecode(await child.stdout.transform(utf8.decoder)
-        .transform(const LineSplitter()).first) as Map<String, dynamic>;
+{DART_READINESS}
 
 void main() {{
   test('{AUTHOR_TEST}', () async {{
     if (!keepGoing()) return;
     final helper = File('tool/crash_tree.dart').absolute.uri.toString();
-    final child = await Process.start(Platform.resolvedExecutable,
-        ['--disable-dart-dev', helper, 'child']);
-    final tree = await ready(child);
-    final watcher = await Process.start(Platform.resolvedExecutable,
-        ['--disable-dart-dev', helper, 'watcher']);
-    final background = await ready(watcher);
+    final program = Platform.resolvedExecutable;
+    final childArguments = ['--disable-dart-dev', helper, 'child'];
+    final child = await Process.start(program, childArguments);
+    final tree = await ready(child, role: 'child', program: program,
+        arguments: childArguments, helperUri: helper);
+    final watcherArguments = ['--disable-dart-dev', helper, 'watcher'];
+    final watcher = await Process.start(program, watcherArguments);
+    final background = await ready(watcher, role: 'watcher', program: program,
+        arguments: watcherArguments, helperUri: helper);
     if (tree['role'] != 'child' || tree['pid'] != child.pid ||
         background['role'] != 'watcher' || background['pid'] != watcher.pid) {{
       throw StateError('descendant readiness mismatch');
@@ -370,7 +477,7 @@ impl Harness {
             &author_source(listener.local_addr()?.port(), &nonce)?,
         )?;
         fs::create_dir(project.join("tool"))?;
-        fs::write(project.join("tool/crash_tree.dart"), TREE_HELPER)?;
+        fs::write(project.join("tool/crash_tree.dart"), tree_helper_source())?;
         let mut empty = profile();
         empty["mutations"]
             .as_object_mut()
