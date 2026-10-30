@@ -29,17 +29,19 @@ fn run() -> io::Result<u8> {
             unsafe { windows_sys::Win32::System::Threading::ExitProcess(code) }
         }
         "console-state" => {
-            // GetConsoleCP is zero when no console is attached, independently
-            // of whether stdout itself is a redirected pipe or regular file.
+            let (error, members) = console_members()?;
             let code_page = unsafe { windows_sys::Win32::System::Console::GetConsoleCP() };
-            writeln!(io::stdout(), "{code_page}")?;
+            writeln!(io::stdout(), "console-pid {}", std::process::id())?;
+            writeln!(io::stdout(), "console-code-page {code_page}")?;
+            writeln!(io::stdout(), "console-query-error {error}")?;
+            write_members("console-members", &members)?;
             Ok(0)
         }
         "console-owner" => {
-            let code_page = unsafe { windows_sys::Win32::System::Console::GetConsoleCP() };
-            if code_page == 0 {
+            let (error, members) = console_members()?;
+            if error != 0 || !members.contains(&std::process::id()) {
                 return Err(io::Error::other(
-                    "console-owner requires an attached console",
+                    "console-owner must observe itself in its attached console",
                 ));
             }
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -72,7 +74,8 @@ fn run() -> io::Result<u8> {
                         "console-state child did not finish cleanly",
                     ));
                 }
-                write!(io::stdout(), "owner-console {code_page}\nchild-console ")?;
+                writeln!(io::stdout(), "owner-pid {}", std::process::id())?;
+                write_members("owner-members", &members)?;
                 io::stdout().write_all(&result.stdout.tail)?;
                 Ok(0)
             })
@@ -200,6 +203,42 @@ fn run() -> io::Result<u8> {
         _ => Ok(2),
     }
 }
+
+fn console_members() -> io::Result<(u32, Vec<u32>)> {
+    use windows_sys::Win32::Foundation::{ERROR_INVALID_HANDLE, GetLastError};
+    use windows_sys::Win32::System::Console::GetConsoleProcessList;
+
+    let mut members = vec![0; 8];
+    loop {
+        let count = unsafe { GetConsoleProcessList(members.as_mut_ptr(), members.len() as u32) };
+        if count == 0 {
+            let error = unsafe { GetLastError() };
+            return if error == ERROR_INVALID_HANDLE {
+                Ok((error, Vec::new()))
+            } else {
+                Err(io::Error::from_raw_os_error(error as i32))
+            };
+        }
+        if count > 128 {
+            return Err(io::Error::other("unexpectedly large fixture console"));
+        }
+        if count as usize > members.len() {
+            members.resize(count as usize, 0);
+        } else {
+            members.truncate(count as usize);
+            return Ok((0, members));
+        }
+    }
+}
+
+fn write_members(label: &str, members: &[u32]) -> io::Result<()> {
+    write!(io::stdout(), "{label}")?;
+    for member in members {
+        write!(io::stdout(), " {member}")?;
+    }
+    writeln!(io::stdout())
+}
+
 fn write_pattern(mut writer: impl Write, mut count: usize) -> io::Result<()> {
     let block = [b'x'; 8192];
     while count > 0 {

@@ -13,7 +13,7 @@ use std::os::windows::process::CommandExt;
 use std::path::{Component, Path, PathBuf, Prefix};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+use windows_sys::Win32::Foundation::{ERROR_INVALID_HANDLE, WAIT_OBJECT_0};
 use windows_sys::Win32::Storage::FileSystem::{
     LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY, LockFileEx,
 };
@@ -144,7 +144,7 @@ async fn native_control_c_exit_status_is_not_reclassified_as_cancellation() {
 }
 
 #[test]
-fn runner_child_has_no_console_even_when_its_owner_has_a_new_console() {
+fn runner_child_does_not_share_its_owners_console() {
     let directory = Directory::new();
     let stdout = directory.0.join("console-stdout");
     let stderr = directory.0.join("console-stderr");
@@ -174,17 +174,31 @@ fn runner_child_has_no_console_even_when_its_owner_has_a_new_console() {
     );
     let output = std::fs::read_to_string(stdout).unwrap();
     let lines: Vec<_> = output.lines().collect();
-    assert_eq!(lines.len(), 2, "{output}");
-    assert_ne!(
-        lines[0]
-            .strip_prefix("owner-console ")
+    assert_eq!(lines.len(), 6, "{output}");
+    let number =
+        |line: &str, prefix: &str| line.strip_prefix(prefix).unwrap().parse::<u32>().unwrap();
+    let members = |line: &str, prefix: &str| -> Vec<u32> {
+        line.strip_prefix(prefix)
             .unwrap()
-            .parse::<u32>()
-            .unwrap(),
-        0,
-        "the fixture must establish a real parent console"
-    );
-    assert_eq!(lines[1], "child-console 0");
+            .split_whitespace()
+            .map(|value| value.parse().unwrap())
+            .collect()
+    };
+    let owner = number(lines[0], "owner-pid ");
+    assert!(members(lines[1], "owner-members").contains(&owner));
+    let child = number(lines[2], "console-pid ");
+    assert_ne!(owner, child);
+    // A private hidden console may have a normal code page. Membership, not
+    // code-page value or redirected stdout, establishes console isolation.
+    let _code_page = number(lines[3], "console-code-page ");
+    let error = number(lines[4], "console-query-error ");
+    let child_members = members(lines[5], "console-members");
+    assert!(!child_members.contains(&owner), "{output}");
+    match error {
+        0 => assert!(child_members.contains(&child), "{output}"),
+        ERROR_INVALID_HANDLE => assert!(child_members.is_empty(), "{output}"),
+        _ => panic!("console membership query failed: {output}"),
+    }
 }
 
 #[tokio::test]
