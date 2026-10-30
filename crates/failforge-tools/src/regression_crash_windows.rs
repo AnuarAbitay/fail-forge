@@ -5,6 +5,7 @@
 //! evidence; the next public campaign, not a fabricated lease, recovers it.
 use super::*;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::io::{self, Read};
 use std::net::{TcpListener, TcpStream};
 use std::os::windows::ffi::OsStringExt;
@@ -78,11 +79,21 @@ Future<Map<String, dynamic>> ready(Process child, {
   // Drain immediately and keep draining after the retained prefix is full.
   // Success does not wait for stderr EOF: the process must stay at its barrier.
   final stderr = StderrCapture(child.stderr);
+  Object? observedRole;
+  Object? observedPid;
   try {
     final line = await readyLine(child).timeout(const Duration(seconds: 45));
     final value = jsonDecode(line);
     if (value is! Map<String, dynamic>) {
       throw StateError('readiness JSON is not an object');
+    }
+    observedRole = value['role'];
+    observedPid = value['pid'];
+    if (observedRole != role) {
+      throw StateError('readiness role mismatch');
+    }
+    if (observedPid is! int || observedPid <= 0 || observedPid > 0xffffffff) {
+      throw StateError('readiness VM pid is not a positive Windows process ID');
     }
     return value;
   } catch (failure) {
@@ -113,6 +124,9 @@ Future<Map<String, dynamic>> ready(Process child, {
       'helperExists': helperExists,
       'resolvedExecutable': Platform.resolvedExecutable,
       'pid': child.pid,
+      'launcherPid': child.pid,
+      'observedRole': observedRole,
+      'observedPid': observedPid,
       'exitCode': exitCode,
       'failure': text.substring(0, text.length < 512 ? text.length : 512),
       'stderr': stderr.snapshot(),
@@ -133,11 +147,9 @@ const TREE_HELPER: &str = r#"Future<void> main(List<String> arguments) async {
     final grandchild = await Process.start(program, arguments);
     final observed = await ready(grandchild, role: 'grandchild',
         program: program, arguments: arguments, helperUri: helper);
-    if (observed['role'] != 'grandchild' || observed['pid'] != grandchild.pid) {
-      throw StateError('grandchild readiness mismatch');
-    }
     stdout.writeln(jsonEncode({'role': role, 'pid': pid,
-        'grandchildPid': grandchild.pid}));
+        'grandchildLauncherPid': grandchild.pid,
+        'grandchildPid': observed['pid']}));
     await stdout.flush();
     await stdin.drain<void>();
     // Keep the Process and its stdin capability live across the readiness wait.
@@ -185,14 +197,12 @@ void main() {{
     final watcher = await Process.start(program, watcherArguments);
     final background = await ready(watcher, role: 'watcher', program: program,
         arguments: watcherArguments, helperUri: helper);
-    if (tree['role'] != 'child' || tree['pid'] != child.pid ||
-        background['role'] != 'watcher' || background['pid'] != watcher.pid) {{
-      throw StateError('descendant readiness mismatch');
-    }}
     final barrier = await Socket.connect(InternetAddress.loopbackIPv4, {port});
     barrier.writeln(jsonEncode({{'nonce': {nonce}, 'authorPid': pid,
-        'childPid': child.pid, 'grandchildPid': tree['grandchildPid'],
-        'watcherPid': watcher.pid}}));
+        'childLauncherPid': child.pid, 'childPid': tree['pid'],
+        'grandchildLauncherPid': tree['grandchildLauncherPid'],
+        'grandchildPid': tree['grandchildPid'],
+        'watcherLauncherPid': watcher.pid, 'watcherPid': background['pid']}}));
     await barrier.flush();
     // The harness retains its peer until the controller has actually died.
     await barrier.drain<void>();
@@ -211,19 +221,94 @@ void main() {{
 struct Ready {
     nonce: String,
     author_pid: u32,
+    child_launcher_pid: u32,
     child_pid: u32,
+    grandchild_launcher_pid: u32,
     grandchild_pid: u32,
+    watcher_launcher_pid: u32,
     watcher_pid: u32,
 }
 
+impl Ready {
+    fn process_roles(
+        &self,
+        controller: u32,
+        reporter: Option<u32>,
+    ) -> Result<BTreeMap<u32, Vec<&'static str>>> {
+        let vms = [
+            self.author_pid,
+            self.child_pid,
+            self.grandchild_pid,
+            self.watcher_pid,
+        ];
+        ensure(
+            controller != 0
+                && vms.iter().all(|pid| *pid != 0 && *pid != controller)
+                && vms.into_iter().collect::<BTreeSet<_>>().len() == vms.len(),
+            format!("crash fixture VM identities overlap: controller={controller}, VMs={vms:?}"),
+        )?;
+        let bindings = [
+            ("author-child", self.child_launcher_pid, self.child_pid),
+            (
+                "author-grandchild",
+                self.grandchild_launcher_pid,
+                self.grandchild_pid,
+            ),
+            (
+                "background-watcher",
+                self.watcher_launcher_pid,
+                self.watcher_pid,
+            ),
+        ];
+        let mut launchers = BTreeSet::new();
+        for (role, launcher, vm) in bindings {
+            ensure(
+                launcher != 0
+                    && launcher != controller
+                    && launchers.insert(launcher)
+                    && (!vms.contains(&launcher) || launcher == vm),
+                format!(
+                    "invalid crash fixture identity: role={role}, pid={vm}, launcherPid={launcher}, controller={controller}"
+                ),
+            )?;
+        }
+        let mut roles: BTreeMap<u32, Vec<&'static str>> = BTreeMap::new();
+        for (role, pid) in [
+            ("controller-and-native-owner", controller),
+            ("author-test-vm", self.author_pid),
+            ("author-child-launcher", self.child_launcher_pid),
+            ("author-child-vm", self.child_pid),
+            ("author-grandchild-launcher", self.grandchild_launcher_pid),
+            ("author-grandchild-vm", self.grandchild_pid),
+            ("background-watcher-launcher", self.watcher_launcher_pid),
+            ("background-watcher-vm", self.watcher_pid),
+        ] {
+            roles.entry(pid).or_default().push(role);
+        }
+        if let Some(pid) = reporter {
+            ensure(
+                pid != 0
+                    && pid != controller
+                    && (!roles.contains_key(&pid) || pid == self.author_pid),
+                format!(
+                    "invalid Dart reporter identity: role=dart-test-runner, pid={pid}, authorPid={}",
+                    self.author_pid
+                ),
+            )?;
+            roles.entry(pid).or_default().push("dart-test-runner");
+        }
+        Ok(roles)
+    }
+}
+
 struct Process {
-    role: &'static str,
+    roles: Vec<&'static str>,
     pid: u32,
     image: PathBuf,
     handle: OwnedHandle,
 }
 impl Process {
-    fn open(role: &'static str, pid: u32) -> Result<Self> {
+    fn open(roles: Vec<&'static str>, pid: u32) -> Result<Self> {
         ensure(pid != 0, "fixture announced an invalid process ID")?;
         // SAFETY: these PIDs come from our nonce-bound fixture barrier or the
         // matching live reporter capture; each process is still held at ready.
@@ -254,14 +339,17 @@ impl Process {
             return Err(io::Error::last_os_error().into());
         }
         let process = Self {
-            role,
+            roles,
             pid,
             image: std::ffi::OsString::from_wide(&name[..length as usize]).into(),
             handle,
         };
         ensure(
             process.alive()?,
-            format!("{role} exited before the crash barrier"),
+            format!(
+                "{} exited before the crash barrier",
+                process.roles.join("/")
+            ),
         )?;
         Ok(process)
     }
@@ -293,7 +381,8 @@ impl Process {
             }
             WAIT_TIMEOUT => Err(format!(
                 "{} (PID {}) survived the controller crash deadline",
-                self.role, self.pid
+                self.roles.join("/"),
+                self.pid
             )
             .into()),
             _ => Err(io::Error::last_os_error().into()),
@@ -301,7 +390,7 @@ impl Process {
     }
 
     fn observation(&self) -> Value {
-        json!({"role":self.role,"pid":self.pid,"image":self.image})
+        json!({"roles":self.roles,"pid":self.pid,"image":self.image})
     }
 }
 impl Drop for Process {
@@ -377,17 +466,7 @@ fn ready(
     }
     let observed: Ready = serde_json::from_slice(&bytes)?;
     ensure(observed.nonce == nonce, "foreign crash barrier response")?;
-    let pids = [
-        observed.author_pid,
-        observed.child_pid,
-        observed.grandchild_pid,
-        observed.watcher_pid,
-    ];
-    ensure(
-        pids.into_iter().all(|pid| pid != 0 && pid != owner.0.id())
-            && pids.into_iter().collect::<BTreeSet<_>>().len() == pids.len(),
-        "crash fixture process identities overlap",
-    )?;
+    observed.process_roles(owner.0.id(), None)?;
     Ok((stream, observed))
 }
 
@@ -544,18 +623,13 @@ impl Harness {
             )?;
             std::thread::sleep(Duration::from_millis(10));
         };
-        ensure(
-            runner_pid != owner.0.id(),
-            "Dart reporter incorrectly identified the native controller as its process",
-        )?;
-        let processes = [
-            Process::open("controller-and-native-owner", owner.0.id())?,
-            Process::open("dart-test-runner", runner_pid)?,
-            Process::open("author-test-vm", announced.author_pid)?,
-            Process::open("author-child", announced.child_pid)?,
-            Process::open("author-grandchild", announced.grandchild_pid)?,
-            Process::open("background-watcher", announced.watcher_pid)?,
-        ];
+        // Windows dart.exe can wait for a separate dartvm.exe. Retain every
+        // launcher and VM once, preserving role aliases on exec-style hosts.
+        let processes = announced
+            .process_roles(owner.0.id(), Some(runner_pid))?
+            .into_iter()
+            .map(|(pid, roles)| Process::open(roles, pid))
+            .collect::<Result<Vec<_>>>()?;
         let registry = temp_root.join(failforge_workspace::windows_fs::campaign_registry_name()?);
         let campaigns = fs::read_dir(&registry)?
             .map(|entry| entry.map(|entry| entry.path()))
@@ -608,7 +682,10 @@ impl Harness {
         for process in &processes {
             ensure(
                 process.alive()?,
-                format!("{} exited before forced controller death", process.role),
+                format!(
+                    "{} exited before forced controller death",
+                    process.roles.join("/")
+                ),
             )?;
         }
         let evidence_path = self.output.join("windows-controller-crash-evidence.json");
@@ -631,7 +708,7 @@ impl Harness {
             .map(|process| {
                 let code = process.wait_until(deadline)?;
                 Ok(
-                    json!({"role":process.role,"pid":process.pid,"exitCode":code,
+                    json!({"roles":process.roles,"pid":process.pid,"exitCode":code,
                 "retainedHandleSignalled":true}),
                 )
             })
@@ -697,6 +774,10 @@ impl Harness {
             json!({"name":"windows-controller-crash", "evidence":evidence_path,
             "nativeOwnerIsController":true,"forcedExitCode":exit,"campaignComplete":false,
             "observedCampaignStatus":summary["status"],"scoresWithheld":true,
+            "retainedProcessHandles":evidence["retainedProcessHandles"].clone(),
+            "processExits":evidence["processExits"].clone(),
+            "processDrainWallSeconds":evidence["processDrainWallSeconds"].clone(),
+            "processDrainBudgetSeconds":evidence["processDrainBudgetSeconds"].clone(),
             "activeNativeOwnerProtected":true,"allObservedProcessesExited":true,
             "staleLeaseRecovered":true,"registryClean":true,"reportsPreserved":true,
             "originalProjectFilesUnchanged":true}),
@@ -708,6 +789,76 @@ impl Harness {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn identities() -> Value {
+        json!({"nonce":"fixture","authorPid":10,
+            "childLauncherPid":21,"childPid":20,
+            "grandchildLauncherPid":31,"grandchildPid":30,
+            "watcherLauncherPid":41,"watcherPid":40})
+    }
+
+    #[test]
+    fn launchers_and_vms_are_distinct_processes_with_only_known_aliases() {
+        let split: Ready = serde_json::from_value(identities()).unwrap();
+        let roles = split.process_roles(1, Some(10)).unwrap();
+        assert_eq!(roles.len(), 8);
+        assert_eq!(roles[&10], ["author-test-vm", "dart-test-runner"]);
+        for pid in [1, 10, 20, 21, 30, 31, 40, 41] {
+            assert!(roles.contains_key(&pid), "lost process {pid}");
+        }
+        assert_eq!(split.process_roles(1, Some(9)).unwrap().len(), 9);
+
+        let mut same = identities();
+        for (launcher, vm) in [
+            ("childLauncherPid", "childPid"),
+            ("grandchildLauncherPid", "grandchildPid"),
+            ("watcherLauncherPid", "watcherPid"),
+        ] {
+            same[launcher] = same[vm].clone();
+        }
+        let same: Ready = serde_json::from_value(same).unwrap();
+        let roles = same.process_roles(1, Some(10)).unwrap();
+        assert_eq!(roles.len(), 5);
+        assert_eq!(roles[&20], ["author-child-launcher", "author-child-vm"]);
+        assert_eq!(roles[&30].len(), 2);
+        assert_eq!(roles[&40].len(), 2);
+    }
+
+    #[test]
+    fn crash_identities_reject_zero_controller_and_cross_role_aliases() {
+        for (field, pid) in [
+            ("authorPid", 0),
+            ("authorPid", 1),
+            ("childPid", 10),
+            ("grandchildPid", 20),
+            ("watcherPid", 30),
+            ("childLauncherPid", 0),
+            ("childLauncherPid", 1),
+            ("childLauncherPid", 10),
+            ("childLauncherPid", 30),
+            ("childLauncherPid", 31),
+            ("grandchildLauncherPid", 20),
+            ("watcherLauncherPid", 21),
+        ] {
+            let mut value = identities();
+            value[field] = json!(pid);
+            let ready: Ready = serde_json::from_value(value).unwrap();
+            assert!(ready.process_roles(1, None).is_err(), "{field}={pid}");
+        }
+        let ready: Ready = serde_json::from_value(identities()).unwrap();
+        assert!(ready.process_roles(0, None).is_err());
+        for reporter in [0, 1, 20, 21, 30, 31, 40, 41] {
+            assert!(ready.process_roles(1, Some(reporter)).is_err());
+        }
+        for pid in [json!(-1), json!(4294967296_u64), json!(1.5), json!(true)] {
+            let mut value = identities();
+            value["grandchildPid"] = pid;
+            assert!(serde_json::from_value::<Ready>(value).is_err());
+        }
+        let mut missing = identities();
+        missing.as_object_mut().unwrap().remove("childLauncherPid");
+        assert!(serde_json::from_value::<Ready>(missing).is_err());
+    }
 
     #[test]
     fn crash_checkpoint_withholds_completion_records_and_every_score() {
