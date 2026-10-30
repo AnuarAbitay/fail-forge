@@ -1,0 +1,5 @@
+# Link the Visual C++ runtime statically, so Windows archives start without
+# the VC++ Redistributable. Packaging rejects executables that still import it.
+# A RUSTFLAGS environment variable replaces these flags; keep it unset for builds.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]
