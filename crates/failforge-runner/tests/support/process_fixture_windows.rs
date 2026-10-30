@@ -18,6 +18,65 @@ fn run() -> io::Result<u8> {
             .and_then(|arg| arg.to_str())
             .and_then(|arg| arg.parse().ok())
             .unwrap_or(2)),
+        "exit-dword" => {
+            let code = args
+                .get(1)
+                .and_then(|arg| arg.to_str())
+                .and_then(|arg| arg.parse::<u32>().ok())
+                .ok_or(io::ErrorKind::InvalidInput)?;
+            // SAFETY: this fixture exits only its own process with the exact
+            // requested native status; no console event or cancellation occurs.
+            unsafe { windows_sys::Win32::System::Threading::ExitProcess(code) }
+        }
+        "console-state" => {
+            // GetConsoleCP is zero when no console is attached, independently
+            // of whether stdout itself is a redirected pipe or regular file.
+            let code_page = unsafe { windows_sys::Win32::System::Console::GetConsoleCP() };
+            writeln!(io::stdout(), "{code_page}")?;
+            Ok(0)
+        }
+        "console-owner" => {
+            let code_page = unsafe { windows_sys::Win32::System::Console::GetConsoleCP() };
+            if code_page == 0 {
+                return Err(io::Error::other(
+                    "console-owner requires an attached console",
+                ));
+            }
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            runtime.block_on(async {
+                let runner = failforge_runner::Runner::new();
+                let spec = failforge_runner::CommandSpec {
+                    program: std::env::current_exe()?.into(),
+                    args: vec!["console-state".into()],
+                    cwd: std::env::current_dir()?,
+                    env: Default::default(),
+                    timeout_policy: failforge_runner::TimeoutPolicy {
+                        timeout: Some(Duration::from_secs(5)),
+                        forced_wait: Duration::from_secs(5),
+                        output_drain: Duration::from_secs(5),
+                        ..Default::default()
+                    },
+                    capture_policy: Default::default(),
+                };
+                let outcome = runner.start(spec).map_err(io::Error::other)?.wait().await;
+                let shutdown = runner.shutdown().await;
+                let result = outcome.map_err(io::Error::other)?;
+                shutdown.map_err(io::Error::other)?;
+                if result.cause != failforge_runner::CompletionCause::ProcessCompleted
+                    || !result.status.is_some_and(|status| status.success())
+                    || !result.cleanup.is_complete()
+                {
+                    return Err(io::Error::other(
+                        "console-state child did not finish cleanly",
+                    ));
+                }
+                write!(io::stdout(), "owner-console {code_page}\nchild-console ")?;
+                io::stdout().write_all(&result.stdout.tail)?;
+                Ok(0)
+            })
+        }
         "argv" => {
             for arg in &args[1..] {
                 writeln!(io::stdout(), "{}", hex(arg.as_encoded_bytes()))?;

@@ -6,6 +6,12 @@ downloads and their verification results.
 
 ## Unreleased
 
+### Fixed
+
+- Keep captured Windows child processes outside the controller's console so
+  Ctrl+Break is handled through the CLI's owned Job Object cancellation rather
+  than terminating Dart first and producing an infrastructure error.
+
 ## 0.1.0-beta.4 — 2026-10-28
 
 ### Added

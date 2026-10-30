@@ -218,7 +218,10 @@ impl ManagedChild {
                 1,
                 CREATE_SUSPENDED
                     | CREATE_UNICODE_ENVIRONMENT
-                    | CREATE_NEW_PROCESS_GROUP
+                    // Redirected children must not share the controller's
+                    // console: Ctrl+Break would otherwise terminate them before
+                    // the public CLI can request owned Job Object cancellation.
+                    | CREATE_NO_WINDOW
                     | EXTENDED_STARTUPINFO_PRESENT,
                 command.env.as_ptr().cast(),
                 command.cwd.as_ptr(),

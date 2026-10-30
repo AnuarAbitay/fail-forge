@@ -9,6 +9,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::io::{AsHandle, AsRawHandle, FromRawHandle, OwnedHandle};
+use std::os::windows::process::CommandExt;
 use std::path::{Component, Path, PathBuf, Prefix};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -18,7 +19,8 @@ use windows_sys::Win32::Storage::FileSystem::{
 };
 use windows_sys::Win32::System::IO::OVERLAPPED;
 use windows_sys::Win32::System::Threading::{
-    OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, WaitForSingleObject,
+    CREATE_NEW_CONSOLE, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
+    WaitForSingleObject,
 };
 
 fn spec(args: &[&str]) -> CommandSpec {
@@ -128,6 +130,61 @@ async fn nonzero_exit_is_ordinary_result_and_both_pipes_drain() {
     assert_eq!(result.stderr.bytes_read, 1_048_576);
     assert_eq!(result.stdout.tail, vec![b'x'; 128]);
     assert!(result.stdout.tail_truncated && result.stderr.tail_truncated);
+}
+
+#[tokio::test]
+async fn native_control_c_exit_status_is_not_reclassified_as_cancellation() {
+    let code = 0xc000013a_u32;
+    let result = run(spec(&["exit-dword", &code.to_string()])).await;
+    assert_eq!(result.cause, CompletionCause::ProcessCompleted);
+    assert_eq!(
+        result.status.unwrap().code().map(|value| value as u32),
+        Some(code)
+    );
+}
+
+#[test]
+fn runner_child_has_no_console_even_when_its_owner_has_a_new_console() {
+    let directory = Directory::new();
+    let stdout = directory.0.join("console-stdout");
+    let stderr = directory.0.join("console-stderr");
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_failforge-process-fixture"))
+        .arg("console-owner")
+        .creation_flags(CREATE_NEW_CONSOLE)
+        .stdin(std::process::Stdio::null())
+        .stdout(File::create(&stdout).unwrap())
+        .stderr(File::create(&stderr).unwrap())
+        .spawn()
+        .unwrap();
+    // This exact retained handle is the only termination authority on failure.
+    // Killing the owner closes its Runner job and terminates its nested child.
+    let waited = unsafe { WaitForSingleObject(child.as_raw_handle(), 30_000) };
+    if waited != WAIT_OBJECT_0 {
+        let _ = child.kill();
+        if unsafe { WaitForSingleObject(child.as_raw_handle(), 5_000) } == WAIT_OBJECT_0 {
+            let _ = child.wait();
+        }
+        panic!("console-owner exceeded its bounded lifetime: wait={waited}");
+    }
+    let status = child.wait().unwrap();
+    assert!(
+        status.success(),
+        "console-owner failed: {}",
+        std::fs::read_to_string(stderr).unwrap()
+    );
+    let output = std::fs::read_to_string(stdout).unwrap();
+    let lines: Vec<_> = output.lines().collect();
+    assert_eq!(lines.len(), 2, "{output}");
+    assert_ne!(
+        lines[0]
+            .strip_prefix("owner-console ")
+            .unwrap()
+            .parse::<u32>()
+            .unwrap(),
+        0,
+        "the fixture must establish a real parent console"
+    );
+    assert_eq!(lines[1], "child-console 0");
 }
 
 #[tokio::test]

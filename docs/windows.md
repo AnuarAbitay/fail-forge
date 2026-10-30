@@ -152,6 +152,10 @@ their own budgets after termination. Completed campaign results are retained
 when cancellation can finish normally. After abrupt owner death, abandoned
 working copies are recovered on a later run using file leases.
 
+Runner children use redirected standard streams and do not inherit the public
+CLI's console. Console events are handled by the CLI, which cancels the owned
+job; Ctrl+Break therefore cannot terminate a captured child ahead of that request.
+
 Reports use regular files, without requiring Windows symlink privileges.
 Family report files are installed before the root `summary.json`. The atomic
 replacement of that root summary commits the final generation. During

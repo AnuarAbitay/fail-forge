@@ -1388,6 +1388,16 @@ pub fn run(options: Options) -> Result<()> {
         TESTS,
     )?;
     let all = options.suite == Suite::All;
+    // Exercise native Windows console/owner boundaries before the longer
+    // semantic catalogue so a lifecycle regression produces useful evidence early.
+    #[cfg(windows)]
+    if all || options.suite == Suite::Cancellation {
+        harness.console_cancellation()?;
+    }
+    #[cfg(windows)]
+    if all || options.suite == Suite::Recovery {
+        harness.controller_crash()?;
+    }
     // Check SDK interop and attribution before the longer profile catalogue.
     if options.suite == Suite::Flutter || (all && harness.flutter.is_some()) {
         harness.flutter()?;
@@ -1406,13 +1416,9 @@ pub fn run(options: Options) -> Result<()> {
     }
     if all || options.suite == Suite::Cancellation {
         harness.cancellation()?;
-        #[cfg(windows)]
-        harness.console_cancellation()?;
     }
     if all || options.suite == Suite::Recovery {
         harness.recovery()?;
-        #[cfg(windows)]
-        harness.controller_crash()?;
     }
     if all || options.suite == Suite::Applicability {
         harness.applicability()?;
