@@ -357,6 +357,7 @@ Use `failforge --help` or `<command> --help` for available options.
 - [Complete mutation operator catalogue](docs/mutation-operators.md)
 - [Mutation commands and profile reference](docs/mutation-cli.md)
 - [Beta limitations and verification scope](docs/beta-limitations.md)
+- [Regression matrix and verification records](https://github.com/AnuarAbitay/fail-forge/blob/main/docs/regression-matrix.md)
 - [Changelog](CHANGELOG.md)
 - [Security policy and vulnerability reporting](SECURITY.md)
 

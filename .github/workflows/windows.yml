@@ -243,6 +243,13 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           & target/release/failforge-tools.exe regression --binary-dir target/release --output (Join-Path $env:RUNNER_TEMP 'native-regression-windows') --dart-sdk (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk') --flutter-sdk $env:FLUTTER_ROOT
+          $summary = Get-Content (Join-Path $env:RUNNER_TEMP 'native-regression-windows/summary.json') -Raw | ConvertFrom-Json
+          $required = @('windows-console-ctrl-c', 'windows-console-ctrl-break', 'windows-console-ctrl-c-ignored', 'windows-controller-crash')
+          foreach ($name in $required) {
+            $cases = @($summary.cases | Where-Object { $_.name -eq $name })
+            if ($cases.Count -ne 1) { throw "Missing or duplicate native regression evidence: $name" }
+            $cases[0] | ConvertTo-Json -Depth 8
+          }
       - name: Show bounded regression diagnostics on failure
         if: failure()
         run: |
@@ -251,7 +258,7 @@ jobs:
             $root = Join-Path $env:RUNNER_TEMP $name
             if (-not (Test-Path $root)) { continue }
             $files = Get-ChildItem $root -File -Recurse |
-              Where-Object { $_.Name -in @('command.json', 'summary.json', 'stderr.log', 'stdout.log', 'stderr.bin', 'stdout.bin') } |
+              Where-Object { $_.Name -in @('command.json', 'summary.json', 'stderr.log', 'stdout.log', 'stderr.bin', 'stdout.bin', 'host-ready.json', 'host-result.json', 'host-stdout.log', 'host-stderr.log', 'windows-controller-crash-evidence.json') } |
               Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 16
             foreach ($file in $files) {
               Write-Output "Diagnostic: $($file.FullName)"

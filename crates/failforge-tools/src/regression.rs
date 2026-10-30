@@ -12,6 +12,12 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
+#[path = "regression_console_windows.rs"]
+mod console_windows;
+#[cfg(windows)]
+#[path = "regression_crash_windows.rs"]
+mod crash_windows;
 #[path = "regression_replay.rs"]
 mod replay;
 
@@ -1400,9 +1406,13 @@ pub fn run(options: Options) -> Result<()> {
     }
     if all || options.suite == Suite::Cancellation {
         harness.cancellation()?;
+        #[cfg(windows)]
+        harness.console_cancellation()?;
     }
     if all || options.suite == Suite::Recovery {
         harness.recovery()?;
+        #[cfg(windows)]
+        harness.controller_crash()?;
     }
     if all || options.suite == Suite::Applicability {
         harness.applicability()?;
