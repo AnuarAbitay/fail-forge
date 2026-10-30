@@ -176,8 +176,3 @@ Native Windows CI also exercises real Dart/Flutter commands, mutation and
 timeout regressions, retained replay, and a moved packaged installation with
 a fresh Pub cache. Cross-compilation on another operating system only checks
 types; use the native job results for the revision being evaluated.
-
-The [regression matrix in the source repository](https://github.com/AnuarAbitay/fail-forge/blob/main/docs/regression-matrix.md)
-lists expected outcomes, native console and owner-death checks, and the separate
-clean-machine/public-project acceptance tasks. Listed scenarios require evidence
-from the exact commit being evaluated.
