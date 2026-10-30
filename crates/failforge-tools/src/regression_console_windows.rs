@@ -15,9 +15,12 @@ fn ignored_control_summary(summary: &Value) -> Result<()> {
             && summary["complete"] == false
             && summary["completedMutants"] == 0
             && summary["records"].as_array().is_some_and(Vec::is_empty)
-            && ["mutationScore", "failureModeScore", "languageSpecificScore"]
+            && ["mutationScore", "failureModeScore"]
                 .iter()
-                .all(|key| summary.get(key) == Some(&Value::Null)),
+                .all(|key| summary.get(key) == Some(&Value::Null))
+            && summary
+                .get("languageSpecificScore")
+                .is_none_or(Value::is_null),
         "ignored Ctrl+C control lacks an unfinished campaign without results or scores",
     )
 }
@@ -359,10 +362,15 @@ mod tests {
 
     #[test]
     fn ignored_control_accepts_initial_report_but_rejects_terminal_results_and_scores() {
-        let running = json!({"status":"running","complete":false,
+        // Direct classic reports contain these two score fields; the
+        // language-specific score is normally omitted from this schema.
+        let running = json!({"family":"classic","status":"running","complete":false,
             "completedMutants":0,"records":[],"mutationScore":null,
-            "failureModeScore":null,"languageSpecificScore":null});
+            "failureModeScore":null});
         assert!(ignored_control_summary(&running).is_ok());
+        let mut optional_null = running.clone();
+        optional_null["languageSpecificScore"] = Value::Null;
+        assert!(ignored_control_summary(&optional_null).is_ok());
         for (key, value) in [
             ("status", json!("cancelled")),
             ("status", json!("completed")),
@@ -371,13 +379,14 @@ mod tests {
             ("records", json!([{"outcome":"CANCELLED"}])),
             ("mutationScore", json!({"percent":100})),
             ("failureModeScore", json!({"percent":100})),
+            ("languageSpecificScore", json!(100)),
             ("languageSpecificScore", json!({"percent":100})),
         ] {
             let mut changed = running.clone();
             changed[key] = value;
             assert!(ignored_control_summary(&changed).is_err(), "{key}");
         }
-        for key in ["mutationScore", "failureModeScore", "languageSpecificScore"] {
+        for key in ["mutationScore", "failureModeScore"] {
             let mut missing = running.clone();
             missing.as_object_mut().unwrap().remove(key);
             assert!(ignored_control_summary(&missing).is_err(), "{key}");
