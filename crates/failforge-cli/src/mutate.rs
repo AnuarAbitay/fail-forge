@@ -424,9 +424,11 @@ fn execute_selected(
             format!(
                 "{}\nReport: {}\n",
                 report.terminal,
-                Path::new(report.summary["output"].as_str().unwrap_or(""))
-                    .join("summary.json")
-                    .display()
+                crate::display::user_path(
+                    &Path::new(report.summary["output"].as_str().unwrap_or(""))
+                        .join("summary.json")
+                )
+                .display()
             ),
         )?;
         if status == 125 {

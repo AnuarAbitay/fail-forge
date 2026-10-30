@@ -35,3 +35,27 @@ pub(crate) fn spawn(mut receiver: StreamReceiver) -> io::Result<()> {
         })?;
     Ok(())
 }
+
+/// The spelling of a path shown to a user. Canonical paths carry the verbatim
+/// `\\?\` prefix; the ordinary drive or UNC form is used when Win32 lookup
+/// proves that it names the same file, so the path can be copied as is.
+pub(crate) fn user_path(path: &std::path::Path) -> std::path::PathBuf {
+    failforge_runner::windows_process_path(path)
+}
+
+#[cfg(test)]
+mod user_path_tests {
+    use super::user_path;
+
+    #[test]
+    fn existing_verbatim_paths_are_shown_without_the_prefix() {
+        let canonical = std::env::temp_dir().canonicalize().unwrap();
+        assert!(canonical.to_string_lossy().starts_with(r"\\?\"));
+        let shown = user_path(&canonical);
+        assert!(!shown.to_string_lossy().starts_with(r"\\?\"), "{shown:?}");
+        assert_eq!(shown.canonicalize().unwrap(), canonical);
+        // Without a file to compare identities, the literal spelling stays.
+        let missing = canonical.join("ff-user-path-missing-entry");
+        assert_eq!(user_path(&missing), missing);
+    }
+}

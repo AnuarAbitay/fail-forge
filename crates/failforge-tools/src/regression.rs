@@ -83,6 +83,18 @@ const LOOP_TEST: &str = "import 'package:campaign_sample/value.dart';\nimport 'p
 fn profile() -> Value {
     json!({"mutations":{"classic":{"enabled":true,"operators":{"BOOLEAN_LITERAL_FLIP":true}},"failure_mode":{"enabled":true,"operators":{"EXCEPTION_AT_ENTRY":true}},"language_specific":{"enabled":true,"language":"dart","operators":{"NSM-001":true}}},"rules":{"include":["lib/value.dart"],"methods":["enabled","value","semantic"]},"workers":1,"timeouts":{"test":"2s","command":"30s"}})
 }
+/// Spellings the CLI may print for a report path. Windows output drops the
+/// verbatim `\\?\` prefix when the ordinary drive or UNC form names the file.
+fn terminal_spellings(path: &str) -> Vec<String> {
+    let mut spellings = vec![path.to_owned()];
+    if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+        spellings.push(format!(r"\\{unc}"));
+    } else if let Some(disk) = path.strip_prefix(r"\\?\") {
+        spellings.push(disk.to_owned());
+    }
+    spellings
+}
+
 pub(crate) fn summary_contract(summary: &Value, stdout: &[u8]) -> Result<()> {
     ensure(
         summary["version"] == if summary["kind"] == "profile" { 2 } else { 1 },
@@ -96,8 +108,11 @@ pub(crate) fn summary_contract(summary: &Value, stdout: &[u8]) -> Result<()> {
         "missing terminal summary",
     )?;
     let output = summary["output"].as_str().ok_or("missing summary output")?;
+    let report = Path::new(output).join("summary.json").display().to_string();
     ensure(
-        text.contains(&Path::new(output).join("summary.json").display().to_string()),
+        terminal_spellings(&report)
+            .iter()
+            .any(|spelling| text.contains(spelling.as_str())),
         "terminal report path mismatch",
     )?;
     let records = summary["records"]
@@ -1583,3 +1598,43 @@ mod tests {
 #[cfg(all(test, unix))]
 #[path = "regression_adversarial_tests.rs"]
 mod adversarial_tests;
+
+#[cfg(test)]
+mod terminal_spelling_tests {
+    use super::*;
+
+    #[test]
+    fn verbatim_report_paths_may_be_printed_in_their_ordinary_form() {
+        assert_eq!(
+            terminal_spellings("/report/summary.json"),
+            ["/report/summary.json"]
+        );
+        assert_eq!(
+            terminal_spellings(r"\\?\C:\runs\summary.json"),
+            [r"\\?\C:\runs\summary.json", r"C:\runs\summary.json"]
+        );
+        assert_eq!(
+            terminal_spellings(r"\\?\UNC\host\share\summary.json"),
+            [
+                r"\\?\UNC\host\share\summary.json",
+                r"\\host\share\summary.json"
+            ]
+        );
+        let printed = |path: &str| format!("FailForge mutation summary\nReport: {path}\n");
+        let summary = |output: &str| json!({"version":1,"output":output,"status":"no_mutants","records":[],"outcomeCounts":{},"complete":true,"expectedMutants":0,"completedMutants":0,"originalProjectFilesUnchanged":true,"temporarySnapshotCleaned":true,"workspaceCleanupDeferred":false});
+        // Path::join uses the platform separator, so each platform checks its own.
+        #[cfg(windows)]
+        let (output, shown, other) = (
+            r"\\?\C:\runs",
+            r"C:\runs\summary.json",
+            r"D:\runs\summary.json",
+        );
+        #[cfg(unix)]
+        let (output, shown, other) = ("/runs", "/runs/summary.json", "/other/summary.json");
+        let summary = summary(output);
+        let full = Path::new(output).join("summary.json").display().to_string();
+        summary_contract(&summary, printed(shown).as_bytes()).unwrap();
+        summary_contract(&summary, printed(&full).as_bytes()).unwrap();
+        assert!(summary_contract(&summary, printed(other).as_bytes()).is_err());
+    }
+}
