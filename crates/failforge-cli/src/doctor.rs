@@ -28,6 +28,8 @@ struct Check {
     status: Status,
     label: &'static str,
     detail: String,
+    /// The underlying failure (path, OS error), shown before the remedy.
+    cause: Option<String>,
     remedy: Option<String>,
 }
 
@@ -40,8 +42,22 @@ impl Report {
             status,
             label,
             detail: detail.into(),
+            cause: None,
             remedy: None,
         });
+    }
+
+    /// A prerequisite whose failure carries its own cause. A generic remedy
+    /// alone hid filesystem errors behind advice that could not fix them.
+    fn prerequisite_with_cause(
+        &mut self,
+        result: Result<(), String>,
+        label: &'static str,
+        detail: &str,
+        remedy: String,
+    ) {
+        self.prerequisite(result.is_ok(), label, detail, remedy);
+        self.0.last_mut().expect("a check was just inserted").cause = result.err();
     }
 
     fn prerequisite(&mut self, ready: bool, label: &'static str, detail: &str, remedy: String) {
@@ -86,6 +102,9 @@ impl Report {
                 check.label,
                 display_text(&check.detail)
             )?;
+            if let Some(cause) = &check.cause {
+                writeln!(output, "  Cause: {}", display_text(cause))?;
+            }
             if let Some(remedy) = &check.remedy {
                 writeln!(output, "  Fix: {}", display_text(remedy))?;
             }
@@ -101,6 +120,7 @@ impl Report {
 /// Ordinary paths use portable single quotes; ANSI-C quoting keeps controls out
 /// of the diagnostic stream while preserving the argument when pasted.
 fn quote(path: &Path) -> String {
+    let path = crate::display::user_path(path);
     let value = path.to_string_lossy();
     let control = |character: char| {
         character.is_control()
@@ -204,8 +224,8 @@ fn inspect(
         ),
         "restore the adapters/dart directory or pass --adapter-root PATH".into(),
     );
-    report.prerequisite(
-        adapter_dependencies(&config.adapter_root).is_ok(),
+    report.prerequisite_with_cause(
+        adapter_dependencies(&config.adapter_root).map(drop),
         "Adapter dependencies",
         &format!(
             "prepared metadata and all declared dependencies at {}",
@@ -232,6 +252,7 @@ fn inspect(
             status: Status::Fail,
             label: "Configuration",
             detail: "METHOD_CHANNEL_ERROR requires a prepared Flutter project".into(),
+            cause: None,
             remedy: Some("disable METHOD_CHANNEL_ERROR for Dart packages".into()),
         };
     }
@@ -243,7 +264,7 @@ fn inspect(
         } else {
             dart.clone()
         };
-    report.prerequisite(original.is_some(), "Project", &format!("standalone package metadata, dependencies and source files at {}", quote(&config.project)), format!("{} --suppress-analytics pub get --directory {}; for Flutter packages use flutter pub get; ensure the package is standalone with test/flutter_test and no source aliases", quote(&project_pub), quote(&config.project)));
+    report.prerequisite_with_cause(project.as_ref().map(drop).map_err(ToString::to_string), "Project", &format!("standalone package metadata, dependencies and source files at {}", quote(&config.project)), format!("{} --suppress-analytics pub get --directory {}; for Flutter packages use flutter pub get; ensure the package is standalone with test/flutter_test and no source aliases", quote(&project_pub), quote(&config.project)));
     if let Some(project) = original {
         if project.flutter {
             report.add(
@@ -398,5 +419,118 @@ mod native_tests {
         fs::remove_file(&expected).unwrap();
         assert!(!executable(&helper));
         fs::remove_dir(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod cause_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn failed_prerequisites_show_their_cause_before_the_remedy() {
+        let mut report = Report::default();
+        report.prerequisite_with_cause(
+            Err("/cache/pkg: redirected (Windows error 4395)".into()),
+            "Project",
+            "package at /project",
+            "pub get".into(),
+        );
+        report.prerequisite_with_cause(Ok(()), "Adapter", "adapter", "pub get".into());
+        let mut output = Vec::new();
+        report.write(&mut output).unwrap();
+        let text = String::from_utf8(output).unwrap();
+        let lines: Vec<_> = text.lines().collect();
+        assert_eq!(
+            lines[1..5],
+            [
+                "[FAIL] Project: missing, invalid or inaccessible: package at /project",
+                "  Cause: /cache/pkg: redirected (Windows error 4395)",
+                "  Fix: pub get",
+                "[OK] Adapter: verified: adapter",
+            ],
+            "{text}"
+        );
+        assert_eq!(report.status(), 1);
+    }
+
+    #[test]
+    fn adapter_dependency_failures_name_the_file_and_the_reason() {
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("ff-doctor-cause-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join(".dart_tool")).unwrap();
+        let pubspec = root.join("pubspec.yaml");
+        let config = root.join(".dart_tool/package_config.json");
+        let error = adapter_dependencies(&root).unwrap_err();
+        assert!(
+            error.starts_with(&format!(
+                "{}: ",
+                failforge_workspace::display_path(&pubspec)
+            )),
+            "{error}"
+        );
+        fs::write(&pubspec, "name: adapter\ndependencies:\n  analyzer: any\n").unwrap();
+        let error = adapter_dependencies(&root).unwrap_err();
+        assert!(
+            error.starts_with(&format!("{}: ", failforge_workspace::display_path(&config))),
+            "{error}"
+        );
+        let packages = |names: &[&str]| {
+            let entries: Vec<_> = names
+                .iter()
+                .map(|name| {
+                    let uri = if *name == "adapter" {
+                        "../".to_owned()
+                    } else {
+                        format!("../{name}/")
+                    };
+                    serde_json::json!({"name": name, "rootUri": uri, "packageUri": "lib/"})
+                })
+                .collect();
+            fs::write(
+                &config,
+                serde_json::json!({"configVersion": 2, "packages": entries}).to_string(),
+            )
+            .unwrap();
+        };
+        fs::create_dir_all(root.join("analyzer")).unwrap();
+        packages(&["analyzer"]);
+        assert_eq!(
+            adapter_dependencies(&root).unwrap_err(),
+            format!(
+                "{}: adapter does not resolve to the adapter root",
+                failforge_workspace::display_path(&config)
+            )
+        );
+        packages(&["adapter"]);
+        assert_eq!(
+            adapter_dependencies(&root).unwrap_err(),
+            format!(
+                "{}: dependencies entry analyzer is not prepared",
+                failforge_workspace::display_path(&config)
+            )
+        );
+        packages(&["adapter", "analyzer"]);
+        assert_eq!(adapter_dependencies(&root), Ok(2));
+        fs::write(&pubspec, "name: adapter\ndev_dependencies: [test]\n").unwrap();
+        assert_eq!(
+            adapter_dependencies(&root).unwrap_err(),
+            format!(
+                "{}: dev_dependencies is not a mapping",
+                failforge_workspace::display_path(&pubspec)
+            )
+        );
+        fs::write(&pubspec, "dependencies: {}\n").unwrap();
+        assert_eq!(
+            adapter_dependencies(&root).unwrap_err(),
+            format!(
+                "{}: no package name",
+                failforge_workspace::display_path(&pubspec)
+            )
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 }

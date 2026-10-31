@@ -15,7 +15,7 @@ use std::path::PathBuf;
 pub enum ProfileError {
     #[error("{0}")]
     Config(String),
-    #[error("cannot read package inputs or publish the generated profile")]
+    #[error("cannot read package inputs or publish the generated profile: {0}")]
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Analysis(String),

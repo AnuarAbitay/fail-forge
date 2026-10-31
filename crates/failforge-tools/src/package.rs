@@ -169,6 +169,116 @@ fn artifacts(raw: &[u8], cache: &Path) -> Result<BTreeMap<String, PathBuf>> {
     Ok(result)
 }
 
+/// Lower-case names of every DLL a PE32+ image imports, at load time or
+/// delay-loaded on first use.
+fn pe_imports(image: &[u8]) -> Result<Vec<String>> {
+    let bytes = |offset: usize, length: usize| -> Result<&[u8]> {
+        offset
+            .checked_add(length)
+            .and_then(|end| image.get(offset..end))
+            .ok_or_else(|| "truncated PE import table".into())
+    };
+    let u16_at =
+        |offset| -> Result<usize> { Ok(u16::from_le_bytes(bytes(offset, 2)?.try_into()?).into()) };
+    let u32_at = |offset| -> Result<usize> {
+        Ok(u32::from_le_bytes(bytes(offset, 4)?.try_into()?).try_into()?)
+    };
+    let coff = u32_at(0x3c)? + 4;
+    let optional = coff + 20;
+    let optional_size = u16_at(coff + 16)?;
+    // PE32+ keeps NumberOfRvaAndSizes at 108 and 8-byte directories from 112.
+    let directories = if optional_size < 112 {
+        0
+    } else {
+        u32_at(optional + 108)?.min((optional_size - 112) / 8)
+    };
+    let directory = |index: usize| -> Result<usize> {
+        if index < directories {
+            u32_at(optional + 112 + 8 * index)
+        } else {
+            Ok(0)
+        }
+    };
+    // Entry 1 holds 20-byte import descriptors with the name RVA at 12;
+    // entry 13 holds 32-byte delay-load descriptors with the name RVA at 4.
+    let (import, delayed) = (directory(1)?, directory(13)?);
+    if import == 0 && delayed == 0 {
+        return Ok(Vec::new());
+    }
+    // (RVA, mapped size, bytes stored in the file, file offset) per section.
+    // A zero VirtualSize means the raw size; only stored bytes can be read.
+    let sections = (0..u16_at(coff + 2)?)
+        .map(|index| {
+            let header = optional + optional_size + 40 * index;
+            let stored = u32_at(header + 16)?;
+            let mapped = match u32_at(header + 8)? {
+                0 => stored,
+                size => size,
+            };
+            Ok((u32_at(header + 12)?, mapped, stored, u32_at(header + 20)?))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let file_offset = |rva: usize| -> Result<usize> {
+        sections
+            .iter()
+            .find(|(address, mapped, ..)| (*address..address + mapped).contains(&rva))
+            .filter(|(address, _, stored, _)| rva - address < *stored)
+            .map(|(address, _, _, raw)| raw + (rva - address))
+            .ok_or_else(|| "PE import RVA is outside the stored section data".into())
+    };
+    let mut names = Vec::new();
+    for (table, size, name_at) in [(import, 20, 12), (delayed, 32, 4)] {
+        if table == 0 {
+            continue;
+        }
+        let table = file_offset(table)?;
+        for descriptor in (0..).map(|index| table + size * index) {
+            if bytes(descriptor, size)?.iter().all(|byte| *byte == 0) {
+                break;
+            }
+            // Delay-load attribute bit 0 marks RVAs; the old form uses VAs.
+            if size == 32 && u32_at(descriptor)? & 1 == 0 {
+                return Err("unsupported delay-load descriptor without RVAs".into());
+            }
+            let name = file_offset(u32_at(descriptor + name_at)?)?;
+            let tail = image.get(name..).ok_or("truncated PE import name")?;
+            let end = tail
+                .iter()
+                .take(256)
+                .position(|byte| *byte == 0)
+                .ok_or("unterminated PE import name")?;
+            names.push(String::from_utf8(tail[..end].to_vec())?.to_ascii_lowercase());
+        }
+    }
+    Ok(names)
+}
+
+/// DLLs of the redistributable Visual C++ runtime that an image imports.
+///
+/// Release executables link the CRT statically (see `.cargo/config.toml`).
+/// Without the redistributable, a dynamic import ends the process with
+/// STATUS_DLL_NOT_FOUND before `main` can report anything.
+fn dynamic_crt_imports(image: &[u8]) -> Result<Vec<String>> {
+    Ok(pe_imports(image)?
+        .into_iter()
+        .filter(|name| {
+            // msvcr1xx are the pre-2015 runtimes; msvcrt.dll ships with Windows.
+            [
+                "vcruntime",
+                "msvcp",
+                "msvcr1",
+                "concrt",
+                "vccorlib",
+                "vcomp",
+                "api-ms-win-crt-",
+            ]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+                || name == "ucrtbase.dll"
+        })
+        .collect())
+}
+
 fn binary_format(path: &Path, target: &str) -> Result<()> {
     let parent = path.parent().ok_or("missing binary parent")?;
     let mut file = assets::regular(
@@ -205,7 +315,21 @@ fn binary_format(path: &Path, target: &str) -> Result<()> {
     ensure(
         valid,
         "built executable format/architecture does not match the native target",
-    )
+    )?;
+    if target.contains("-pc-windows-") {
+        let mut image = Vec::new();
+        file.seek(SeekFrom::Start(0))?;
+        file.read_to_end(&mut image)?;
+        let runtime = dynamic_crt_imports(&image)?;
+        ensure(
+            runtime.is_empty(),
+            format!(
+                "built executable imports the dynamic Visual C++ runtime: {}",
+                runtime.join(", ")
+            ),
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -507,6 +631,232 @@ mod windows_tests {
         fs::write(&path, &bytes).unwrap();
         assert!(binary_format(&path, "x86_64-pc-windows-msvc").is_err());
     }
+    const OPTIONAL: usize = 0x58;
+    const SECTION: usize = OPTIONAL + 240;
+
+    /// A PE32+ image with one section holding an import table for `dlls`.
+    fn pe_importing(dlls: &[&str]) -> Vec<u8> {
+        pe_with(dlls, 240, 16)
+    }
+
+    fn pe_with(dlls: &[&str], optional_size: u16, directories: u32) -> Vec<u8> {
+        pe_with_delayed(dlls, &[], 1, optional_size, directories)
+    }
+
+    /// Also a delay-load table for `delayed` with the given attribute word.
+    fn pe_with_delayed(
+        dlls: &[&str],
+        delayed: &[&str],
+        attributes: u32,
+        optional_size: u16,
+        directories: u32,
+    ) -> Vec<u8> {
+        const SECTION_RVA: usize = 0x1000;
+        const SECTION_FILE: usize = 0x200;
+        let mut bytes = vec![0; SECTION_FILE];
+        bytes[..2].copy_from_slice(b"MZ");
+        bytes[0x3c..0x40].copy_from_slice(&0x40_u32.to_le_bytes());
+        bytes[0x40..0x44].copy_from_slice(b"PE\0\0");
+        bytes[0x44..0x46].copy_from_slice(&0x8664_u16.to_le_bytes());
+        bytes[0x46..0x48].copy_from_slice(&1_u16.to_le_bytes());
+        bytes[0x54..0x56].copy_from_slice(&optional_size.to_le_bytes());
+        let optional = OPTIONAL;
+        bytes[optional..optional + 2].copy_from_slice(&0x20b_u16.to_le_bytes());
+        bytes[optional + 108..optional + 112].copy_from_slice(&directories.to_le_bytes());
+        let delay_table = 20 * (dlls.len() + 1);
+        let delay_size = if delayed.is_empty() {
+            0
+        } else {
+            32 * (delayed.len() + 1)
+        };
+        let mut section = vec![0; delay_table + delay_size];
+        let rva = |offset: usize| u32::try_from(SECTION_RVA + offset).unwrap().to_le_bytes();
+        for (index, dll) in dlls.iter().enumerate() {
+            let name = rva(section.len());
+            section[20 * index + 12..20 * index + 16].copy_from_slice(&name);
+            section.extend_from_slice(dll.as_bytes());
+            section.push(0);
+        }
+        for (index, dll) in delayed.iter().enumerate() {
+            let descriptor = delay_table + 32 * index;
+            let name = rva(section.len());
+            section[descriptor..descriptor + 4].copy_from_slice(&attributes.to_le_bytes());
+            section[descriptor + 4..descriptor + 8].copy_from_slice(&name);
+            section.extend_from_slice(dll.as_bytes());
+            section.push(0);
+        }
+        if !dlls.is_empty() {
+            bytes[optional + 120..optional + 124].copy_from_slice(&rva(0));
+        }
+        if !delayed.is_empty() {
+            bytes[optional + 216..optional + 220].copy_from_slice(&rva(delay_table));
+        }
+        let header = optional + usize::from(optional_size);
+        let size = u32::try_from(section.len()).unwrap().to_le_bytes();
+        bytes[header + 8..header + 12].copy_from_slice(&size);
+        bytes[header + 12..header + 16]
+            .copy_from_slice(&u32::try_from(SECTION_RVA).unwrap().to_le_bytes());
+        bytes[header + 16..header + 20].copy_from_slice(&size);
+        bytes[header + 20..header + 24]
+            .copy_from_slice(&u32::try_from(SECTION_FILE).unwrap().to_le_bytes());
+        bytes.extend_from_slice(&section);
+        bytes
+    }
+
+    #[test]
+    fn dynamic_visual_cpp_runtime_imports_are_rejected() {
+        let image = pe_importing(&[
+            "KERNEL32.dll",
+            "VCRUNTIME140.dll",
+            "msvcrt.dll",
+            "api-ms-win-crt-runtime-l1-1-0.dll",
+            "MSVCP140.dll",
+            "ucrtbase.dll",
+        ]);
+        assert_eq!(
+            pe_imports(&image).unwrap(),
+            [
+                "kernel32.dll",
+                "vcruntime140.dll",
+                "msvcrt.dll",
+                "api-ms-win-crt-runtime-l1-1-0.dll",
+                "msvcp140.dll",
+                "ucrtbase.dll"
+            ]
+        );
+        assert_eq!(
+            dynamic_crt_imports(&image).unwrap(),
+            [
+                "vcruntime140.dll",
+                "api-ms-win-crt-runtime-l1-1-0.dll",
+                "msvcp140.dll",
+                "ucrtbase.dll"
+            ]
+        );
+        let temporary = Temporary::new("ff-pe-crt").unwrap();
+        let path = temporary.0.join("native.exe");
+        fs::write(&path, &image).unwrap();
+        let error = binary_format(&path, "x86_64-pc-windows-msvc")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("vcruntime140.dll"), "{error}");
+        let image = pe_importing(&["KERNEL32.dll", "ntdll.dll", "msvcrt.dll"]);
+        assert!(dynamic_crt_imports(&image).unwrap().is_empty());
+        fs::write(&path, &image).unwrap();
+        binary_format(&path, "x86_64-pc-windows-msvc").unwrap();
+    }
+
+    #[test]
+    fn import_directory_presence_follows_the_optional_header_bounds() {
+        let crt = ["VCRUNTIME140.dll"];
+        // The smallest header that still holds the import directory entry.
+        assert_eq!(
+            pe_imports(&pe_with(&crt, 128, 2)).unwrap(),
+            ["vcruntime140.dll"]
+        );
+        assert!(pe_imports(&pe_with(&crt, 127, 2)).unwrap().is_empty());
+        assert!(pe_imports(&pe_with(&crt, 240, 1)).unwrap().is_empty());
+        assert!(pe_imports(&pe_with(&crt, 240, 0)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn delay_loaded_and_older_runtimes_are_rejected_too() {
+        let image = pe_with_delayed(
+            &["KERNEL32.dll"],
+            &["VCRUNTIME140.dll", "user32.dll"],
+            1,
+            240,
+            16,
+        );
+        assert_eq!(
+            pe_imports(&image).unwrap(),
+            ["kernel32.dll", "vcruntime140.dll", "user32.dll"]
+        );
+        assert_eq!(dynamic_crt_imports(&image).unwrap(), ["vcruntime140.dll"]);
+        // An image whose import directory is empty can still delay-load.
+        let image = pe_with_delayed(&[], &["MSVCR120.dll"], 1, 240, 16);
+        assert_eq!(&image[OPTIONAL + 120..OPTIONAL + 124], [0; 4]);
+        assert_eq!(dynamic_crt_imports(&image).unwrap(), ["msvcr120.dll"]);
+        // Entry 13 needs 14 directories in a 224-byte optional header.
+        let delayed = ["VCRUNTIME140.dll"];
+        assert_eq!(
+            pe_imports(&pe_with_delayed(&[], &delayed, 1, 240, 14))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            pe_imports(&pe_with_delayed(&[], &delayed, 1, 240, 13))
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            pe_imports(&pe_with_delayed(&[], &delayed, 1, 223, 16))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            pe_imports(&pe_with_delayed(&[], &delayed, 1, 224, 16))
+                .unwrap()
+                .len(),
+            1
+        );
+        // The old VA form cannot be resolved without the image base.
+        assert!(pe_imports(&pe_with_delayed(&[], &delayed, 0, 240, 16)).is_err());
+        let image = pe_importing(&["vcomp140.dll", "msvcr100.dll", "msvcrt.dll"]);
+        assert_eq!(
+            dynamic_crt_imports(&image).unwrap(),
+            ["vcomp140.dll", "msvcr100.dll"]
+        );
+    }
+
+    #[test]
+    fn import_names_are_read_only_from_stored_section_bytes() {
+        let crt = ["VCRUNTIME140.dll"];
+        let set = |image: &mut Vec<u8>, offset: usize, value: u32| {
+            image[SECTION + offset..SECTION + offset + 4].copy_from_slice(&value.to_le_bytes());
+        };
+        // Descriptors take 40 bytes; the name starts right after them.
+        let mut image = pe_importing(&crt);
+        set(&mut image, 8, 0);
+        assert_eq!(pe_imports(&image).unwrap(), ["vcruntime140.dll"]);
+        let mut image = pe_importing(&crt);
+        set(&mut image, 8, 0x1000);
+        set(&mut image, 16, 40);
+        assert!(pe_imports(&image).is_err(), "name beyond the stored bytes");
+        let mut image = pe_importing(&crt);
+        set(&mut image, 8, 40);
+        set(&mut image, 16, 0x1000);
+        assert!(
+            pe_imports(&image).is_err(),
+            "name beyond the mapped section"
+        );
+    }
+
+    #[test]
+    fn malformed_import_tables_are_errors_rather_than_empty() {
+        let image = pe_importing(&["VCRUNTIME140.dll"]);
+        assert!(pe_imports(&image[..image.len() - 4]).is_err());
+        let mut outside = image.clone();
+        outside[OPTIONAL + 120..OPTIONAL + 124].copy_from_slice(&0x9000_u32.to_le_bytes());
+        assert!(pe_imports(&outside).is_err());
+        let mut unterminated = image;
+        let last = unterminated.len() - 1;
+        unterminated[last] = b'x';
+        assert!(pe_imports(&unterminated).is_err());
+    }
+
+    #[test]
+    fn this_build_links_the_c_runtime_statically() {
+        let image = fs::read(std::env::current_exe().unwrap()).unwrap();
+        let imports = pe_imports(&image).unwrap();
+        assert!(
+            imports.iter().any(|name| name == "kernel32.dll"),
+            "{imports:?}"
+        );
+        assert_eq!(dynamic_crt_imports(&image).unwrap(), Vec::<String>::new());
+    }
+
     #[test]
     fn directory_publication_never_replaces_existing_output() {
         let temporary = Temporary::new("ff-publish").unwrap();

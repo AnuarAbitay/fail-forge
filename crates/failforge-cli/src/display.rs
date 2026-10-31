@@ -106,6 +106,11 @@ fn write_once<W: Write>(writer: &mut W, bytes: &[u8]) -> io::Result<usize> {
     }
 }
 
+/// The spelling of a path shown to a user; Unix paths need no rewriting.
+pub(crate) fn user_path(path: &std::path::Path) -> std::path::PathBuf {
+    path.into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

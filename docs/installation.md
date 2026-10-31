@@ -16,7 +16,7 @@ their original SDK constraints.
 | Requirement | Current support |
 | --- | --- |
 | Operating system | Linux, macOS, or Windows 10 version 1809 or newer on x64 with local NTFS. Platform support does not imply that every distribution or architecture has been tested. See the [Windows scope](windows.md#requirements). |
-| Windows archive runtime | Install the latest supported [Microsoft Visual C++ v14 Redistributable (x64)](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170) before first running either FailForge executable. |
+| Windows archive runtime | The published beta.4 archive requires Microsoft Visual C++ v14 Redistributable for x64. Source revisions containing `.cargo/config.toml` link it statically; their archives do not need it. See the [Windows requirements](windows.md#requirements). |
 | Rust for source builds | Rust and Cargo 1.85.1 or newer, with the platform's C linker. Not required when using a prepared native archive. |
 | Dart adapter SDK | Stable Dart `>=3.13.0 <4.0.0`. A Flutter installation may supply this Dart SDK. |
 | Target package | One standalone Dart or Flutter package with a passing `test` or `flutter_test` suite and prepared dependencies. |

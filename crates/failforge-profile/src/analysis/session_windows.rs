@@ -162,7 +162,7 @@ pub(super) async fn discover(
         recovery: Some(workspace.recovery()?),
     };
     // Connection is bounded; the helper opens cancellation before adapter spawn.
-    tokio::time::timeout(
+    failforge_runner::awake_timeout(
         Duration::from_secs(10),
         owner.control.as_ref().unwrap().connect(),
     )

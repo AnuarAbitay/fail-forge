@@ -8,9 +8,9 @@ or build the tagged source. The historical beta.3 downloads are Linux/macOS only
 
 - Windows 10 version 1809 or newer, x64, with a local NTFS working directory.
 - PowerShell and the Windows `tar.exe` utility for archive installation.
-- Native archives require the latest supported
+- The published beta.4 archive requires the
   [Microsoft Visual C++ v14 Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
-  for x64. Install it before first running either FailForge executable;
+  for x64. Install it before first running either executable;
   [Microsoft's x64 installer](https://aka.ms/vc14/vc_redist.x64.exe) supplies the runtime.
 - A prepared stable Dart SDK `>=3.13.0 <4.0.0`, or Flutter containing that SDK.
   Flutter projects require the Flutter SDK and prepared Flutter dependencies.
@@ -18,6 +18,11 @@ or build the tagged source. The historical beta.3 downloads are Linux/macOS only
   `x86_64-pc-windows-msvc`, Visual Studio Build Tools with the Desktop development
   with C++ workload and a Windows SDK. Archive users do not need Rust, Cargo or
   MSVC build tools.
+
+Source revisions containing the static-runtime configuration in
+`.cargo/config.toml` link the Visual C++ runtime statically. Archives built from
+those revisions do not require the Redistributable. The published beta.4 archive
+and its source tag predate that configuration.
 
 Windows ARM64, network shares, and filesystems without the required file ID,
 locking, ACL, hard-link and atomic rename operations are outside this port's
@@ -162,6 +167,45 @@ replacement of that root summary commits the final generation. During
 publication, readers of several files can observe different generations;
 wait for final `summary.json` and check the run identifiers before combining
 files. `progress.json` remains the live checkpoint.
+
+## Long runs, paths and terminal output
+
+`mutate`, `replay` and `profile generate` hold a Windows power request while
+they run, so the system does not sleep from idleness, including Modern
+Standby. Closing the lid or choosing Sleep still suspends the machine. Command
+and adapter request timeouts count only awake time, but the Dart test runner's
+own per-test timeouts also count sleep. If a baseline or control run times out
+while the system slept, the error says how long it slept; keep the computer
+awake and run again. Wall times in reports include sleep; a closing
+`failforge: the system slept for …` line says how much.
+
+Working copies live under the temporary directory, for example
+`%TEMP%\c<20 characters>\campaign-<32>\work\attempt-<32>\package\`. That prefix
+is about 120 characters plus the length of `%TEMP%`, before the project's own
+relative paths. FailForge itself opens these files relative to directory
+handles and is not limited to 260 characters, but Dart, Flutter and their
+tools may be. For deep Flutter projects (`build`, `.dart_tool`, nested
+packages), either enable
+[Win32 long paths](https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation)
+or start FailForge with a short temporary directory, such as
+`$env:TMP = 'C:\fft'` in the same PowerShell session.
+
+Progress lines such as `failforge: baseline` are written to standard error;
+reports and summaries go to standard output. Windows PowerShell 5.1 shows the
+first standard error line of a native command redirected with `2>&1` as a red
+`NativeCommandError` although nothing failed. Leave standard error
+unredirected, use PowerShell 7, or redirect each stream to its own file.
+
+The first binding of a campaign reads and hashes the Dart SDK, the adapter's
+dependencies and the project's Pub dependencies. Real-time antivirus scanning
+can make this take minutes. Later integrity checks in the same run reuse the
+digest of each file whose identity, size, write time and change time are
+unchanged, unless another process has it open for writing. Files changed
+within the last two seconds are always read again, because file times advance
+in clock ticks. Restoring both times on purpose after an edit is not detected
+between checks. Excluding the SDK and Pub cache directories from real-time
+scanning speeds up the first binding; decide that according to your security
+policy.
 
 ## Verify locally
 

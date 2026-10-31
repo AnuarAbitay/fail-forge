@@ -236,8 +236,10 @@ impl AdapterClient {
             command,
             line: Vec::new(),
         });
+        // Awake time: a request pending across system sleep is not timed out on wake.
         let result =
-            tokio::time::timeout(self.options.request_timeout, self.exchange(&bytes)).await;
+            failforge_runner::awake_timeout(self.options.request_timeout, self.exchange(&bytes))
+                .await;
         match result {
             Ok(Ok(response)) => {
                 self.in_flight = false;
@@ -345,7 +347,7 @@ impl AdapterClient {
             None
         };
         let mut protocol_error = None;
-        let outcome = tokio::time::timeout(self.close_budget, async {
+        let outcome = failforge_runner::awake_timeout(self.close_budget, async {
             let result = loop {
                 tokio::select! {
                     result = self.handle.wait() => break result,
