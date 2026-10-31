@@ -421,14 +421,14 @@ fn open_at(
     let sharing = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
     open_sharing_at(parent, name, directory, writable, create, delete, sharing)
 }
-/// Whether another handle can currently write the regular file `name`. A data
-/// read that denies write sharing then fails with a sharing violation. The
-/// probe closes at once, so it never blocks a later writer.
-pub fn has_writer_at(parent: &File, name: &OsStr) -> io::Result<bool> {
+/// Open a regular file while denying data writes until the returned guard is
+/// dropped. An existing writer makes the guard unavailable; other errors are
+/// preserved. Callers can verify the guard's identity and stamp before reuse.
+pub fn try_read_guard_at(parent: &File, name: &OsStr) -> io::Result<Option<File>> {
     let sharing = FILE_SHARE_READ | FILE_SHARE_DELETE;
     match open_sharing_at(parent, name, Some(false), false, false, false, sharing) {
-        Ok(_) => Ok(false),
-        Err(error) if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION as i32) => Ok(true),
+        Ok(file) => Ok(Some(file)),
+        Err(error) if error.raw_os_error() == Some(ERROR_SHARING_VIOLATION as i32) => Ok(None),
         Err(error) => Err(error),
     }
 }
@@ -884,6 +884,35 @@ pub fn set_readonly(file: &File, readonly: bool) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_guard_denies_writes_until_it_is_dropped() {
+        use std::io::Write;
+
+        let root = std::env::temp_dir().join(format!("ff-read-guard-{}", random_token().unwrap()));
+        std::fs::create_dir(&root).unwrap();
+        let path = root.join("payload");
+        std::fs::write(&path, b"one").unwrap();
+        let parent = directory(&root).unwrap();
+        let name = OsStr::new("payload");
+        let guard = try_read_guard_at(&parent, name).unwrap().unwrap();
+        let blocked = File::options().write(true).open(&path).unwrap_err();
+        assert_eq!(blocked.raw_os_error(), Some(ERROR_SHARING_VIOLATION as i32));
+        assert_eq!(std::fs::read(&path).unwrap(), b"one");
+
+        drop(guard);
+        let mut writer = File::options().write(true).open(&path).unwrap();
+        assert!(try_read_guard_at(&parent, name).unwrap().is_none());
+        writer.write_all(b"two").unwrap();
+        writer.flush().unwrap();
+        drop(writer);
+        let guard = try_read_guard_at(&parent, name).unwrap().unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"two");
+        drop(guard);
+        drop(parent);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn only_stamps_older_than_the_clock_margin_are_settled() {
         let stamp = |last_write, change| Stamp {

@@ -25,6 +25,8 @@ downloads and their verification results.
 
 ### Fixed
 
+- Recheck Windows cached input digests under a retained read guard so an edit
+  completed between the stamp lookup and writer check cannot reuse a stale hash.
 - Keep captured Windows child processes outside the controller's console so
   Ctrl+Break is handled through the CLI's owned Job Object cancellation rather
   than terminating Dart first and producing an infrastructure error.

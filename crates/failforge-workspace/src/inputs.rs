@@ -465,7 +465,12 @@ pub fn hash_file(path: &Path, cancel: &Cancellation) -> Result<String, InputErro
         .file_name()
         .ok_or_else(|| failure("file has no name"))?;
     let mut file = win::regular_at(&parent, name, false, false).map_err(at)?;
-    cached_digest(&mut file, cancel, || win::has_writer_at(&parent, name), &at)
+    cached_digest(
+        &mut file,
+        cancel,
+        || win::try_read_guard_at(&parent, name),
+        &at,
+    )
 }
 
 #[cfg(unix)]
@@ -733,15 +738,19 @@ fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 fn cached_digest(
     file: &mut File,
     cancel: &Cancellation,
-    has_writer: impl FnOnce() -> std::io::Result<bool>,
+    read_guard: impl FnOnce() -> std::io::Result<Option<File>>,
     at: &dyn Fn(std::io::Error) -> std::io::Error,
 ) -> Result<String, InputError> {
     use crate::windows_fs as win;
     let before = win::stamp(file).map_err(at)?;
     let cached = lock(&DIGESTS).get(&before).cloned();
     if let Some(digest) = cached {
-        if !has_writer().map_err(at)? {
-            return Ok(digest);
+        if let Some(guard) = read_guard().map_err(at)? {
+            // Keep writes denied through the decision. The guard must name the
+            // same file and unchanged bytes, not merely find no open writer.
+            if win::stamp(&guard).map_err(at)? == before {
+                return Ok(digest);
+            }
         }
     }
     let mut digest = Sha256::new();
@@ -828,7 +837,7 @@ fn tree(
                     let digest = cached_digest(
                         &mut file,
                         cancel,
-                        || win::has_writer_at(dir, &name),
+                        || win::try_read_guard_at(dir, &name),
                         &path_error,
                     )?;
                     win::same_entry(dir, &name, &file).map_err(at(&relative))?;
@@ -1053,7 +1062,7 @@ mod windows_tree_tests {
         let before = win::stamp(&input).unwrap();
         assert!(before.settled());
         let injected = Cell::new(false);
-        let probe_busy = Cell::new(None);
+        let guard_available = Cell::new(None);
         let at = |error| win::at_path(&path, error);
         let actual = cached_digest(
             &mut input,
@@ -1067,9 +1076,9 @@ mod windows_tree_tests {
                 writer.flush()?;
                 drop(writer);
                 injected.set(true);
-                let busy = win::has_writer_at(&parent, name)?;
-                probe_busy.set(Some(busy));
-                Ok(busy)
+                let guard = win::try_read_guard_at(&parent, name)?;
+                guard_available.set(Some(guard.is_some()));
+                Ok(guard)
             },
             &at,
         )
@@ -1082,9 +1091,9 @@ mod windows_tree_tests {
 
         assert!(injected.get(), "the cache-hit writer probe must execute");
         assert_eq!(
-            probe_busy.get(),
-            Some(false),
-            "the completed writer must be absent during the actual probe"
+            guard_available.get(),
+            Some(true),
+            "the completed writer must allow the actual read guard"
         );
         assert_ne!(after, before, "the completed edit must move its stamp");
         assert_eq!(
