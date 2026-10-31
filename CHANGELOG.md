@@ -6,11 +6,40 @@ downloads and their verification results.
 
 ## Unreleased
 
+### Changed
+
+- Windows executables link the Visual C++ runtime statically. Archives no longer
+  require the Visual C++ Redistributable, which previously made both executables
+  exit with `0xC0000135` and no message. Packaging rejects any executable that
+  still imports the dynamic runtime, including delay-loaded and pre-2015
+  runtimes.
+- Windows integrity checks within one run reuse a file's digest while its
+  identity, size, write time and change time are unchanged and no other
+  process has it open for writing. Files changed in the last two seconds are
+  always reread. A profile no longer rereads the Dart SDK and Pub cache for
+  every family.
+- Windows terminal output and error messages show paths without the `\\?\`
+  prefix when the ordinary spelling is unambiguous.
+- `doctor` prints a `Cause:` line with the failing path and error for adapter
+  dependency and project checks, before the suggested fix.
+
 ### Fixed
 
 - Keep captured Windows child processes outside the controller's console so
   Ctrl+Break is handled through the CLI's owned Job Object cancellation rather
   than terminating Dart first and producing an infrastructure error.
+- Accept a leading UTF-8 byte-order mark in mutation profiles and project
+  `pubspec.yaml` files, as written by Windows PowerShell 5.1 and some editors.
+  Such files previously failed with `invalid YAML configuration`.
+- On Windows, system sleep no longer expires command or adapter request
+  timeouts, which now count only awake time. `mutate`, `replay` and
+  `profile generate` hold a power request against idle sleep and Modern
+  Standby. A control run that timed out while the system slept names the sleep
+  in its error, and runs report how long the system slept.
+- Windows input errors include the path and the operating-system error. An entry
+  redirected by a file-system filter (MSIX virtualization, sandboxes, sync
+  clients) now reports NTSTATUS `0xC000050B` with a remedy instead of a bare
+  localized message.
 
 ## 0.1.0-beta.4 — 2026-10-28
 

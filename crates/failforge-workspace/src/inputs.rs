@@ -455,6 +455,20 @@ fn skip(relative: &Path, source: bool) -> bool {
             })
 }
 
+#[cfg(windows)]
+pub fn hash_file(path: &Path, cancel: &Cancellation) -> Result<String, InputError> {
+    use crate::windows_fs as win;
+    cancel.check()?;
+    let at = |error| win::at_path(path, error);
+    let parent = win::directory(path.parent().ok_or_else(|| failure("file has no parent"))?)?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| failure("file has no name"))?;
+    let mut file = win::regular_at(&parent, name, false, false).map_err(at)?;
+    cached_digest(&mut file, cancel, || win::has_writer_at(&parent, name), &at)
+}
+
+#[cfg(unix)]
 pub fn hash_file(path: &Path, cancel: &Cancellation) -> Result<String, InputError> {
     cancel.check()?;
     let mut file = regular_file(path)?;
@@ -695,6 +709,68 @@ pub fn copy_snapshot(
     Ok(copied)
 }
 
+/// File digests from earlier walks in this process, by identity and stamp.
+/// A campaign re-verifies the SDK and every dependency tree many times; with
+/// real-time antivirus scanning each full read of the Dart SDK and Pub cache
+/// took tens of seconds. Writes change the stamp, so edits are still found.
+/// The cache never outlives the process, so separate executions hash afresh.
+#[cfg(windows)]
+static DIGESTS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<crate::windows_fs::Stamp, String>>,
+> = std::sync::LazyLock::new(Default::default);
+
+#[cfg(windows)]
+fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The SHA-256 of an open regular file. A cached digest is reused only while
+/// the stamp is unchanged and no other handle can write the file: NTFS may
+/// move the times of an open writer only when it closes.
+#[cfg(windows)]
+fn cached_digest(
+    file: &mut File,
+    cancel: &Cancellation,
+    has_writer: impl FnOnce() -> std::io::Result<bool>,
+    at: &dyn Fn(std::io::Error) -> std::io::Error,
+) -> Result<String, InputError> {
+    use crate::windows_fs as win;
+    let before = win::stamp(file).map_err(at)?;
+    let cached = lock(&DIGESTS).get(&before).cloned();
+    if let Some(digest) = cached {
+        if !has_writer().map_err(at)? {
+            return Ok(digest);
+        }
+    }
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 65536];
+    loop {
+        cancel.check()?;
+        let count = file.read(&mut buffer).map_err(at)?;
+        if count == 0 {
+            break;
+        }
+        #[cfg(test)]
+        HASHED_BYTES.with(|bytes| bytes.set(bytes.get() + count));
+        digest.update(&buffer[..count]);
+    }
+    let digest = format!("{:x}", digest.finalize());
+    // A write during the read changes the stamp, and a recent stamp may not
+    // change on the next write within the same clock tick; cache neither.
+    if before.settled() && win::stamp(file).map_err(at)? == before {
+        lock(&DIGESTS).insert(before, digest.clone());
+    }
+    Ok(digest)
+}
+
+#[cfg(all(test, windows))]
+thread_local! {
+    /// File bytes this thread read to hash, so tests can observe cache hits.
+    static HASHED_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 #[cfg(windows)]
 fn tree(
     root: &Path,
@@ -705,6 +781,7 @@ fn tree(
     depth: usize,
 ) -> Result<(), InputError> {
     fn visit(
+        root: &Path,
         dir: &File,
         prefix: &Path,
         source: bool,
@@ -716,7 +793,11 @@ fn tree(
         if depth > 128 {
             return Err(failure("input tree exceeds supported depth"));
         }
-        for name in win::names(dir)? {
+        let at = |relative: &Path| {
+            let path = root.join(relative);
+            move |error| win::at_path(&path, error)
+        };
+        for name in win::names(dir).map_err(at(prefix))? {
             cancel.check()?;
             let relative = prefix.join(&name);
             if skip(&relative, source) {
@@ -724,22 +805,33 @@ fn tree(
             }
             match win::directory_at(dir, &name) {
                 Ok(child) => {
-                    visit(&child, &relative, source, result, cancel, depth + 1)?;
-                    win::same_entry(dir, &name, &child)?;
+                    visit(root, &child, &relative, source, result, cancel, depth + 1)?;
+                    win::same_entry(dir, &name, &child).map_err(at(&relative))?;
                 }
-                Err(_) => {
-                    let mut file = win::regular_at(dir, &name, false, false)?;
-                    let mut digest = Sha256::new();
-                    let mut buffer = [0; 65536];
-                    loop {
-                        cancel.check()?;
-                        let count = file.read(&mut buffer)?;
-                        if count == 0 {
-                            break;
+                Err(directory) => {
+                    // ERROR_DIRECTORY: the entry is not a directory, so the file
+                    // open decides. Otherwise report both failed opens.
+                    let mut file = match win::regular_at(dir, &name, false, false) {
+                        Ok(file) => file,
+                        Err(error) if directory.raw_os_error() == Some(267) => {
+                            return Err(at(&relative)(error).into());
                         }
-                        digest.update(&buffer[..count]);
-                    }
-                    win::same_entry(dir, &name, &file)?;
+                        Err(error) => {
+                            let both = std::io::Error::new(
+                                directory.kind(),
+                                format!("{directory}; opening it as a file: {error}"),
+                            );
+                            return Err(at(&relative)(both).into());
+                        }
+                    };
+                    let path_error = at(&relative);
+                    let digest = cached_digest(
+                        &mut file,
+                        cancel,
+                        || win::has_writer_at(dir, &name),
+                        &path_error,
+                    )?;
+                    win::same_entry(dir, &name, &file).map_err(at(&relative))?;
                     result.files.insert(
                         PathBuf::from(
                             relative
@@ -747,7 +839,7 @@ fn tree(
                                 .ok_or_else(|| failure("input paths must be UTF-8"))?
                                 .replace('\\', "/"),
                         ),
-                        format!("{:x}", digest.finalize()),
+                        digest,
                     );
                 }
             }
@@ -755,5 +847,245 @@ fn tree(
         Ok(())
     }
     let directory = crate::windows_fs::directory(&root.join(relative))?;
-    visit(&directory, relative, source, result, cancel, depth)
+    visit(root, &directory, relative, source, result, cancel, depth)
+}
+
+#[cfg(all(test, windows))]
+mod windows_tree_tests {
+    use super::*;
+    use std::fs;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_BASIC_INFO, FileBasicInfo, GetFileInformationByHandleEx, SetFileInformationByHandle,
+    };
+
+    fn times(file: &fs::File) -> FILE_BASIC_INFO {
+        let mut times = FILE_BASIC_INFO::default();
+        let size = size_of::<FILE_BASIC_INFO>() as u32;
+        let handle = file.as_raw_handle();
+        assert_ne!(
+            unsafe {
+                GetFileInformationByHandleEx(handle, FileBasicInfo, (&raw mut times).cast(), size)
+            },
+            0
+        );
+        times
+    }
+
+    fn set_times(file: &fs::File, times: &FILE_BASIC_INFO) {
+        let size = size_of::<FILE_BASIC_INFO>() as u32;
+        let handle = file.as_raw_handle();
+        assert_ne!(
+            unsafe {
+                SetFileInformationByHandle(
+                    handle,
+                    FileBasicInfo,
+                    std::ptr::from_ref(times).cast(),
+                    size,
+                )
+            },
+            0
+        );
+    }
+
+    /// Move the write and change times `hours` back, so the stamp is settled.
+    /// The whole test may run within one clock tick; distinct ages keep the
+    /// stamps of successive contents distinct.
+    fn age(path: &Path, hours: i64) {
+        let file = fs::File::options().write(true).open(path).unwrap();
+        let mut old = times(&file);
+        old.LastWriteTime -= hours * 3600 * 10_000_000;
+        old.ChangeTime -= hours * 3600 * 10_000_000;
+        set_times(&file, &old);
+    }
+
+    #[test]
+    fn repeated_walks_reuse_digests_until_a_file_is_written() {
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("ff-tree-cache-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("a.dart");
+        let read = || HASHED_BYTES.with(|bytes| bytes.replace(0));
+        let walk = || {
+            let tree = bound_tree(&root, &Cancellation::default()).unwrap();
+            (read(), tree.files[Path::new("a.dart")].clone())
+        };
+        let sha = |text: &str| format!("{:x}", Sha256::digest(text));
+        fs::write(&file, "one").unwrap();
+        read();
+        // A just-written file may be rewritten within the same clock tick
+        // without moving its times, so its digest is never cached.
+        assert_eq!(walk(), (3, sha("one")));
+        assert_eq!(walk(), (3, sha("one")));
+        fs::write(&file, "two").unwrap();
+        assert_eq!(walk(), (3, sha("two")));
+        // A settled file is read once and then reused.
+        age(&file, 1);
+        assert_eq!(walk(), (3, sha("two")));
+        assert_eq!(walk(), (0, sha("two")));
+        // Same size, new content: the write time and change time move.
+        fs::write(&file, "six").unwrap();
+        assert_eq!(walk(), (3, sha("six")));
+        age(&file, 2);
+        assert_eq!(walk(), (3, sha("six")));
+        // Restoring the write time cannot hide a write: the change time moved.
+        let modified = fs::metadata(&file).unwrap().modified().unwrap();
+        fs::write(&file, "ten").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        assert_eq!(fs::metadata(&file).unwrap().modified().unwrap(), modified);
+        let restored = walk();
+        let _ = fs::remove_dir_all(&root);
+        assert_eq!(restored, (3, sha("ten")));
+    }
+
+    #[test]
+    fn an_open_writer_bypasses_the_cached_digest_even_with_unchanged_times() {
+        use std::io::Write;
+        use std::os::windows::fs::OpenOptionsExt;
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("ff-tree-writer-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("a.dart");
+        fs::write(&file, "one").unwrap();
+        age(&file, 3);
+        let read = || HASHED_BYTES.with(|bytes| bytes.replace(0));
+        let digest = |tree: &BoundTree| tree.files[Path::new("a.dart")].clone();
+        let sha = |text: &str| format!("{:x}", Sha256::digest(text));
+        read();
+        assert_eq!(
+            digest(&bound_tree(&root, &Cancellation::default()).unwrap()),
+            sha("one")
+        );
+        assert_eq!(
+            hash_file(&file, &Cancellation::default()).unwrap(),
+            sha("one")
+        );
+        assert_eq!(read(), 3, "the second read is a cache hit");
+        // An open writer may move the times only when it closes, so the stamp
+        // cannot vouch for the content while it stays open, even unchanged.
+        // Opening for writing already moves the change time on NTFS; put the
+        // cached times back to reach the writer check itself.
+        let cached_times = times(&fs::File::open(&file).unwrap());
+        let writer = fs::File::options().write(true).open(&file).unwrap();
+        set_times(&writer, &cached_times);
+        let tree = bound_tree(&root, &Cancellation::default()).unwrap();
+        let single = hash_file(&file, &Cancellation::default()).unwrap();
+        assert_eq!((digest(&tree), single), (sha("one"), sha("one")));
+        assert_eq!(
+            read(),
+            6,
+            "both reads bypass the cache while a writer is open"
+        );
+        drop(writer);
+        assert_eq!(
+            hash_file(&file, &Cancellation::default()).unwrap(),
+            sha("one")
+        );
+        assert_eq!(
+            read(),
+            0,
+            "the cache is trusted again once the writer closed"
+        );
+        // A writer that changed the file cannot put the change time back
+        // while it stays open; NTFS reports the write.
+        let mut writer = fs::File::options().write(true).open(&file).unwrap();
+        let settled = times(&writer);
+        writer.write_all(b"two").unwrap();
+        set_times(&writer, &settled);
+        let changed = hash_file(&file, &Cancellation::default()).unwrap();
+        drop(writer);
+        assert_eq!((changed, read()), (sha("two"), 3));
+        // A file locked against every other open fails as a file, without the
+        // directory open's error appended.
+        let locked = fs::File::options()
+            .read(true)
+            .share_mode(0)
+            .open(&file)
+            .unwrap();
+        let error = bound_tree(&root, &Cancellation::default())
+            .unwrap_err()
+            .to_string();
+        drop(locked);
+        let _ = fs::remove_dir_all(&root);
+        assert!(error.contains(&crate::display_path(&file)), "{error}");
+        assert!(!error.contains("opening it as a file"), "{error}");
+    }
+
+    #[test]
+    fn walks_deeper_than_the_supported_depth_are_rejected() {
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("ff-tree-depth-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        // A walk accepts directories nested 128 deep and rejects 129.
+        let nested = |name: &str, depth| {
+            let top = root.join(name);
+            fs::create_dir_all((0..depth).fold(top.clone(), |path, _| path.join("d"))).unwrap();
+            top
+        };
+        let (deep, shallow) = (nested("deep", 129), nested("ok", 128));
+        let error = bound_tree(&deep, &Cancellation::default())
+            .unwrap_err()
+            .to_string();
+        let accepted = bound_tree(&shallow, &Cancellation::default());
+        let _ = fs::remove_dir_all(&root);
+        assert!(
+            error.contains("input tree exceeds supported depth"),
+            "{error}"
+        );
+        accepted.unwrap();
+    }
+
+    #[test]
+    fn tree_errors_name_the_entry_and_keep_the_directory_open_reason() {
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("ff-tree-errors-{}", std::process::id()));
+        let tree = root.join("tree");
+        let outside = root.join("outside");
+        fs::create_dir_all(tree.join("nested")).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(tree.join("nested").join("file.dart"), "void main() {}").unwrap();
+        bound_tree(&tree, &Cancellation::default()).unwrap();
+        // Junction creation needs no symlink privilege.
+        let alias = tree.join("nested").join("alias");
+        assert!(
+            std::process::Command::new("cmd.exe")
+                .args(["/D", "/C", "mklink", "/J"])
+                .arg(&alias)
+                .arg(&outside)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+        let error = bound_tree(&tree, &Cancellation::default())
+            .unwrap_err()
+            .to_string();
+        let _ = fs::remove_dir(&alias);
+        let _ = fs::remove_dir_all(&root);
+        assert!(
+            error.starts_with("cannot read or copy workspace inputs: "),
+            "{error}"
+        );
+        assert!(error.contains(&crate::display_path(&alias)), "{error}");
+        assert!(!error.contains(r"\\?\"), "{error}");
+        assert!(
+            error.contains("reparse points are outside supported workspaces"),
+            "{error}"
+        );
+    }
 }

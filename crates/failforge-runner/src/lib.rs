@@ -35,6 +35,7 @@
 //! kill-on-close Job Object assigned before the child starts running. Runtime abort,
 //! controller SIGKILL, and blocking OS/filesystem calls have explicit limits.
 
+mod awake;
 mod output;
 #[cfg(unix)]
 mod platform;
@@ -60,6 +61,7 @@ mod workspace_lease;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 compile_error!("FailForge's first-stage process backend supports Linux, macOS and Windows only");
 
+pub use awake::{AwakeInstant, AwakeTimeout, awake_timeout};
 pub use output::{OutputStream, StreamChunk, StreamReceiver};
 #[cfg(windows)]
 pub use prepare::windows_process_path;

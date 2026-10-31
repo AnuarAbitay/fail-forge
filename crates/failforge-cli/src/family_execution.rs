@@ -12,13 +12,14 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 #[cfg(unix)]
 use crate::signals::{SignalKind, signal};
 use failforge_dart::discovery::verify_candidate;
 use failforge_dart::namespace::NamespaceError;
 use failforge_dart::{InitializationHandoff, SelectionContext};
+use failforge_runner::AwakeInstant;
 use failforge_workspace::lifecycle::LifecycleCaps;
 #[cfg(any(unix, test))]
 use failforge_workspace::parse_json;
@@ -497,6 +498,27 @@ fn stage(
     Ok(())
 }
 
+/// Suspension shorter than this is clock noise, not a sleep worth reporting.
+const SLEEP_NOTICE: Duration = Duration::from_secs(1);
+
+/// Name system sleep in a control that timed out while sleep overlapped it.
+/// Command timeouts skip sleep, but Dart's own per-test timeouts count it.
+/// Other failures keep their message: sleep did not cause them.
+fn control_failure(message: &str, attempt: &Value, suspended: Duration) -> String {
+    let timed_out = matches!(
+        attempt["reason"].as_str(),
+        Some("runner_timeout" | "test_timeout")
+    );
+    if !timed_out || suspended < SLEEP_NOTICE {
+        return message.into();
+    }
+    format!(
+        "{message}; the system slept for {}s during this run, which can expire \
+         Dart test timeouts; keep the computer awake and run again",
+        suspended.as_secs()
+    )
+}
+
 fn require_passing(
     attempt: &Value,
     cancel: &Cancellation,
@@ -535,6 +557,7 @@ async fn run_family(
     let baseline_caps = caps.try_clone()?;
     stage(stream, "baseline", None)?;
     let begin = Instant::now();
+    let awake = AwakeInstant::now();
     let baseline = crate::attempt::run_owned(
         baseline_request,
         baseline_caps,
@@ -550,7 +573,11 @@ async fn run_family(
     require_passing(
         &baseline.attempt,
         cancel,
-        "original baseline did not pass; no mutation score established",
+        &control_failure(
+            "original baseline did not pass; no mutation score established",
+            &baseline.attempt,
+            awake.suspended_elapsed(),
+        ),
     )?;
     let baseline = Arc::new(baseline_evidence(&request, baseline)?);
     let _replay_control = if request.retained_expected.is_some() {
@@ -562,6 +589,7 @@ async fn run_family(
         )?;
         stage(stream, "original_before", None)?;
         let begin = Instant::now();
+        let awake = AwakeInstant::now();
         let control = crate::attempt::run_owned(
             control_request,
             caps.try_clone()?,
@@ -581,7 +609,11 @@ async fn run_family(
         require_passing(
             &control.attempt,
             cancel,
-            "second original control before replay did not pass",
+            &control_failure(
+                "second original control before replay did not pass",
+                &control.attempt,
+                awake.suspended_elapsed(),
+            ),
         )?;
         verify_frozen(Arc::clone(&request)).await?;
         Some(control)
@@ -635,6 +667,7 @@ async fn run_family(
     let control_caps = caps.try_clone()?;
     stage(stream, "original_after", None)?;
     let begin = Instant::now();
+    let awake = AwakeInstant::now();
     let control =
         crate::attempt::run_owned(control_request, control_caps, cancel, Publication::Attempt)
             .await;
@@ -646,10 +679,15 @@ async fn run_family(
         "original_after",
         Some(begin.elapsed().as_secs_f64()),
     )?;
+    let control = control?;
     require_passing(
-        &control?.attempt,
+        &control.attempt,
         cancel,
-        "original control after mutations did not pass",
+        &control_failure(
+            "original control after mutations did not pass",
+            &control.attempt,
+            awake.suspended_elapsed(),
+        ),
     )?;
     if ledger.ids.len() != request.candidates.len() {
         return Err(invalid("family did not process every discovered mutant"));

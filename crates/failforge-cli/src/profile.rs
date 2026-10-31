@@ -138,12 +138,12 @@ async fn generate(arguments: &ProfileGenerateArgs, context: &Context) -> Result<
                 options.force,
                 Some(&draft.binding),
             )?;
-            let output = draft
-                .output
+            let output = crate::display::user_path(&draft.output);
+            let output = output
                 .to_str()
                 .ok_or_else(|| ProfileError::Config("profile output must be Unicode".into()))?;
-            let installation = context
-                .installation
+            let installation = crate::display::user_path(&context.installation);
+            let installation = installation
                 .to_str()
                 .ok_or_else(|| ProfileError::Config("installation must be Unicode".into()))?;
             emit(
@@ -171,7 +171,12 @@ pub(crate) fn execute(arguments: ProfileGenerateArgs, invocation_cwd: &Path) -> 
             .worker_threads(1)
             .enable_all()
             .build()?;
-        runtime.block_on(generate(&arguments, &context))
+        let awake = failforge_runner::AwakeInstant::now();
+        let result = runtime.block_on(generate(&arguments, &context));
+        if let Some(note) = crate::keep_awake::sleep_note(awake.suspended_elapsed()) {
+            let _ = emit(true, note.as_bytes());
+        }
+        result
     })();
     match result {
         Ok(()) => ExitCode::SUCCESS,

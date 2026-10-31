@@ -15,8 +15,8 @@ use tokio::sync::watch;
 use crate::output::{OutputSession, OutputSnapshot, StreamReceiver};
 use crate::platform::ManagedChild;
 use crate::{
-    CancelReason, CleanupReport, CommandResult, CommandSpec, CompletionCause, GroupState,
-    RunTimings, RunnerError, SignalOutcome, SignalRecord,
+    AwakeInstant, CancelReason, CleanupReport, CommandResult, CommandSpec, CompletionCause,
+    GroupState, RunTimings, RunnerError, SignalOutcome, SignalRecord,
 };
 
 const POLL: Duration = Duration::from_millis(5);
@@ -264,6 +264,7 @@ impl Runner {
         let mut child = ManagedChild::spawn(&mut command)
             .map_err(|error| RunnerError::preparation("spawn", error))?;
         let spawned = Instant::now();
+        let awake = AwakeInstant::now();
         let spawn = spawn_start.elapsed();
         let mut guard = SupervisorGuard {
             registry: self.registry.clone(),
@@ -292,7 +293,7 @@ impl Runner {
         // A private task and its guard retain ownership even if a wait future
         // or public handle is dropped. No raw Child or abort handle is exposed.
         runtime.spawn(async move {
-            supervise(child, output, spec, spawned, setup_error, &mut guard).await;
+            supervise(child, output, spec, spawned, awake, setup_error, &mut guard).await;
         });
         Ok(RunHandle {
             record,
@@ -517,14 +518,13 @@ async fn supervise(
     mut output: OutputSession,
     spec: CommandSpec,
     spawned: Instant,
+    awake: AwakeInstant,
     setup_error: Option<io::Error>,
     guard: &mut SupervisorGuard,
 ) {
     tracing::debug!(pid = child.id(), "supervisor started");
-    let timeout = spec
-        .timeout_policy
-        .timeout
-        .and_then(|value| spawned.checked_add(value));
+    // The command timeout counts awake time: sleep must not expire it on wake.
+    let timeout = spec.timeout_policy.timeout;
     let mut failed = setup_error.is_some();
     if let Some(error) = setup_error {
         record_error(&mut guard.cleanup, "output setup", &error);
@@ -539,7 +539,7 @@ async fn supervise(
             }
         };
         let output_failed = output.failure().is_some();
-        let timed_out = timeout.is_some_and(|deadline| Instant::now() >= deadline);
+        let timed_out = timeout.is_some_and(|limit| awake.awake_elapsed() >= limit);
         let selected =
             lock(&guard.record.control).select(completed, failed, output_failed, timed_out);
         if let Some(cause) = selected {

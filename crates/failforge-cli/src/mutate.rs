@@ -417,6 +417,7 @@ fn execute_selected(
             .worker_threads(2)
             .enable_all()
             .build()?;
+        let awake = failforge_runner::AwakeInstant::now();
         let (report, signal) = runtime.block_on(run(plan, &display, parent))?;
         let status = exit_status(&report.summary, signal);
         display.text(
@@ -424,11 +425,16 @@ fn execute_selected(
             format!(
                 "{}\nReport: {}\n",
                 report.terminal,
-                Path::new(report.summary["output"].as_str().unwrap_or(""))
-                    .join("summary.json")
-                    .display()
+                crate::display::user_path(
+                    &Path::new(report.summary["output"].as_str().unwrap_or(""))
+                        .join("summary.json")
+                )
+                .display()
             ),
         )?;
+        if let Some(note) = crate::keep_awake::sleep_note(awake.suspended_elapsed()) {
+            display.text(true, note)?;
+        }
         if status == 125 {
             if let Some(error) = report.summary["error"].as_str() {
                 display.text(true, format!("failforge: {error}\n"))?;

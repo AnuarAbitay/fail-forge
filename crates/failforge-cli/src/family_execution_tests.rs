@@ -199,6 +199,38 @@ fn terminal_success_requires_complete_and_conclusive_published_records() {
 }
 
 #[test]
+fn control_failures_name_system_sleep_only_when_it_happened() {
+    let message = "original baseline did not pass; no mutation score established";
+    let runner = json!({"outcome":"TIMEOUT","reason":"runner_timeout"});
+    assert_eq!(control_failure(message, &runner, Duration::ZERO), message);
+    assert_eq!(
+        control_failure(message, &runner, Duration::from_millis(999)),
+        message
+    );
+    let slept = control_failure(message, &runner, Duration::from_secs(1));
+    assert!(slept.starts_with(message), "{slept}");
+    assert!(slept.contains("the system slept for 1s"), "{slept}");
+    assert!(
+        control_failure(message, &runner, Duration::from_secs(10_831)).contains("slept for 10831s"),
+        "hours of sleep are reported in seconds"
+    );
+    let test = json!({"outcome":"KILLED","reason":"test_timeout"});
+    assert!(control_failure(message, &test, Duration::from_secs(5)).contains("slept for 5s"));
+    // Sleep did not cause an ordinary failing test or an integrity error.
+    for attempt in [
+        json!({"outcome":"KILLED","reason":"test_failure"}),
+        json!({"outcome":"INFRA_ERROR","reason":"runner_not_completed"}),
+        json!({"outcome":"KILLED"}),
+    ] {
+        assert_eq!(
+            control_failure(message, &attempt, Duration::from_secs(600)),
+            message,
+            "{attempt}"
+        );
+    }
+}
+
+#[test]
 fn passing_controls_and_family_terminals_never_hide_integrity_as_cancellation() {
     let cancel = Cancellation::default();
     let ledger = Ledger::default();
