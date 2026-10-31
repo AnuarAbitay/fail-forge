@@ -1023,6 +1023,78 @@ mod windows_tree_tests {
     }
 
     #[test]
+    fn a_writer_closed_between_the_cached_stamp_and_probe_cannot_hide_an_edit() {
+        use crate::windows_fs as win;
+        use std::cell::Cell;
+        use std::ffi::OsStr;
+        use std::io::Write;
+
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("ff-tree-closed-writer-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("a.dart");
+        fs::write(&path, b"one").unwrap();
+        age(&path, 3);
+        let cancel = Cancellation::default();
+        let sha = |bytes: &[u8]| format!("{:x}", Sha256::digest(bytes));
+        let read = || HASHED_BYTES.with(|bytes| bytes.replace(0));
+        read();
+        assert_eq!(hash_file(&path, &cancel).unwrap(), sha(b"one"));
+        assert_eq!(hash_file(&path, &cancel).unwrap(), sha(b"one"));
+        assert_eq!(read(), 3, "the second settled read must use the cache");
+
+        let parent = win::directory(&root).unwrap();
+        let name = OsStr::new("a.dart");
+        let mut input = win::regular_at(&parent, name, false, false).unwrap();
+        let identity = win::identity(&input).unwrap();
+        let before = win::stamp(&input).unwrap();
+        assert!(before.settled());
+        let injected = Cell::new(false);
+        let probe_busy = Cell::new(None);
+        let at = |error| win::at_path(&path, error);
+        let actual = cached_digest(
+            &mut input,
+            &cancel,
+            || {
+                // This callback runs after cached_digest reads the old stamp.
+                // Finish a same-size edit before the real writer probe runs;
+                // no sleep, racing thread, or forged post-write time is needed.
+                let mut writer = fs::File::options().write(true).open(&path)?;
+                writer.write_all(b"two")?;
+                writer.flush()?;
+                drop(writer);
+                injected.set(true);
+                let busy = win::has_writer_at(&parent, name)?;
+                probe_busy.set(Some(busy));
+                Ok(busy)
+            },
+            &at,
+        )
+        .unwrap();
+        let after = win::stamp(&input).unwrap();
+        assert_eq!(win::identity(&input).unwrap(), identity);
+        drop(input);
+        drop(parent);
+        fs::remove_dir_all(&root).unwrap();
+
+        assert!(injected.get(), "the cache-hit writer probe must execute");
+        assert_eq!(
+            probe_busy.get(),
+            Some(false),
+            "the completed writer must be absent during the actual probe"
+        );
+        assert_ne!(after, before, "the completed edit must move its stamp");
+        assert_eq!(
+            actual,
+            sha(b"two"),
+            "a closed writer left stale cached bytes"
+        );
+    }
+
+    #[test]
     fn walks_deeper_than_the_supported_depth_are_rejected() {
         let root = std::env::temp_dir()
             .canonicalize()
