@@ -6,8 +6,6 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -782,9 +780,7 @@ impl Harness {
         common::check_interrupt()?;
         self.registry_clean()?;
         let directory = self.output.join(&case.name);
-        fs::create_dir(&directory)?;
-        #[cfg(unix)]
-        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+        common::private_directory(&directory)?;
         let cancel = failforge_workspace::Cancellation::default();
         let before = failforge_workspace::source_hashes(&case.project, &cancel)?;
         common::write_json(
