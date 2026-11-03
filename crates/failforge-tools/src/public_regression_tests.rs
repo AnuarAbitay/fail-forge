@@ -76,6 +76,7 @@ fn direct_routing_keeps_each_argument_literal_and_freezes_workers() {
         sdk: "/sdk".into(),
         output: "/output".into(),
         temp_root: "/tmp/ff-test".into(),
+        env_temp: "/tmp/ff-test".into(),
     };
     let command = harness
         .selected_command(
@@ -114,6 +115,7 @@ fn profile_rewrite_only_changes_fresh_copy_and_rejects_existing_reserved_path() 
         sdk: "/sdk".into(),
         output: "/output".into(),
         temp_root: "/tmp/ff-test".into(),
+        env_temp: "/tmp/ff-test".into(),
     };
     harness
         .selected_command(
@@ -227,6 +229,7 @@ fn actual_registry_rejects_campaigns_and_pending_reapers() {
         sdk: "/sdk".into(),
         output: "/output".into(),
         temp_root: temp.0.clone(),
+        env_temp: temp.environment_path().unwrap(),
     };
     harness.registry_clean().unwrap();
     for name in ["campaign-active", "pending-reaper"] {

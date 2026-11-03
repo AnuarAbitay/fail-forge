@@ -266,6 +266,29 @@ pub fn tree(path: &Path) -> Result<BTreeMap<String, String>> {
 
 pub struct Temporary(pub PathBuf);
 impl Temporary {
+    /// A temporary-directory hint for child runtimes that round-trip file URIs.
+    /// Keep the canonical path in `self.0` for ownership and cleanup.
+    pub fn environment_path(&self) -> Result<PathBuf> {
+        #[cfg(windows)]
+        {
+            use std::path::{Component, Prefix};
+            let ordinary = failforge_runner::windows_process_path(&self.0);
+            if !matches!(ordinary.components().next(), Some(Component::Prefix(prefix))
+                if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::UNC(..)))
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "temporary directory needs a short, unambiguous Windows drive or UNC path",
+                )
+                .into());
+            }
+            Ok(ordinary)
+        }
+        #[cfg(unix)]
+        {
+            Ok(self.0.clone())
+        }
+    }
     pub fn new(prefix: &str) -> Result<Self> {
         Self::new_in(&std::env::temp_dir(), prefix)
     }
@@ -730,6 +753,70 @@ mod tree_tests {
 #[cfg(all(test, windows))]
 mod windows_tests {
     use super::*;
+    #[test]
+    fn temporary_environment_keeps_unicode_identity_and_canonical_cleanup() {
+        use failforge_workspace::windows_fs;
+        use std::ffi::OsStr;
+        use std::path::{Component, Prefix};
+        let parent = Temporary::new("ff-env-path").unwrap();
+        let path = parent.0.join("данные-😀");
+        private_directory(&path).unwrap();
+        let temporary = Temporary(path.canonicalize().unwrap());
+        let canonical = temporary.0.clone();
+        fs::write(canonical.join("payload"), b"owned payload").unwrap();
+
+        let environment = temporary.environment_path().unwrap();
+        assert!(
+            matches!(environment.components().next(), Some(Component::Prefix(prefix))
+            if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::UNC(..)))
+        );
+        assert_eq!(environment.file_name(), Some(OsStr::new("данные-😀")));
+        assert_eq!(
+            windows_fs::identity(&windows_fs::directory(&canonical).unwrap()).unwrap(),
+            windows_fs::identity(&windows_fs::directory(&environment).unwrap()).unwrap()
+        );
+        assert_eq!(
+            fs::read(environment.join("payload")).unwrap(),
+            b"owned payload"
+        );
+        assert_eq!(temporary.0, canonical);
+        drop(temporary);
+        assert!(!canonical.exists());
+        assert!(!environment.exists());
+    }
+
+    #[test]
+    fn temporary_environment_rejects_ambiguous_and_long_owned_directories() {
+        let parent = Temporary::new("ff-env-reject").unwrap();
+        let alias = parent.0.join("sensitive");
+        private_directory(&alias).unwrap();
+        fs::write(alias.join("payload"), b"alias control").unwrap();
+        for name in ["sensitive.", "sensitive "] {
+            let path = parent.0.join(name);
+            private_directory(&path).unwrap();
+            let temporary = Temporary(path.canonicalize().unwrap());
+            fs::write(temporary.0.join("payload"), b"literal payload").unwrap();
+            assert!(temporary.environment_path().is_err());
+            assert_eq!(
+                fs::read(temporary.0.join("payload")).unwrap(),
+                b"literal payload"
+            );
+            assert_eq!(fs::read(alias.join("payload")).unwrap(), b"alias control");
+        }
+        let mut long = parent.0.clone();
+        for _ in 0..3 {
+            long.push("x".repeat(100));
+            private_directory(&long).unwrap();
+        }
+        let temporary = Temporary(long.canonicalize().unwrap());
+        fs::write(temporary.0.join("payload"), b"long payload").unwrap();
+        assert!(temporary.environment_path().is_err());
+        assert_eq!(
+            fs::read(temporary.0.join("payload")).unwrap(),
+            b"long payload"
+        );
+    }
+
     #[test]
     fn temporary_directory_is_private_and_unique() {
         let first = Temporary::new("ff-native-tools").unwrap();

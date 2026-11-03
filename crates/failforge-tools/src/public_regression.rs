@@ -473,6 +473,7 @@ struct Harness {
     sdk: PathBuf,
     output: PathBuf,
     temp_root: PathBuf,
+    env_temp: PathBuf,
 }
 impl Harness {
     fn command(&self) -> std::process::Command {
@@ -482,9 +483,9 @@ impl Harness {
             .env("PUB_CACHE", self.root.join(".toolchain/pub-cache"))
             .env("XDG_CONFIG_HOME", self.output.join("tool-state"));
         command
-            .env("TMPDIR", &self.temp_root)
-            .env("TMP", &self.temp_root)
-            .env("TEMP", &self.temp_root);
+            .env("TMPDIR", &self.env_temp)
+            .env("TMP", &self.env_temp)
+            .env("TEMP", &self.env_temp);
         command
     }
     fn registry_clean(&self) -> Result<()> {
@@ -974,6 +975,7 @@ pub fn run(options: Options) -> Result<()> {
         sdk,
         output: options.output.canonicalize()?,
         temp_root: temporary.0.clone(),
+        env_temp: temporary.environment_path()?,
     };
     let binary_hash = common::hash(&harness.binary)?;
     common::write_json(
