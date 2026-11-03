@@ -286,6 +286,14 @@ impl BoundFile {
         expected: &[u8],
         original: &[u8],
     ) -> Result<(), NamespaceError> {
+        let read = fs::regular_at(&self.parent, &self.name, false, false)?;
+        require(
+            fs::identity(&read)? == self.info.identity,
+            "namespace rollback target changed",
+        )?;
+        // Closing our writer can finalize NTFS ChangeTime. Bind the rollback
+        // only after that close, retaining the same file through a read handle.
+        self.file = read;
         let (actual, mut current) = root.read(&self.relative, expected.len(), true)?;
         require(
             current.info.identity == self.info.identity && actual == expected,
