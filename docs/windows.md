@@ -180,15 +180,25 @@ awake and run again. Wall times in reports include sleep; a closing
 `failforge: the system slept for …` line says how much.
 
 Working copies live under the temporary directory, for example
-`%TEMP%\c<20 characters>\campaign-<32>\work\attempt-<32>\package\`. That prefix
-is about 120 characters plus the length of `%TEMP%`, before the project's own
+`%TEMP%\c<20 characters>\campaign-<32>\work\a-<32>\package\`. New Windows attempt
+names retain the full 32-character hexadecimal token and save six characters;
+abandoned `attempt-<32>` directories from earlier builds are still recovered.
+The layout adds about 114 characters to `%TEMP%` before the project's own
 relative paths. FailForge itself opens these files relative to directory
-handles and is not limited to 260 characters, but Dart, Flutter and their
-tools may be. For deep Flutter projects (`build`, `.dart_tool`, nested
-packages), either enable
+handles, but Dart, Flutter and their tools can still have path limits.
+
+`package:test` may start its compiler runtime with a relative executable path.
+On Windows, that relative launch can fail when the working directory plus the
+relative executable reaches 260 characters, even if the normalized absolute
+executable exists and is much shorter. Enabling
 [Win32 long paths](https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation)
-or start FailForge with a short temporary directory, such as
-`$env:TMP = 'C:\fft'` in the same PowerShell session.
+does not remove the relative-path limit. Keep both the SDK and temporary
+working paths short, preferably below a common short parent (for example,
+`C:\ff\flutter` and `C:\ff\tmp`). In the same PowerShell session, select the
+prepared temporary directory with `$env:TMP = 'C:\ff\tmp'` and
+`$env:TEMP = $env:TMP`. Changing TMP alone can leave the compiler path too long.
+Shorter attempt names give more room; they do not remove upstream runtime path
+limits or change the selected test compiler.
 
 Progress lines such as `failforge: baseline` are written to standard error;
 reports and summaries go to standard output. Windows PowerShell 5.1 shows the

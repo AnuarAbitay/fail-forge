@@ -357,3 +357,137 @@ fn recovery_retries_after_another_crash_restoring_the_unlinked_lease() {
             .cleanup_deferred
     );
 }
+
+fn legacy_attempt(campaign: &StartResult, suffix: &str) -> Allocation {
+    let name = format!("attempt-{suffix}");
+    let directory = win::create_directory_at(&campaign.caps.work, OsStr::new(&name)).unwrap();
+    let path = campaign
+        .root_path
+        .join(&campaign.campaign_name)
+        .join(WORK)
+        .join(&name);
+    std::fs::create_dir_all(path.join("package/lib")).unwrap();
+    std::fs::write(path.join("package/lib/value.dart"), b"legacy payload").unwrap();
+    drop(directory);
+    Allocation { name, path }
+}
+
+#[test]
+fn compact_attempt_and_legacy_names_can_be_removed_without_aliasing() {
+    let f = Fixture::new();
+    let root = f.0.join("registry");
+    let cancel = Cancellation::default();
+    let mut campaign = start(&root, &cancel).unwrap();
+    let allocation = allocate(
+        &root,
+        &campaign.campaign_name,
+        campaign.caps.try_clone().unwrap(),
+        "attempt",
+        &cancel,
+    )
+    .unwrap();
+    assert!(allocation.path.is_dir());
+    let suffix = allocation
+        .name
+        .strip_prefix("a-")
+        .expect("compact Windows attempt name");
+    assert!(
+        token(suffix),
+        "compact name must retain the full 32-hex token"
+    );
+    assert_eq!(allocation.name.len(), 34);
+    std::fs::write(allocation.path.join("payload"), b"current payload").unwrap();
+    // The two formats may coexist even when their token suffixes are equal.
+    let legacy = legacy_attempt(&campaign, suffix);
+    remove(
+        &root,
+        &campaign.campaign_name,
+        campaign.caps.try_clone().unwrap(),
+        &allocation.name,
+        &cancel,
+    )
+    .unwrap();
+    assert!(!allocation.path.exists());
+    assert_eq!(
+        std::fs::read(legacy.path.join("package/lib/value.dart")).unwrap(),
+        b"legacy payload"
+    );
+    remove(
+        &root,
+        &campaign.campaign_name,
+        campaign.caps.try_clone().unwrap(),
+        &legacy.name,
+        &cancel,
+    )
+    .unwrap();
+    assert!(!legacy.path.exists());
+    campaign.caps.lease.take();
+    assert!(
+        !close(&root, &campaign.campaign_name, campaign.caps, &cancel)
+            .unwrap()
+            .cleanup_deferred
+    );
+}
+
+#[test]
+fn recovery_preserves_live_and_cleans_abandoned_compact_and_legacy_attempts() {
+    let f = Fixture::new();
+    let root = f.0.join("registry");
+    let cancel = Cancellation::default();
+    let mut campaign = start(&root, &cancel).unwrap();
+    let campaign_name = campaign.campaign_name.clone();
+    let allocation = allocate(
+        &root,
+        &campaign_name,
+        campaign.caps.try_clone().unwrap(),
+        "attempt",
+        &cancel,
+    )
+    .unwrap();
+    std::fs::create_dir_all(allocation.path.join("package/lib")).unwrap();
+    std::fs::write(
+        allocation.path.join("package/lib/value.dart"),
+        b"current payload",
+    )
+    .unwrap();
+    let suffix = win::random_token().unwrap();
+    let legacy = legacy_attempt(&campaign, &suffix);
+    let outside = f.0.join("outside");
+    std::fs::write(&outside, b"unrelated input").unwrap();
+
+    let mut observer = start(&root, &cancel).unwrap();
+    assert!(
+        observer
+            .skipped
+            .iter()
+            .any(|skip| skip.name == campaign_name && skip.reason == "active_lease")
+    );
+    assert_eq!(
+        std::fs::read(allocation.path.join("package/lib/value.dart")).unwrap(),
+        b"current payload"
+    );
+    assert_eq!(
+        std::fs::read(legacy.path.join("package/lib/value.dart")).unwrap(),
+        b"legacy payload"
+    );
+    observer.caps.lease.take();
+    assert!(
+        !close(&root, &observer.campaign_name, observer.caps, &cancel)
+            .unwrap()
+            .cleanup_deferred
+    );
+    campaign.caps.lease.take();
+    drop(campaign.caps);
+
+    let mut recovered = start(&root, &cancel).unwrap();
+    assert!(recovered.recovered.contains(&campaign_name));
+    assert!(!allocation.path.exists());
+    assert!(!legacy.path.exists());
+    assert_eq!(std::fs::read(&outside).unwrap(), b"unrelated input");
+    recovered.caps.lease.take();
+    assert!(
+        !close(&root, &recovered.campaign_name, recovered.caps, &cancel)
+            .unwrap()
+            .cleanup_deferred
+    );
+}

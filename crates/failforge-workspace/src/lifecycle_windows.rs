@@ -20,6 +20,8 @@ const LEASE: &str = "lease";
 const METADATA: &str = "metadata.json";
 const CLEANUP: &str = ".cleanup";
 const WORK: &str = "work";
+// Keep full 128-bit tokens while reserving path space for Windows runtimes.
+const ATTEMPT_PREFIX: &str = "a-";
 const GLOBAL_LOCK_BUDGET: Duration = Duration::from_secs(2);
 const GLOBAL_LOCK_RETRY: Duration = Duration::from_millis(10);
 
@@ -146,6 +148,7 @@ fn temporary_name(value: &str) -> bool {
     value
         .strip_prefix("snapshot-")
         .or_else(|| value.strip_prefix("attempt-"))
+        .or_else(|| value.strip_prefix(ATTEMPT_PREFIX))
         .is_some_and(token)
 }
 fn regular(parent: &File, name: &str, writable: bool, create: bool) -> Result<File, InputError> {
@@ -562,7 +565,12 @@ pub fn allocate_bound(
     )?;
     let guard = validate_caps(root_path, campaign_name, &caps, cancel)?;
     cancel.check()?;
-    let name = format!("{kind}-{}", win::random_token()?);
+    let prefix = if kind == "attempt" {
+        ATTEMPT_PREFIX
+    } else {
+        "snapshot-"
+    };
+    let name = format!("{prefix}{}", win::random_token()?);
     let directory = win::create_directory_at(&caps.work, OsStr::new(&name))?;
     let allocation = Allocation {
         path: root_path.join(campaign_name).join(WORK).join(&name),
