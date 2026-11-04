@@ -394,6 +394,98 @@ fn normalized(
     })
 }
 
+// VM stack exhaustion moves the visible head within a recursive cycle. Keep
+// the full ordered cycle and exact author tail, rather than its repeat count.
+// Unrecognized shapes keep the original complete diagnostic signature.
+fn overflow_stack(stack: &str, target: &[String], authors: &[String]) -> Option<String> {
+    const MAX_BYTES: usize = 64 * 1024;
+    const MAX_FRAMES: usize = 256;
+    if stack.len() > MAX_BYTES || stack.contains('\r') {
+        return None;
+    }
+    let lines: Vec<_> = stack.lines().take(MAX_FRAMES + 1).collect();
+    if lines.len() > MAX_FRAMES {
+        return None;
+    }
+    let elisions: Vec<_> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.split_ascii_whitespace().eq([".", "..."]))
+        .map(|(index, _)| index)
+        .collect();
+    if elisions.len() != 2 || elisions[0] + 1 != elisions[1] {
+        return None;
+    }
+    let head = &lines[..elisions[0]];
+    let tail = &lines[elisions[1] + 1..];
+    let author = tail
+        .iter()
+        .position(|line| frame_end(line, authors, 0).is_some())?;
+    if head
+        .iter()
+        .any(|line| frame_end(line, authors, 0).is_some())
+    {
+        return None;
+    }
+    let cycle = overflow_cycle(head, &tail[..author], target)?;
+    let rotation = (0..cycle.len()).min_by(|left, right| {
+        cycle
+            .iter()
+            .cycle()
+            .skip(*left)
+            .take(cycle.len())
+            .cmp(cycle.iter().cycle().skip(*right).take(cycle.len()))
+    })?;
+    let mut output = String::with_capacity(stack.len());
+    for line in cycle.iter().cycle().skip(rotation).take(cycle.len() * 3) {
+        output.push_str(line);
+        output.push('\n');
+    }
+    output.push_str(". ...\n. ...\n");
+    let tail_start: usize = lines[..=elisions[1]]
+        .iter()
+        .map(|line| line.len() + 1)
+        .sum();
+    output.push_str(&stack[tail_start..]);
+    Some(output)
+}
+
+fn overflow_cycle<'a>(
+    head: &'a [&'a str],
+    tail: &[&str],
+    target: &[String],
+) -> Option<&'a [&'a str]> {
+    const MAX_PERIOD: usize = 16;
+    const MAX_HEAD: usize = 16;
+    for period in 1..=MAX_PERIOD.min(head.len() / 3) {
+        let start = (0..head.len() - period)
+            .rev()
+            .find(|index| head[*index] != head[*index + period])
+            .map_or(0, |index| index + 1);
+        if start > MAX_HEAD || head.len() - start < period * 3 || tail.len() < period {
+            continue;
+        }
+        let cycle = &head[head.len() - period..];
+        if !cycle
+            .iter()
+            .any(|line| frame_end(line, target, 0).is_some())
+        {
+            continue;
+        }
+        // The recursive prefix may return through a stable entry bridge.
+        // overflow_stack retains the entire tail as exact confirmation evidence.
+        if (0..period).any(|rotation| {
+            tail.iter()
+                .take(period)
+                .enumerate()
+                .all(|(index, line)| *line == cycle[(index + rotation) % period])
+        }) {
+            return Some(cycle);
+        }
+    }
+    None
+}
+
 fn subject_signature(
     failures: &[LoadFailure],
     directory: &Directory,
@@ -435,7 +527,17 @@ fn subject_signature(
                 return None;
             }
         }
-        result.push(normalized(failure, directory, &mut budget)?);
+        let mut value = normalized(failure, directory, &mut budget)?;
+        if failures.len() == 1 && failure.errors.len() == 1 {
+            let error = &failure.errors[0];
+            if LOADER_PREFIX.replace(&error.error, "") == "Stack Overflow" {
+                if let Some(stack) = overflow_stack(&error.stack_trace, &locations, &authors) {
+                    budget = budget.checked_add(value.errors[0].stack_trace.len())?;
+                    value.errors[0].stack_trace = directory.normalize(&stack, &mut budget)?;
+                }
+            }
+        }
+        result.push(value);
     }
     // Python's sorted-key ASCII JSON order differs from raw Unicode ordering.
     let mut sort_budget = MAX_SIGNATURE_BYTES;

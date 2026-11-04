@@ -599,3 +599,659 @@ fn frozen_python_initialization_signatures_match() {
     }
     assert!(checked >= 50, "insufficient frozen cases");
 }
+
+// Captured from the same Windows logging mutant and its fresh replay. The VM
+// exhausted the stack at different points in the same recursive call cycle.
+const LOGGING_OVERFLOW_INITIAL: &str = r###"dart:core                                        _StringBase.startsWith
+package:failforge_subject/src/logger.dart 81:14  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+.                                                ...
+.                                                ...
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+test\logging_test.dart 294:15                    main.<fn>
+package:test_api                                 Declarer.group
+package:test_core/src/scaffolding.dart 233:13    group
+test\logging_test.dart 292:3                     main
+"###;
+const LOGGING_OVERFLOW_REPLAY: &str = r###"dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+.                                                ...
+.                                                ...
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+package:failforge_subject/src/logger.dart 93:32  new Logger._named
+package:failforge_subject/src/logger.dart 67:47  new Logger.<fn>
+dart:_compact_hash                               _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16  new Logger
+test\logging_test.dart 294:15                    main.<fn>
+package:test_api                                 Declarer.group
+package:test_core/src/scaffolding.dart 233:13    group
+test\logging_test.dart 292:3                     main
+"###;
+const LOGGING_HEALTHY_IDENTITIES: &str = r###"[
+  [
+    "test/logging_test.dart",
+    "cannot directly manipulate Logger.children"
+  ],
+  [
+    "test/logging_test.dart",
+    "default levels are in order"
+  ],
+  [
+    "test/logging_test.dart",
+    "detached loggers children is empty"
+  ],
+  [
+    "test/logging_test.dart",
+    "detached loggers create new instances of Logger"
+  ],
+  [
+    "test/logging_test.dart",
+    "detached loggers have levels independent of the root level"
+  ],
+  [
+    "test/logging_test.dart",
+    "detached loggers log messages regardless of hierarchy"
+  ],
+  [
+    "test/logging_test.dart",
+    "detached loggers parent is null"
+  ],
+  [
+    "test/logging_test.dart",
+    "level comparison is a valid comparator"
+  ],
+  [
+    "test/logging_test.dart",
+    "levels are comparable"
+  ],
+  [
+    "test/logging_test.dart",
+    "levels are hashable"
+  ],
+  [
+    "test/logging_test.dart",
+    "logger full name"
+  ],
+  [
+    "test/logging_test.dart",
+    "logger name cannot end with a \".\""
+  ],
+  [
+    "test/logging_test.dart",
+    "logger name cannot start with a \".\" "
+  ],
+  [
+    "test/logging_test.dart",
+    "logger naming is hierarchical"
+  ],
+  [
+    "test/logging_test.dart",
+    "logger parent-child links are correct"
+  ],
+  [
+    "test/logging_test.dart",
+    "loggers are singletons"
+  ],
+  [
+    "test/logging_test.dart",
+    "mutating levels add/remove handlers - no hierarchy"
+  ],
+  [
+    "test/logging_test.dart",
+    "mutating levels add/remove handlers - with hierarchy"
+  ],
+  [
+    "test/logging_test.dart",
+    "mutating levels cannot set level if hierarchy is disabled"
+  ],
+  [
+    "test/logging_test.dart",
+    "mutating levels cannot set the level to null on a detached logger"
+  ],
+  [
+    "test/logging_test.dart",
+    "mutating levels cannot set the level to null on the root logger"
+  ],
+  [
+    "test/logging_test.dart",
+    "mutating levels isLoggable is appropriate"
+  ],
+  [
+    "test/logging_test.dart",
+    "mutating levels loggers effective level - no hierarchy"
+  ],
+  [
+    "test/logging_test.dart",
+    "mutating levels loggers effective level - with changing hierarchy"
+  ],
+  [
+    "test/logging_test.dart",
+    "mutating levels loggers effective level - with hierarchy"
+  ],
+  [
+    "test/logging_test.dart",
+    "mutating levels logging methods store appropriate level"
+  ],
+  [
+    "test/logging_test.dart",
+    "mutating levels logging methods store exception"
+  ],
+  [
+    "test/logging_test.dart",
+    "mutating levels message logging - calls toString"
+  ],
+  [
+    "test/logging_test.dart",
+    "mutating levels message logging - lazy functions"
+  ],
+  [
+    "test/logging_test.dart",
+    "mutating levels message logging - no hierarchy"
+  ],
+  [
+    "test/logging_test.dart",
+    "mutating levels message logging - with hierarchy"
+  ],
+  [
+    "test/logging_test.dart",
+    "recordStackTraceAtLevel defaults a missing trace"
+  ],
+  [
+    "test/logging_test.dart",
+    "recordStackTraceAtLevel defaults an empty trace"
+  ],
+  [
+    "test/logging_test.dart",
+    "recordStackTraceAtLevel error also generated when generating a trace"
+  ],
+  [
+    "test/logging_test.dart",
+    "recordStackTraceAtLevel listen for level changed"
+  ],
+  [
+    "test/logging_test.dart",
+    "recordStackTraceAtLevel no stack trace by default"
+  ],
+  [
+    "test/logging_test.dart",
+    "recordStackTraceAtLevel onLevelChanged is not emited if set the level to the same value"
+  ],
+  [
+    "test/logging_test.dart",
+    "recordStackTraceAtLevel provided trace is used if given"
+  ],
+  [
+    "test/logging_test.dart",
+    "recordStackTraceAtLevel setting level in a loop throws state error"
+  ],
+  [
+    "test/logging_test.dart",
+    "recordStackTraceAtLevel trace recorded only on requested levels"
+  ],
+  [
+    "test/logging_test.dart",
+    "root level has proper defaults"
+  ],
+  [
+    "test/logging_test.dart",
+    "stackTrace gets throw to LogRecord"
+  ],
+  [
+    "test/logging_test.dart",
+    "zone gets recorded to LogRecord child zone"
+  ],
+  [
+    "test/logging_test.dart",
+    "zone gets recorded to LogRecord custom zone"
+  ],
+  [
+    "test/logging_test.dart",
+    "zone gets recorded to LogRecord root zone"
+  ]
+]"###;
+
+fn logging_overflow_evidence(
+    body: &str,
+    stack: &str,
+) -> crate::initialization::InitializationEvidence {
+    #[cfg(windows)]
+    let suite = r"test\logging_test.dart";
+    #[cfg(unix)]
+    let suite = "test/logging_test.dart";
+    #[cfg(unix)]
+    let native_stack = stack.replace(r"test\logging_test.dart", suite);
+    #[cfg(unix)]
+    let stack = native_stack.as_str();
+    let raw = capture(&[(suite, Some((body, stack, false)))], false);
+    let classification = classified(&raw, ReporterMode::Dart);
+    let observation = analyze_initialization_evidence(
+        &raw,
+        &crate::test_fs::absolute("/missing/logging-overflow"),
+        ReporterMode::Dart,
+        &classification,
+        Some(&json!({"file":"lib/src/logger.dart"})),
+        "failforge_subject",
+    )
+    .unwrap();
+    crate::initialization::InitializationEvidence {
+        outcome: classification["outcome"].as_str().unwrap().into(),
+        reason: classification["reason"].as_str().unwrap().into(),
+        test_identities: Some(vec![]),
+        observation: Some(observation),
+    }
+}
+
+fn logging_overflow_context(
+    body: &str,
+    replay_stack: &str,
+) -> crate::initialization::InitializationContext {
+    use crate::initialization::*;
+    let expected: Vec<[String; 2]> = serde_json::from_str(LOGGING_HEALTHY_IDENTITIES).unwrap();
+    let baseline = InitializationEvidence {
+        outcome: "SURVIVED".into(),
+        reason: "user_tests_passed".into(),
+        test_identities: Some(expected.clone()),
+        observation: Some(InitializationObservation {
+            suites: vec!["test/logging_test.dart".into()],
+            signature: None,
+            failed_suite: None,
+        }),
+    };
+    let initial = logging_overflow_evidence(body, LOGGING_OVERFLOW_INITIAL);
+    let replay = logging_overflow_evidence(body, replay_stack);
+    InitializationContext {
+        candidate_valid: true,
+        expected,
+        baseline: baseline.clone(),
+        initial,
+        attempts: vec![
+            InitializationAttempt {
+                role: InitializationRole::OriginalBefore,
+                evidence: baseline,
+            },
+            InitializationAttempt {
+                role: InitializationRole::MutantReplay,
+                evidence: replay,
+            },
+        ],
+        cancelled: false,
+    }
+}
+
+#[test]
+fn captured_recursive_overflow_replay_still_requires_both_healthy_originals() {
+    use crate::initialization::*;
+    assert_ne!(LOGGING_OVERFLOW_INITIAL, LOGGING_OVERFLOW_REPLAY);
+    let full = logging_overflow_context("Stack Overflow", LOGGING_OVERFLOW_REPLAY);
+    let mut context = full.clone();
+    context.attempts.clear();
+    for role in [
+        InitializationRole::OriginalBefore,
+        InitializationRole::MutantReplay,
+        InitializationRole::OriginalAfter,
+    ] {
+        let decision = evaluate_initialization(&context).unwrap();
+        assert_eq!(decision.next_role, Some(role));
+        assert!(!decision.confirmed);
+        let evidence = if role == InitializationRole::MutantReplay {
+            full.attempts[1].evidence.clone()
+        } else {
+            full.baseline.clone()
+        };
+        context
+            .attempts
+            .push(InitializationAttempt { role, evidence });
+    }
+    let decision = evaluate_initialization(&context).unwrap();
+    assert!(decision.confirmed);
+    assert_eq!(decision.outcome, "KILLED");
+    assert_eq!(decision.reason, "mutation_caused_initialization_failure");
+}
+
+#[test]
+fn recursive_overflow_matching_keeps_cycle_target_author_and_error_boundaries() {
+    use crate::initialization::evaluate_initialization;
+    let marker = ".                                                ...";
+    let (head, tail) = LOGGING_OVERFLOW_REPLAY.split_once(marker).unwrap();
+    let changes = [
+        LOGGING_OVERFLOW_REPLAY.replace("src/logger.dart", "src/other.dart"),
+        LOGGING_OVERFLOW_REPLAY.replace("93:32", "94:32"),
+        LOGGING_OVERFLOW_REPLAY.replace("new Logger.<fn>", "new Logger.other"),
+        LOGGING_OVERFLOW_REPLAY.replace(
+            "_LinkedHashMapMixin.putIfAbsent",
+            "_LinkedHashMapMixin.other",
+        ),
+        LOGGING_OVERFLOW_REPLAY.replace("294:15", "295:15"),
+        LOGGING_OVERFLOW_REPLAY.replace(r"test\logging_test.dart", r"test\other_test.dart"),
+        format!(
+            "{}{}{}",
+            head.replace("new Logger.<fn>", "new Logger.other"),
+            marker,
+            tail
+        ),
+        format!(
+            "{}\n{}{}",
+            head.lines().take(4).collect::<Vec<_>>().join("\n"),
+            marker,
+            tail
+        ),
+        LOGGING_OVERFLOW_REPLAY.replace(marker, "not an elision marker"),
+        format!(
+            "{}{}",
+            "dart:core temporary\n".repeat(17),
+            LOGGING_OVERFLOW_REPLAY
+        ),
+        format!(
+            "{}{}",
+            "dart:core temporary
+"
+            .repeat(257),
+            LOGGING_OVERFLOW_REPLAY
+        ),
+    ];
+    for stack in changes {
+        let context = logging_overflow_context("Stack Overflow", &stack);
+        let decision = evaluate_initialization(&context).unwrap();
+        assert!(!decision.confirmed);
+        assert_eq!(decision.outcome, "UNCLASSIFIED");
+        assert_eq!(decision.reason, "initialization_not_reproduced");
+    }
+    // A bound target only in the ignored head must not authenticate a foreign cycle.
+    let foreign = |stack: &str| {
+        format!(
+            "package:failforge_subject/src/logger.dart 10:1 entry\n{}",
+            stack.replace(
+                "package:failforge_subject/src/logger.dart",
+                "package:external/loop.dart"
+            )
+        )
+    };
+    let mut context = logging_overflow_context("Stack Overflow", &foreign(LOGGING_OVERFLOW_REPLAY));
+    context.initial =
+        logging_overflow_evidence("Stack Overflow", &foreign(LOGGING_OVERFLOW_INITIAL));
+    assert_eq!(
+        evaluate_initialization(&context).unwrap().reason,
+        "initialization_not_reproduced"
+    );
+    let context =
+        logging_overflow_context("StateError: initialization failed", LOGGING_OVERFLOW_REPLAY);
+    let decision = evaluate_initialization(&context).unwrap();
+    assert!(!decision.confirmed);
+    assert_eq!(decision.reason, "initialization_not_reproduced");
+    let mut context = logging_overflow_context("Stack Overflow", LOGGING_OVERFLOW_REPLAY);
+    context.attempts[1].evidence =
+        logging_overflow_evidence("StateError: initialization failed", LOGGING_OVERFLOW_REPLAY);
+    assert_eq!(
+        evaluate_initialization(&context).unwrap().reason,
+        "initialization_not_reproduced"
+    );
+}
+
+// This captured overflow enters its recursive cycle through a stable bridge.
+// The bridge includes a getter frame without coordinates and is exact evidence.
+const LOGGING_BRIDGE_OVERFLOW_INITIAL: &str = r###"dart:core                                         _StringBase.startsWith
+package:failforge_subject/src/logger.dart 81:14   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+.                                                 ...
+.                                                 ...
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 317:30  Logger.root
+package:failforge_subject/src/logger.dart         Logger.root
+test\logging_test.dart 293:25                     main.<fn>
+package:test_api                                  Declarer.group
+package:test_core/src/scaffolding.dart 233:13     group
+test\logging_test.dart 292:3                      main
+"###;
+const LOGGING_BRIDGE_OVERFLOW_REPLAY: &str = r###"dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+.                                                 ...
+.                                                 ...
+package:failforge_subject/src/logger.dart 93:39   new Logger._named
+package:failforge_subject/src/logger.dart 67:47   new Logger.<fn>
+dart:_compact_hash                                _LinkedHashMapMixin.putIfAbsent
+package:failforge_subject/src/logger.dart 67:16   new Logger
+package:failforge_subject/src/logger.dart 317:30  Logger.root
+package:failforge_subject/src/logger.dart         Logger.root
+test\logging_test.dart 293:25                     main.<fn>
+package:test_api                                  Declarer.group
+package:test_core/src/scaffolding.dart 233:13     group
+test\logging_test.dart 292:3                      main
+"###;
+
+fn logging_bridge_overflow_context(replay: &str) -> crate::initialization::InitializationContext {
+    let mut context = logging_overflow_context("Stack Overflow", replay);
+    context.initial = logging_overflow_evidence("Stack Overflow", LOGGING_BRIDGE_OVERFLOW_INITIAL);
+    context
+}
+
+#[test]
+fn captured_overflow_entry_bridge_preserves_ordered_confirmation() {
+    use crate::initialization::*;
+    assert_ne!(
+        LOGGING_BRIDGE_OVERFLOW_INITIAL,
+        LOGGING_BRIDGE_OVERFLOW_REPLAY
+    );
+    let mut context = logging_bridge_overflow_context(LOGGING_BRIDGE_OVERFLOW_REPLAY);
+    let decision = evaluate_initialization(&context).unwrap();
+    assert_eq!(decision.next_role, Some(InitializationRole::OriginalAfter));
+    assert!(!decision.confirmed);
+    context.attempts.push(InitializationAttempt {
+        role: InitializationRole::OriginalAfter,
+        evidence: context.baseline.clone(),
+    });
+    let decision = evaluate_initialization(&context).unwrap();
+    assert!(decision.confirmed);
+    assert_eq!(decision.outcome, "KILLED");
+    assert_eq!(decision.reason, "mutation_caused_initialization_failure");
+}
+
+#[test]
+fn overflow_entry_bridge_and_first_tail_cycle_remain_exact_evidence() {
+    use crate::initialization::evaluate_initialization;
+    let stack = LOGGING_BRIDGE_OVERFLOW_REPLAY;
+    let lines: Vec<_> = stack.lines().collect();
+    let first_tail = lines
+        .iter()
+        .position(|line| line.split_ascii_whitespace().eq([".", "..."]))
+        .unwrap()
+        + 2;
+    let changed_tail = |replacement: Vec<&str>| {
+        let mut changed = lines[..first_tail].to_vec();
+        changed.extend(replacement);
+        format!("{}\n", changed.join("\n"))
+    };
+    let mut mismatch = lines[first_tail..].to_vec();
+    mismatch.swap(0, 1);
+    let mut short_cycle = lines[first_tail..].to_vec();
+    short_cycle.remove(0);
+    let mut later_cycle = lines[first_tail..].to_vec();
+    drop(later_cycle.splice(0..0, lines[first_tail..first_tail + 4].iter().copied()));
+    later_cycle.swap(0, 1);
+    let changes = [
+        stack.replace("317:30", "318:30"),
+        stack.replace("Logger.root", "Logger.other"),
+        stack.replace("293:25", "294:25"),
+        changed_tail(mismatch),
+        changed_tail(short_cycle),
+        changed_tail(later_cycle),
+    ];
+    for changed in changes {
+        let context = logging_bridge_overflow_context(&changed);
+        let decision = evaluate_initialization(&context).unwrap();
+        assert!(!decision.confirmed);
+        assert_eq!(decision.outcome, "UNCLASSIFIED");
+        assert_eq!(decision.reason, "initialization_not_reproduced");
+    }
+}
