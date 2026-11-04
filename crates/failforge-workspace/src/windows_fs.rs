@@ -500,7 +500,9 @@ pub fn directory_at(parent: &File, name: &OsStr) -> io::Result<File> {
     open_at(parent, name, Some(true), false, false, false)
 }
 pub fn create_directory_at(parent: &File, name: &OsStr) -> io::Result<File> {
-    open_at(parent, name, Some(true), true, true, true)
+    // DELETE conflicts with processes using this directory as their current one.
+    // Cleanup reopens the retained object with DELETE only when it needs it.
+    open_at(parent, name, Some(true), true, true, false)
 }
 pub fn regular_at(parent: &File, name: &OsStr, writable: bool, create: bool) -> io::Result<File> {
     open_at(parent, name, Some(false), writable, create, writable)

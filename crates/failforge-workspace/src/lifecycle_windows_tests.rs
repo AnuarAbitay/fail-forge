@@ -491,3 +491,72 @@ fn recovery_preserves_live_and_cleans_abandoned_compact_and_legacy_attempts() {
             .cleanup_deferred
     );
 }
+
+// Run the process-wide current-directory operation only in a child test process.
+#[test]
+#[ignore = "subprocess fixture for retained allocation current-directory interop"]
+fn bound_allocation_current_directory_child() {
+    let expected = PathBuf::from(
+        std::env::var_os("FAILFORGE_TEST_CWD_PARENT")
+            .expect("run through the retained-allocation parent test"),
+    );
+    let package = std::env::current_dir().unwrap();
+    let parent = package.parent().unwrap().to_path_buf();
+    assert_eq!(
+        parent.canonicalize().unwrap(),
+        expected.canonicalize().unwrap()
+    );
+    std::env::set_current_dir(&parent).unwrap();
+    assert_eq!(
+        std::env::current_dir().unwrap().canonicalize().unwrap(),
+        expected.canonicalize().unwrap()
+    );
+    std::env::set_current_dir(&package).unwrap();
+}
+
+#[test]
+fn bound_allocation_allows_child_to_change_to_its_parent() {
+    let fixture = Fixture::new();
+    let root = fixture.0.join("registry");
+    let cancel = Cancellation::default();
+    let mut campaign = start(&root, &cancel).unwrap();
+    let mut allocation = allocate_bound(
+        &root,
+        &campaign.campaign_name,
+        campaign.caps.try_clone().unwrap(),
+        "attempt",
+        &cancel,
+    )
+    .unwrap();
+    let package = allocation.path().join("package");
+    std::fs::create_dir(&package).unwrap();
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "lifecycle::tests::bound_allocation_current_directory_child",
+            "--ignored",
+            "--nocapture",
+        ])
+        .current_dir(&package)
+        .env("FAILFORGE_TEST_CWD_PARENT", allocation.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "child current-directory change failed: status={}; stdout={}; stderr={}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    allocation.verify(&cancel).unwrap();
+    allocation.remove(&cancel).unwrap();
+    allocation.remove(&cancel).unwrap();
+    assert!(!allocation.path().exists());
+    drop(allocation);
+    campaign.caps.lease.take();
+    assert!(
+        !close(&root, &campaign.campaign_name, campaign.caps, &cancel)
+            .unwrap()
+            .cleanup_deferred
+    );
+}
