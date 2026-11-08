@@ -4,7 +4,7 @@ User-visible changes are recorded by version. Check
 [GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for published
 downloads and their verification results.
 
-## Unreleased
+## 0.1.0
 
 ### Changed
 
@@ -25,6 +25,16 @@ downloads and their verification results.
 
 ### Fixed
 
+- Let Windows author tests change into their retained attempt directories without
+  conflicting with a directory handle held by FailForge. Directory identity and
+  cleanup checks remain in place.
+- Confirm repeated Dart stack overflows when the VM starts the trace at different
+  points in the same recognizable recursive cycle. Unrecognized traces retain
+  exact diagnostic matching, and healthy original controls are still required.
+- Use shorter private Windows test paths to avoid Dart startup failures caused
+  by long attempt paths. Recovery still recognizes existing attempt directories.
+- Close FailForge's own Windows writer before binding the rollback target's
+  identity, avoiding false reports that the rollback target changed.
 - Recheck Windows cached input digests under a retained read guard so an edit
   completed between the stamp lookup and writer check cannot reuse a stale hash.
 - Keep captured Windows child processes outside the controller's console so

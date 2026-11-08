@@ -1,7 +1,7 @@
 # FailForge
 
-[![CI](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml)
-[![Beta](https://img.shields.io/badge/beta-0.1.0--beta.4-blue)](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.4)
+[![Main CI](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/badge/release-0.1.0-blue)](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **Find the bugs your Dart and Flutter tests would miss.**
@@ -11,21 +11,20 @@ When a test catches a change, the mutant is **killed**. When the tests still
 pass, the mutant **survives** and gives you a concrete place to review your
 assertions, edge cases or requirements.
 
-This documentation covers **FailForge `0.1.0-beta.4`**. Download a native archive
-and its verification files from the
-[beta.4 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.4),
+This documentation covers **FailForge `0.1.0`**. Obtain a native archive and its
+verification files from the
+[0.1.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0),
 or build the tagged source. Choose an archive for your operating system and
-architecture. Read the
-[installation guide](docs/installation.md) and
-[beta limitations](docs/beta-limitations.md) before your first run.
+architecture. Read the [installation guide](docs/installation.md) and
+[support and verification scope](docs/beta-limitations.md) before your first run.
 
-Native archives: [Linux x86_64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.1.0-beta.4/failforge-0.1.0-beta.4-x86_64-unknown-linux-gnu.tar.gz),
-[macOS arm64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.1.0-beta.4/failforge-0.1.0-beta.4-aarch64-apple-darwin.tar.gz)
-and [Windows x64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.1.0-beta.4/failforge-0.1.0-beta.4-x86_64-pc-windows-msvc.tar.gz).
+Release archives: [Linux x86_64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.1.0/failforge-0.1.0-x86_64-unknown-linux-gnu.tar.gz),
+[macOS arm64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.1.0/failforge-0.1.0-aarch64-apple-darwin.tar.gz)
+and [Windows x64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.1.0/failforge-0.1.0-x86_64-pc-windows-msvc.tar.gz).
 Download the matching manifest and checksum file as described in the
 [installation guide](docs/installation.md#install-from-an-archive).
 
-[Download beta.4](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.4) ·
+[Download 0.1.0](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0) ·
 [Installation](docs/installation.md) ·
 [Operators](docs/mutation-operators.md) ·
 [Profiles](#yaml-profiles) ·
@@ -90,14 +89,14 @@ transformation and family. Scores are reported separately for each family.
 
 ## Get started
 
-The published beta targets **Linux x86_64, macOS arm64 and Windows x64**.
+FailForge 0.1.0 targets **Linux x86_64, macOS arm64 and Windows x64**.
 Windows requires Windows 10 version 1809 or newer and a local NTFS working
 directory; see the [Windows installation and source build guide](docs/windows.md).
 Mutation analysis accepts a stable **Dart SDK `>=3.13.0 <4.0.0`**,
 or Flutter with a Dart SDK in that range. Building from source requires
 **Rust 1.85.1 or newer** and a C linker.
 
-The broader SDK range is included in beta.3; earlier releases retain their
+The broader SDK range was introduced in beta.3; earlier releases retain their
 original constraints. Local verification used Flutter **3.47.7** with Dart
 **3.13.5**, plus standalone Dart **3.13.0**. The adapter pins `analyzer` to
 **14.5.0**; newer SDKs and language features need separate validation. `doctor`
@@ -106,15 +105,15 @@ that warning.
 
 The SDK compatibility baseline at `e8b850d` passed all **10 CI jobs**:
 [verification run](https://github.com/AnuarAbitay/fail-forge/actions/runs/39950688183).
-This records the historical SDK compatibility baseline. Beta.4 adds native
-Windows checks; see the release for verification of all 14 jobs on its exact
-tagged revision.
+This records the historical SDK compatibility baseline. Beta.4 added native
+Windows checks. See each release's verification for its exact source SHA and
+required CI results; historical runs do not establish another revision's results.
 
 Follow the [installation guide](docs/installation.md) to extract a prepared
 archive or build FailForge, prepare its adapter and prepare your target package's
 dependencies. A native archive needs no Rust installation. A compatible SDK and
 prepared adapter dependencies are still required. See
-[beta limitations](docs/beta-limitations.md) for verification scope.
+[support and verification scope](docs/beta-limitations.md).
 
 Historical note: `doctor` and automatic SDK/profile-path defaults were added
 in `0.1.0-beta.2`. The `0.1.0-beta.1` archive has no `doctor`;
@@ -334,7 +333,7 @@ project data; review them before sharing.
 
 **Surviving mutants alone do not cause a nonzero exit code.** Execution and
 inconclusive-result errors can still return `125`, even when all candidates were
-processed. The beta has no built-in minimum-score gate; CI integrations must
+processed. FailForge has no built-in minimum-score gate; CI integrations must
 inspect the report to apply their own quality threshold.
 
 ## Commands
@@ -353,10 +352,10 @@ Use `failforge --help` or `<command> --help` for available options.
 
 - [Installation and first run](docs/installation.md)
 - [Check environment prerequisites](docs/doctor.md)
-- [Build and verify a local beta archive](docs/packaging.md)
+- [Build and verify a local release archive](docs/packaging.md)
 - [Complete mutation operator catalogue](docs/mutation-operators.md)
 - [Mutation commands and profile reference](docs/mutation-cli.md)
-- [Beta limitations and verification scope](docs/beta-limitations.md)
+- [Support and verification scope](docs/beta-limitations.md)
 - [Changelog](CHANGELOG.md)
 - [Security policy and vulnerability reporting](SECURITY.md)
 

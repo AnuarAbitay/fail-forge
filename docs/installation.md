@@ -1,12 +1,12 @@
 # Installation and first run
 
-This guide covers FailForge `0.1.0-beta.4`. Obtain a native archive and matching
+This guide covers FailForge `0.1.0`. Obtain a native archive and matching
 verification files from the
-[beta.4 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.4),
-or build the tagged source. Choose the operating system and architecture listed
-for the archive. Developers can also
-produce a local archive with the [packaging command](packaging.md).
-Read the [beta limitations](beta-limitations.md) before running a campaign.
+[0.1.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0),
+or build the tagged source. Choose the listed operating system and architecture
+and review the release's exact-source checks. Developers can also produce a local
+archive with the [packaging command](packaging.md). Read the
+[support and verification scope](beta-limitations.md) before running a campaign.
 For PowerShell commands, follow the [Windows installation guide](windows.md).
 The broader Dart SDK range below was introduced in beta.3; older releases retain
 their original SDK constraints.
@@ -16,7 +16,7 @@ their original SDK constraints.
 | Requirement | Current support |
 | --- | --- |
 | Operating system | Linux, macOS, or Windows 10 version 1809 or newer on x64 with local NTFS. Platform support does not imply that every distribution or architecture has been tested. See the [Windows scope](windows.md#requirements). |
-| Windows archive runtime | The published beta.4 archive requires Microsoft Visual C++ v14 Redistributable for x64. Source revisions containing `.cargo/config.toml` link it statically; their archives do not need it. See the [Windows requirements](windows.md#requirements). |
+| Windows archive runtime | FailForge 0.1.0 links the Visual C++ runtime statically and needs no Redistributable. The historical published beta.4 archive requires the x64 Redistributable; see the [Windows requirements](windows.md#requirements). |
 | Rust for source builds | Rust and Cargo 1.85.1 or newer, with the platform's C linker. Not required when using a prepared native archive. |
 | Dart adapter SDK | Stable Dart `>=3.13.0 <4.0.0`. A Flutter installation may supply this Dart SDK. |
 | Target package | One standalone Dart or Flutter package with a passing `test` or `flutter_test` suite and prepared dependencies. |
@@ -43,7 +43,7 @@ permissions; working-copy isolation is not a security sandbox.
 ### Install from an archive
 
 Choose one target and obtain its three matching files from the
-[release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.4).
+[release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0).
 
 | Platform | Target |
 | --- | --- |
@@ -51,7 +51,7 @@ Choose one target and obtain its three matching files from the
 | macOS arm64 | `aarch64-apple-darwin` |
 | Windows x64 | `x86_64-pc-windows-msvc` |
 
-- `failforge-0.1.0-beta.4-<target>.tar.gz`
+- `failforge-0.1.0-<target>.tar.gz`
 - `package-manifest-<target>.json`
 - `SHA256SUMS-<target>`
 
@@ -73,9 +73,9 @@ Continue only when every checksum reports `OK`:
 
 ```sh
 mkdir /absolute/path/to/new-install-parent
-tar -xzf "failforge-0.1.0-beta.4-$FAILFORGE_TARGET.tar.gz" \
+tar -xzf "failforge-0.1.0-$FAILFORGE_TARGET.tar.gz" \
   -C /absolute/path/to/new-install-parent
-export FAILFORGE_HOME="/absolute/path/to/new-install-parent/failforge-0.1.0-beta.4-$FAILFORGE_TARGET"
+export FAILFORGE_HOME="/absolute/path/to/new-install-parent/failforge-0.1.0-$FAILFORGE_TARGET"
 export PATH="$FAILFORGE_HOME/bin:$PATH"
 failforge --version
 failforge --help
@@ -103,7 +103,7 @@ Obtain the versioned source from the
 [FailForge repository](https://github.com/AnuarAbitay/fail-forge):
 
 ```sh
-git clone --branch v0.1.0-beta.4 --depth 1 \
+git clone --branch v0.1.0 --depth 1 \
   https://github.com/AnuarAbitay/fail-forge.git
 ```
 
@@ -433,4 +433,4 @@ files in the installation.
 | Profile flags conflict | Put campaign and SDK settings in YAML; keep `--installation` on the `mutate --config` command. |
 
 For unsupported project layouts and current release constraints, see
-[beta limitations](beta-limitations.md).
+[support and verification scope](beta-limitations.md).

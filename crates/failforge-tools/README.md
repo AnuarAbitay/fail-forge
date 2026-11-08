@@ -5,13 +5,13 @@ All orchestration is Rust. The Dart adapter and its tests remain Dart. None of
 these commands invokes Python. Regression workflows use prepared targets;
 `package-smoke` explicitly prepares an extracted adapter and its own fixture.
 
-## Local beta package
+## Local release package
 
 ```sh
 rustup component add rust-src rust-docs
 cargo run -p failforge-tools --locked -- package \
-  --output /absolute/new-beta-output \
-  --expected-version 0.1.0-beta.3
+  --output /absolute/new-release-output \
+  --expected-version 0.1.0
 ```
 
 The matching `rust-src` and `rust-docs` components supply the Rust runtime notices
@@ -34,7 +34,7 @@ Exercise a trusted, extracted archive with:
 
 ```sh
 target/debug/failforge-tools package-smoke \
-  --installation "/absolute/path/to/extracted beta installation" \
+  --installation "/absolute/path/to/extracted installation" \
   --dart-sdk /absolute/path/to/dart-sdk \
   --output /absolute/new-package-smoke-results
 ```

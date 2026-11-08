@@ -3,7 +3,7 @@
   "inputs": [
     {
       "path": "Cargo.lock",
-      "sha256": "92d1eecfb5742947ede847290248952cb85f325d6138bb7840134ad9798ab1df"
+      "sha256": "b4a96132192252ec91a3a5f85d33e4df0054d111a12c8734a15123c45d685a0b"
     },
     {
       "path": "adapters/dart/pubspec.yaml",

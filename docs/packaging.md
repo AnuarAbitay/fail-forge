@@ -1,9 +1,9 @@
-# Build a local beta archive
+# Build a local release archive
 
 `failforge-tools package` builds a native FailForge archive for the machine on
-which it runs. The examples package source version `0.1.0-beta.4`. Published
-archives and verification files belong to the
-[beta.4 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0-beta.4).
+which it runs. The examples package source version `0.1.0`. Release archives
+and verification files belong to the
+[0.1.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0).
 Creating a local archive does not publish a GitHub release or establish that
 other platforms have passed.
 
@@ -33,7 +33,7 @@ The resulting archive contains executables for one operating system and
 architecture. It is not a universal binary. A successful local macOS arm64 build
 does not verify Linux, macOS Intel or another system-library baseline.
 
-The current local packaging setup uses Rust **1.99.0**. The project's source
+The recorded local packaging baseline used Rust **1.99.0**. The project's source
 checks on Rust 1.85.1 do not establish packaging compatibility with that older
 toolchain. Runtime notice paths can differ between Rust versions; if a required
 notice is absent, packaging fails even when the toolchain can compile the code.
@@ -45,8 +45,8 @@ From the source checkout:
 ```sh
 rustup component add rust-src rust-docs
 cargo run -p failforge-tools --locked -- package \
-  --output /absolute/new-beta-output \
-  --expected-version 0.1.0-beta.4
+  --output /absolute/new-release-output \
+  --expected-version 0.1.0
 ```
 
 If the tool is already built, select the source checkout explicitly:
@@ -54,8 +54,8 @@ If the tool is already built, select the source checkout explicitly:
 ```sh
 target/debug/failforge-tools package \
   --installation /absolute/path/to/fail-forge-source \
-  --output /absolute/another-new-beta-output \
-  --expected-version 0.1.0-beta.4
+  --output /absolute/another-new-release-output \
+  --expected-version 0.1.0
 ```
 
 For this developer command, `--installation` identifies the source checkout to
@@ -79,8 +79,8 @@ consistency check does not replace a dependency license review.
 A successful macOS arm64 package of this version produces:
 
 ```text
-new-beta-output/
-  failforge-0.1.0-beta.4-aarch64-apple-darwin.tar.gz
+new-release-output/
+  failforge-0.1.0-aarch64-apple-darwin.tar.gz
   SHA256SUMS
   package-manifest.json
 ```
@@ -88,7 +88,7 @@ new-beta-output/
 The target component changes for other native hosts. Keep the checksum file and
 manifest with the corresponding archive.
 
-Beta.4 release assets use `x86_64-unknown-linux-gnu` (Linux x86_64),
+0.1.0 release assets use `x86_64-unknown-linux-gnu` (Linux x86_64),
 `aarch64-apple-darwin` (macOS arm64) and `x86_64-pc-windows-msvc` (Windows x64).
 For each target, the release keeps the archive name above and names the external
 manifest `package-manifest-<target>.json`. Its bytes match the packager's
@@ -102,7 +102,7 @@ Linux/macOS only.
 The archive has one top-level directory:
 
 ```text
-failforge-0.1.0-beta.4-aarch64-apple-darwin/
+failforge-0.1.0-aarch64-apple-darwin/
   bin/
     failforge
     failforge-adapter-campaign
@@ -144,9 +144,9 @@ documentation still require review; packaging is not a secret-scanning service.
 Run the generated checksum check from its output directory:
 
 ```sh
-cd /absolute/new-beta-output
+cd /absolute/new-release-output
 shasum -a 256 -c SHA256SUMS
-tar -tzf failforge-0.1.0-beta.4-aarch64-apple-darwin.tar.gz
+tar -tzf failforge-0.1.0-aarch64-apple-darwin.tar.gz
 ```
 
 On systems providing `sha256sum`, `sha256sum -c SHA256SUMS` is an alternative.
@@ -160,7 +160,7 @@ with the source checkout's developer tool:
 
 ```sh
 target/debug/failforge-tools package-smoke \
-  --installation "/absolute/path/to/extracted beta installation" \
+  --installation "/absolute/path/to/extracted installation" \
   --dart-sdk /absolute/path/to/dart-sdk \
   --output /absolute/new-package-smoke-results
 ```

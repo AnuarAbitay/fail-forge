@@ -2,9 +2,9 @@
 
 ## Supported versions
 
-This policy covers FailForge `0.1.0-beta.1` and the current `main` revision.
+This policy covers FailForge `0.1.0` and the current `main` revision.
 Include the affected version and exact commit ID in a security report. There is
-no stable support or backport schedule during the beta.
+no fixed support or backport schedule.
 
 ## Report a vulnerability privately
 
@@ -38,7 +38,7 @@ Use a disposable test project. Do not include tokens, `.env` secrets, credential
 private source code or unreviewed capture archives. If an attachment is necessary,
 describe what it contains before sharing it privately.
 
-There is no guaranteed response or fix deadline during the beta. Keep
+There is no guaranteed response or fix deadline. Keep
 follow-up information in the same private conversation.
 
 ## Security boundaries
