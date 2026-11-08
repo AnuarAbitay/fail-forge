@@ -38,10 +38,13 @@ WORKFLOWS = {
 
 
 class GitHubFixture(module.GitHub):
-    def __init__(self, scenario='success', *, workflow=None, defect=None):
+    def __init__(self, scenario='success', *, workflow=None, defect=None,
+            version='0.1.0-beta.3', prerelease=True):
         self.scenario = scenario
         self.workflow = workflow
         self.defect = defect
+        self.version = version
+        self.prerelease = prerelease
         self.calls = []
 
     def request(self, path, *, asset=None):
@@ -109,14 +112,14 @@ class GitHubFixture(module.GitHub):
                     jobs.pop()
                 return {'total_count': len(jobs) + (defect == 'job-count'), 'jobs': jobs}
         if '/git/ref/tags/' in path:
-            return {'ref': 'refs/tags/v0.1.0-beta.3', 'object': {
+            return {'ref': f'refs/tags/v{self.version}', 'object': {
                 'type': 'tag' if self.scenario == 'annotated' else 'commit',
                 'sha': 'b' * 40 if self.scenario in ('tag', 'annotated') else 'a' * 40}}
         if '/git/tags/' in path:
             return {'object': {'type': 'commit', 'sha': 'a' * 40}}
         if '/releases?' in path or path.endswith('/releases/99'):
-            release = {'id': 99, 'draft': self.scenario != 'published', 'prerelease': True,
-                'tag_name': 'v0.1.0-beta.3',
+            release = {'id': 99, 'draft': self.scenario != 'published', 'prerelease': self.prerelease,
+                'tag_name': f'v{self.version}',
                 'target_commitish': 'main' if self.scenario == 'commitish' else 'a' * 40,
                 'upload_url': f'https://uploads.github.com/repos/{module.REPOSITORY}/releases/99/assets{{?name,label}}'}
             if '/releases?' in path:
@@ -169,6 +172,12 @@ class ReleaseTests(unittest.TestCase):
         self.smoke['results']['packageManifestSha256'] = self.manifest_hash
         self.write_json('smoke.json', self.smoke)
 
+    def use_version(self, version):
+        self.options.version = version
+        self.manifest['version'] = version
+        self.smoke['results']['packageVersion'] = version
+        self.use_target(self.options.target)
+
     def test_validation_only_needs_no_credentials_or_network(self):
         for target in ['x86_64-unknown-linux-gnu', 'aarch64-apple-darwin', 'x86_64-pc-windows-msvc']:
             self.use_target(target)
@@ -179,6 +188,25 @@ class ReleaseTests(unittest.TestCase):
                     '--validate-only'], capture_output=True, text=True, check=True)
                 self.assertEqual(len(json.loads(result.stdout)['assets']), 3)
 
+    def test_stable_validation_only_returns_three_matching_assets_on_every_target(self):
+        self.use_version('0.1.0')
+        environment = {'PATH': os.defpath, 'PYTHONDONTWRITEBYTECODE': '1'}
+        if 'SystemRoot' in os.environ:
+            environment['SystemRoot'] = os.environ['SystemRoot']
+        for target in ['x86_64-unknown-linux-gnu', 'aarch64-apple-darwin', 'x86_64-pc-windows-msvc']:
+            self.use_target(target)
+            with self.subTest(target=target):
+                result = subprocess.run([sys.executable, '-B', str(SOURCE), '--version', self.options.version,
+                    '--source-sha', self.options.source_sha, '--target', target,
+                    '--package-dir', str(self.root), '--smoke-summary', str(self.options.smoke_summary),
+                    '--validate-only'], capture_output=True, text=True,
+                    env=environment, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                value = json.loads(result.stdout)
+                self.assertEqual(value['version'], '0.1.0')
+                self.assertEqual(value['assets'], [f'failforge-0.1.0-{target}.tar.gz',
+                    f'package-manifest-{target}.json', f'SHA256SUMS-{target}'])
+
     def test_actual_workflow_input_and_actor_guards(self):
         workflow = SOURCE.parent.parent / 'workflows' / 'release.yml'
         match = re.search(r'^        shell: python\n        run: \|\n((?:          [^\n]*\n|\s*\n)+)',
@@ -188,15 +216,40 @@ class ReleaseTests(unittest.TestCase):
         environment = {'RELEASE_VERSION': self.options.version, 'RELEASE_SOURCE_SHA': self.options.source_sha,
             'GITHUB_REPOSITORY': module.REPOSITORY, 'GITHUB_ACTOR': module.ACCOUNT,
             'GITHUB_TRIGGERING_ACTOR': module.ACCOUNT, 'GITHUB_REF': 'refs/heads/main'}
-        for ref in ['refs/heads/main', 'refs/tags/v0.1.0-beta.3']:
-            with patch.dict(os.environ, dict(environment, GITHUB_REF=ref), clear=True):
-                exec(compile(validation, '<workflow-validation>', 'exec'), {})
+        for version in ['0.1.0', '2.10.3', '0.1.0-beta.3']:
+            for ref in ['refs/heads/main', f'refs/tags/v{version}']:
+                with self.subTest(version=version, ref=ref), \
+                        patch.dict(os.environ, dict(environment, RELEASE_VERSION=version, GITHUB_REF=ref), clear=True):
+                    exec(compile(validation, '<workflow-validation>', 'exec'), {})
         for field, value in [('RELEASE_VERSION', '0.01.0-beta.3'), ('RELEASE_SOURCE_SHA', 'A' * 40),
                 ('GITHUB_REPOSITORY', 'other/fail-forge'), ('GITHUB_ACTOR', 'unexpected-account'),
                 ('GITHUB_REF', 'refs/heads/untrusted'), ('GITHUB_TRIGGERING_ACTOR', 'unexpected-account')]:
             with self.subTest(field=field), patch.dict(os.environ, dict(environment, **{field: value}), clear=True):
                 with self.assertRaises(SystemExit):
                     exec(compile(validation, '<workflow-validation>', 'exec'), {})
+
+    def test_actual_workflow_defaults_to_stable_release(self):
+        workflow = SOURCE.parent.parent / 'workflows' / 'release.yml'
+        self.assertRegex(workflow.read_text(), r"(?m)^        default: '0\.1\.0'$")
+
+    def test_other_version_syntax_is_rejected_locally_and_by_actual_workflow(self):
+        workflow = SOURCE.parent.parent / 'workflows' / 'release.yml'
+        match = re.search(r'^        shell: python\n        run: \|\n((?:          [^\n]*\n|\s*\n)+)',
+            workflow.read_text(), re.MULTILINE)
+        self.assertIsNotNone(match)
+        validation = textwrap.dedent(match[1])
+        environment = {'RELEASE_SOURCE_SHA': self.options.source_sha, 'GITHUB_REPOSITORY': module.REPOSITORY,
+            'GITHUB_ACTOR': module.ACCOUNT, 'GITHUB_TRIGGERING_ACTOR': module.ACCOUNT,
+            'GITHUB_REF': 'refs/heads/main'}
+        for version in ['01.0.0', '0.01.0', '0.1.00', '0.1.0-beta.01', '0.1.0-rc.1',
+                '0.1.0+build.1', '0.1.0-beta.3+build.1', 'v0.1.0', '0.1']:
+            self.use_version(version)
+            with self.subTest(version=version):
+                with self.assertRaises(module.ReleaseError):
+                    module.local_assets(self.options)
+                with patch.dict(os.environ, dict(environment, RELEASE_VERSION=version), clear=True):
+                    with self.assertRaises(SystemExit):
+                        exec(compile(validation, '<workflow-validation>', 'exec'), {})
 
     def test_companion_names_and_checksums_match_uploaded_names(self):
         assets = module.local_assets(self.options)
@@ -413,6 +466,40 @@ class ReleaseTests(unittest.TestCase):
                 self.assertEqual(github.calls[0][0], '/user')
                 self.assertTrue(all('/assets?name=' in path for path, asset in github.calls if asset))
                 self.assertFalse(any('/releases/tags/' in path for path, _ in github.calls))
+
+    def test_stable_draft_uploads_three_assets_without_publish(self):
+        self.use_version('0.1.0')
+        github = GitHubFixture(version=self.options.version, prerelease=False)
+        with contextlib.redirect_stdout(io.StringIO()):
+            github.upload(self.options, module.local_assets(self.options))
+        uploads = [(path, asset) for path, asset in github.calls if asset]
+        self.assertEqual(len(uploads), 3)
+        self.assertTrue(all('/assets?name=' in path for path, _ in uploads))
+        self.assertTrue(any('/actions/runs/22/jobs?' in path for path, _ in github.calls))
+        self.assertTrue(any('/actions/runs/44/jobs?' in path for path, _ in github.calls))
+        self.assertFalse(any('/releases/tags/' in path for path, _ in github.calls))
+
+    def test_draft_prerelease_flag_matches_stable_or_beta_version(self):
+        for version, flag in [('0.1.0', False), ('0.1.0-beta.3', True)]:
+            github = GitHubFixture(version=version, prerelease=flag)
+            release = github.request(f'/repos/{module.REPOSITORY}/releases/99')
+            with self.subTest(version=version):
+                self.assertEqual(github.validate_draft(release, f'v{version}', self.options.source_sha)[0], release)
+            github = GitHubFixture(version=version, prerelease=not flag)
+            release = github.request(f'/repos/{module.REPOSITORY}/releases/99')
+            with self.subTest(version=version, mismatch=True), self.assertRaises(module.ReleaseError):
+                github.validate_draft(release, f'v{version}', self.options.source_sha)
+            self.assertFalse(any(asset for _, asset in github.calls))
+
+    def test_both_draft_prerelease_mismatches_stop_before_upload(self):
+        for version, flag in [('0.1.0', True), ('0.1.0-beta.3', False)]:
+            self.use_version(version)
+            github = GitHubFixture(version=version, prerelease=flag)
+            with self.subTest(version=version), contextlib.redirect_stdout(io.StringIO()):
+                assets = module.local_assets(self.options)
+                with self.assertRaises(module.ReleaseError):
+                    github.upload(self.options, assets)
+                self.assertFalse(any(asset for _, asset in github.calls))
 
     def test_package_change_after_validation_stops_before_upload(self):
         assets = module.local_assets(self.options)
