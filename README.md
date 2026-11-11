@@ -117,10 +117,10 @@ dependencies. A native archive needs no Rust installation. A compatible SDK and
 prepared adapter dependencies are still required. See
 [support and verification scope](docs/beta-limitations.md).
 
-Install the Dart launcher **`0.2.0`** to download and prepare native FailForge
+Install the Dart launcher **`0.2.1`** to download and prepare native FailForge
 **`0.2.0`**, including HTML export. On macOS/Linux, use
-`dart pub global activate failforge 0.2.0`; on Windows, use
-`dart install failforge@0.2.0`. Then run `failforge setup`.
+`dart pub global activate failforge 0.2.1`; on Windows, use
+`dart install failforge@0.2.1`. Then run `failforge setup`.
 See the [launcher quickstart](https://github.com/AnuarAbitay/fail-forge/blob/main/packages/failforge/README.md),
 [installation steps](docs/installation.md#install-the-pub-launcher) and
 [launcher verification guide](https://github.com/AnuarAbitay/fail-forge/blob/main/docs/pub-launcher.md).

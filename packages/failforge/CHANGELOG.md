@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1
+
+- Add a runnable boundary-mutation example with tests and an offline HTML report
+  walkthrough, available in the package's Example tab.
+- Apply Dart core style rules and enforce them in package CI.
+- Use the verified native FailForge `0.2.0` runtime.
+
 ## 0.2.0
 
 - Provide the `failforge` command for Dart and Flutter with native FailForge

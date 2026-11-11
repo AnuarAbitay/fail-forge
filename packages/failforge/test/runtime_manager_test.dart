@@ -327,10 +327,11 @@ void main() {
               if (line == 'ready' && !ready.isCompleted) ready.complete();
             },
             onDone: () {
-              if (!ready.isCompleted)
+              if (!ready.isCompleted) {
                 ready.completeError(
                   StateError('Driver exited before readiness.'),
                 );
+              }
             },
           );
       await ready.future.timeout(const Duration(seconds: 15));
