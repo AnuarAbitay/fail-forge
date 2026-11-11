@@ -4,6 +4,57 @@ User-visible changes are recorded by version. Check
 [GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for published
 downloads and their verification results.
 
+## 0.2.0
+
+This native version includes the local Pub launcher `0.1.0-beta.1` prototype,
+which pins native `0.1.0`. Launcher `0.2.0` requires a separate package update
+with the verified archive and manifest hashes of the matching native assets.
+
+### Added
+
+- A local Dart Pub launcher prototype in `packages/failforge`, version
+  `0.1.0-beta.1`, installs native FailForge `0.1.0` through `failforge setup` or
+  first use. It verifies pinned release and payload hashes, prepares adapter
+  dependencies, isolates SDK/Pub cache configurations and preserves native
+  command arguments, streams, exit status and Unix cancellation. Includes
+  package documentation, tests and a three-platform CI workflow. The package
+  has not yet been published to pub.dev.
+- `failforge report RUN --html FILE` exports a saved direct campaign or
+  multi-family profile as one offline HTML report. Browse source files and
+  mutant outcomes, inspect exact mutation edits, and review retained test
+  evidence and bounded output captures. Family scores remain separate;
+  incomplete campaigns have no final score.
+- Mutation details include a one-based source line and UTF-16 column, with
+  nearby original code and the affected lines highlighted. New runs retain a
+  bounded source context; older runs can recover it with `report --source-root`
+  only when the source hash and edit match the saved run.
+- **Copy location** copies a relative `file:line:column` from a standalone HTML
+  report, using one-based lines and UTF-16 columns. If clipboard access is
+  unavailable, selected text remains available for manual copying.
+
+### Changed
+
+- A fully processed campaign can retain its family scores when individual
+  mutants have `INFRA_ERROR` outcomes. Those mutants stay excluded from the
+  denominator, the HTML report names the errors and the scored scope, and the
+  CLI still returns `125`. Cancellation and campaign-wide preparation, control,
+  integrity or cleanup failures remain unscored.
+
+### Fixed
+
+- Preserve Windows Ctrl+C and Ctrl+Break cleanup and exit status in the Pub
+  launcher through Dart's standard native CLI installer. Legacy Windows VM
+  entry points stop before starting a campaign and explain the migration.
+- Await archive file writes in the Pub launcher so open/write/flush/close
+  failures reach normal error handling, resources close, and setup can retry.
+  Validate cached manifest, preparation marker and lock file types before
+  opening streams, avoiding hangs on unexpected special files.
+- Accept unpaired UTF-16 code units in Dart reporter error, stack-trace and
+  print diagnostics using a lossless internal encoding. Unicode diagnostics no
+  longer turn complete test failures into `malformed_reporter_output` errors.
+  Protocol identities, metadata and private context documents retain strict
+  Unicode validation, and raw captures remain unchanged.
+
 ## 0.1.0
 
 ### Changed

@@ -11,7 +11,7 @@ failforge-workspace = { path = "../failforge-workspace" }
 tokio.workspace = true
 serde.workspace = true
 # Catalogue identity must preserve distinct finite float metadata values.
-serde_json = { workspace = true, features = ["float_roundtrip"] }
+serde_json = { workspace = true, features = ["float_roundtrip", "raw_value"] }
 sha2.workspace = true
 thiserror.workspace = true
 libc.workspace = true

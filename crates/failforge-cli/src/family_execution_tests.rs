@@ -162,12 +162,12 @@ fn ledger_retains_completion_order_independence_and_rejects_unbound_records() {
         {"mutant":{"id":"a","family":"classic"}},{"mutant":{"id":"b","family":"classic"}}]);
     let request = decode_value(&value).unwrap();
     let a = json!({"recordKind":"mutation","mutantId":"a","family":"classic","outcome":"KILLED","reason":"user_test_failure"});
-    let b = json!({"recordKind":"mutation","mutantId":"b","family":"classic","outcome":"INFRA_ERROR","reason":"source_input_changed"});
+    let b = json!({"recordKind":"mutation","mutantId":"b","family":"classic","outcome":"INFRA_ERROR","reason":"malformed_reporter_output"});
     let mut ledger = Ledger::default();
     let send_failed = ledger.publish(&request, 0, &a, || Err(invalid("frame exceeds limit")));
     assert!(send_failed.is_err());
     assert!(ledger.ids.is_empty());
-    assert!(!ledger.inconclusive && !ledger.infrastructure);
+    assert!(!ledger.inconclusive);
     assert!(ledger.publish(&request, 0, &b, || Ok(())).is_err());
     assert!(ledger.publish(&request, 2, &a, || Ok(())).is_err());
     for (field, bad_value) in [
@@ -184,11 +184,15 @@ fn ledger_retains_completion_order_independence_and_rejects_unbound_records() {
     ledger.publish(&request, 0, &a, || Ok(())).unwrap();
     assert!(ledger.publish(&request, 0, &a, || Ok(())).is_err());
     assert_eq!(ledger.ids.len(), 2);
-    assert!(ledger.inconclusive && ledger.infrastructure);
+    assert!(!ledger.inconclusive);
+    assert_eq!(
+        terminal_state(Ok(()), &Cancellation::default(), &ledger, 2),
+        ("completed", None)
+    );
 }
 
 #[test]
-fn terminal_success_requires_complete_and_conclusive_published_records() {
+fn terminal_completion_requires_all_results_and_rejects_other_inconclusive_outcomes() {
     let cancel = Cancellation::default();
     let mut ledger = Ledger::default();
     ledger.ids.insert("a".into());
@@ -196,6 +200,57 @@ fn terminal_success_requires_complete_and_conclusive_published_records() {
     assert_eq!(terminal_state(Ok(()), &cancel, &ledger, 2).0, "failed");
     ledger.inconclusive = true;
     assert_eq!(terminal_state(Ok(()), &cancel, &ledger, 1).0, "failed");
+}
+
+#[test]
+fn mutant_infrastructure_results_allow_completion_but_never_hide_control_failures() {
+    let mut input = value();
+    input["candidates"] = json!([{"mutant":{"id":"a","family":"classic"}}]);
+    let request = decode_value(&input).unwrap();
+    let record = json!({"recordKind":"mutation","mutantId":"a","family":"classic",
+        "outcome":"INFRA_ERROR","reason":"malformed_reporter_output"});
+    let mut ledger = Ledger::default();
+    ledger.publish(&request, 0, &record, || Ok(())).unwrap();
+    let cancel = Cancellation::default();
+    assert_eq!(
+        terminal_state(Ok(()), &cancel, &ledger, 1),
+        ("completed", None)
+    );
+    for message in [
+        "original baseline did not pass",
+        "original control did not pass",
+        "source inputs changed",
+    ] {
+        let result = terminal_state(Err(invalid(message)), &cancel, &ledger, 1);
+        assert_eq!(result.0, "failed");
+        assert!(result.1.unwrap().contains(message));
+    }
+    cancel.request(libc::SIGINT);
+    assert_eq!(
+        terminal_state(Ok(()), &cancel, &ledger, 1),
+        ("cancelled", None)
+    );
+    let result = terminal_state(Err(invalid("source inputs changed")), &cancel, &ledger, 1);
+    assert_eq!(result.0, "failed");
+}
+
+#[test]
+fn other_inconclusive_outcomes_keep_the_existing_incomplete_family_policy() {
+    let mut input = value();
+    input["candidates"] = json!([{"mutant":{"id":"a","family":"classic"}}]);
+    let request = decode_value(&input).unwrap();
+    for outcome in ["UNCLASSIFIED", "NO_TESTS", "CANCELLED"] {
+        let record = json!({"recordKind":"mutation","mutantId":"a","family":"classic",
+            "outcome":outcome,"reason":"retained_reason"});
+        let mut ledger = Ledger::default();
+        ledger.publish(&request, 0, &record, || Ok(())).unwrap();
+        assert!(ledger.inconclusive, "{outcome}");
+        assert_eq!(
+            terminal_state(Ok(()), &Cancellation::default(), &ledger, 1).0,
+            "failed",
+            "{outcome}"
+        );
+    }
 }
 
 #[test]
@@ -247,10 +302,6 @@ fn passing_controls_and_family_terminals_never_hide_integrity_as_cancellation() 
         terminal_state(Err(failure), &cancel, &ledger, 1).0,
         "failed"
     );
-    let ledger = Ledger {
-        infrastructure: true,
-        ..Default::default()
-    };
     assert_eq!(
         terminal_state(
             Err(NamespaceError::Cancelled(libc::SIGTERM)),
@@ -259,9 +310,9 @@ fn passing_controls_and_family_terminals_never_hide_integrity_as_cancellation() 
             1
         )
         .0,
-        "failed"
+        "cancelled"
     );
-    assert_eq!(terminal_state(Ok(()), &cancel, &ledger, 1).0, "failed");
+    assert_eq!(terminal_state(Ok(()), &cancel, &ledger, 1).0, "cancelled");
 }
 
 static NEXT: AtomicU64 = AtomicU64::new(0);

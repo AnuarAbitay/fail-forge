@@ -1,7 +1,7 @@
 # Support and verification scope
 
-This document describes FailForge `0.1.0` and its verification boundaries, not a
-promise of support for every Dart project. Use it with the
+This document describes FailForge `0.2.0` and its verification boundaries, not
+a promise of support for every Dart project. Use it with the
 [mutation command guide](mutation-cli.md). Interfaces and report formats may
 change between releases. Release verification identifies the exact source SHA
 and checks performed; historical results below apply only to their recorded revisions.
@@ -54,13 +54,13 @@ The [local packaging command](packaging.md) builds a host-specific `.tar.gz`
 with both executables, adapter sources, user documentation and license material.
 It does not publish a GitHub release. Obtain the versioned archive, checksums
 and matching package manifest from the
-[0.1.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0),
+[0.2.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0),
 selecting Linux x86_64, macOS arm64 or Windows x64. Each target has its own
 `SHA256SUMS-<target>` and `package-manifest-<target>.json` beside the archive.
 Archives are not universal executables, signed installers or notarized macOS
 applications. Historically, beta.1 supplied a macOS arm64 archive and beta.2 was
 available as a source tag; beta.3 supplied Linux/macOS archives and beta.4 added
-Windows x64. Those releases do not establish 0.1.0 verification.
+Windows x64. Those releases do not establish `0.2.0` verification.
 
 If arranging a relocated installation, preserve these relationships:
 
@@ -206,6 +206,13 @@ Final `summary.json` is authoritative. Completed evidence is retained where
 possible after cancellation or publication failure, but it is not a successful
 complete campaign. Atomic publication does not guarantee durability of the final
 rename after sudden power loss.
+
+The `0.2.0` HTML exporter reads an authoritative saved summary without rerunning
+tests or reconstructing missing results. It preserves separate family scores
+and incomplete-run status. Source context and capture previews are bounded;
+see the [HTML report guide](html-report.md) for limits and the scope of the
+recorded Windows/Linux source checks. Those checks do not establish the final
+tagged version's CI or package results.
 
 ## What the existing checks establish
 

@@ -614,7 +614,9 @@ pub(crate) fn python_string(text: &str, output: &mut String) {
 }
 
 /// Exactly json.dumps(..., sort_keys=True)'s ASCII encoding and separators for
-/// the diagnostic schema. This digest is compatible with archived Python runs.
+/// the diagnostic schema. This digest is compatible with archived Python runs
+/// for ordinary Unicode diagnostics. Reporter-only orphan UTF-16 code units and
+/// reserved markers use the lossless canonical encoding established at ingress.
 fn python_diagnostics(errors: &[Diagnostic]) -> String {
     let mut output = String::from("[");
     for (index, error) in errors.iter().enumerate() {

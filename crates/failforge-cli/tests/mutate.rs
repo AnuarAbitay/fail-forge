@@ -854,10 +854,73 @@ fn malformed_mutant_reporter_output_cannot_count_as_killed() {
     let mut f = Fixture::new();
     f.configure("garbage", json!({"classic":["2"]}));
     let args = f.direct();
-    let _output = f.run(&args);
+    let output = f.run(&args);
+    assert_eq!(output.status.code(), Some(125));
     let summary = f.summary();
-    assert_ne!(summary["records"][0]["outcome"], "KILLED");
-    assert_eq!(summary["mutationScore"]["killed"].as_u64().unwrap_or(0), 0);
+    assert_eq!(summary["records"][0]["outcome"], "INFRA_ERROR");
+    assert_eq!(summary["status"], "completed");
+    assert_eq!(summary["complete"], true);
+    assert_eq!(summary["mutationScore"]["killed"], 0);
+    assert_eq!(summary["mutationScore"]["denominator"], 0);
+    assert_eq!(summary["mutationScore"]["percent"], Value::Null);
+    assert_eq!(
+        summary["mutationScore"]["excluded"],
+        json!({"INFRA_ERROR":1})
+    );
+    f.assert_clean(true);
+}
+
+#[test]
+fn completed_campaign_keeps_score_when_one_mutant_has_an_infrastructure_error() {
+    let mut f = Fixture::new();
+    f.configure("mixed_infrastructure", json!({"classic":["2","3","4"]}));
+    let args = f.direct();
+    let output = f.run(&args);
+    assert_eq!(output.status.code(), Some(125));
+    let summary = f.summary();
+    assert_eq!(summary["status"], "completed");
+    assert_eq!(summary["complete"], true);
+    assert_eq!(summary["error"], Value::Null);
+    assert_eq!(summary["completedMutants"], 3);
+    assert_eq!(
+        summary["outcomeCounts"],
+        json!({"KILLED":1,"SURVIVED":1,"INFRA_ERROR":1})
+    );
+    assert_eq!(summary["mutationScore"]["percent"], 50.0);
+    assert_eq!(summary["mutationScore"]["denominator"], 2);
+    assert_eq!(
+        summary["mutationScore"]["excluded"],
+        json!({"INFRA_ERROR":1})
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("50.00% (1/2)"));
+    f.assert_clean(true);
+}
+
+#[test]
+fn profile_continues_after_local_infrastructure_error_and_preserves_each_score() {
+    let mut f = Fixture::new();
+    f.configure(
+        "mixed_infrastructure",
+        json!({"classic":["2","3","4"],"failure_mode":["2"],"language_specific":["2"]}),
+    );
+    let args = f.profile(&FAMILIES, 10);
+    let output = f.run(&args);
+    assert_eq!(output.status.code(), Some(125));
+    let summary = f.summary();
+    assert_eq!(summary["status"], "completed");
+    assert_eq!(summary["complete"], true);
+    assert_eq!(summary["completedMutants"], 5);
+    assert_eq!(summary["mutationScore"], Value::Null);
+    for (family, key, percent) in [
+        ("classic", "mutationScore", 50.0),
+        ("failure_mode", "failureModeScore", 100.0),
+        ("language_specific", "languageSpecificScore", 100.0),
+    ] {
+        let child = &summary["families"][family]["summary"];
+        assert_eq!(child["complete"], true, "{family}");
+        assert_eq!(child["profileComplete"], true, "{family}");
+        assert_eq!(child[key]["percent"], percent, "{family}");
+    }
     f.assert_clean(true);
 }
 #[test]

@@ -11,10 +11,26 @@ use serde_json::{Map, Number, Value};
 
 use super::{EvidenceError, Result};
 
+#[path = "diagnostic_json.rs"]
+mod diagnostic_json;
+
 const MAX_EVENT_BYTES: usize = 8 * 1024 * 1024;
 
 pub(crate) fn parse_event(bytes: &[u8]) -> Result<Value> {
-    parse_json(bytes, MAX_EVENT_BYTES)
+    match parse_json(bytes, MAX_EVENT_BYTES) {
+        Ok(mut value) => {
+            diagnostic_json::canonicalize(&mut value, bytes.len())?;
+            Ok(value)
+        }
+        Err(error)
+            if error.0 == "malformed_reporter_output"
+                && error.is_interrupted_candidate()
+                && bytes.iter().find(|byte| !byte.is_ascii_whitespace()) == Some(&b'{') =>
+        {
+            diagnostic_json::repair(bytes)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// Shared strict decoder for bounded private native context documents. The
@@ -36,6 +52,8 @@ fn json_error(error: serde_json::Error) -> EvidenceError {
     let message = error.to_string();
     if message.starts_with("duplicate_json_key") {
         EvidenceError::invalid("duplicate_json_key")
+    } else if message.starts_with("event_limit_exceeded") {
+        EvidenceError::invalid("event_limit_exceeded")
     } else if message.starts_with("non_json_number") || message.starts_with("number out of range") {
         EvidenceError::invalid("non_json_number")
     } else {

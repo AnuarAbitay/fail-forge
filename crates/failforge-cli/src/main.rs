@@ -43,8 +43,11 @@ mod private_response;
 mod profile;
 #[cfg(unix)]
 mod readiness;
+mod report_html;
+mod report_html_data;
 mod retained_replay;
 mod signals;
+mod source_context;
 mod test_context;
 mod test_evidence;
 #[cfg(test)]
@@ -105,6 +108,7 @@ fn main() -> ExitCode {
     let arguments = match cli.command {
         Commands::Run(arguments) => arguments,
         Commands::Doctor(arguments) => return doctor::execute(*arguments, &invocation_cwd),
+        Commands::Report(arguments) => return report_html::execute(arguments, &invocation_cwd),
         Commands::Mutate(arguments) => {
             let _awake = keep_awake::KeepAwake::request();
             return mutate::execute(*arguments, &invocation_cwd);

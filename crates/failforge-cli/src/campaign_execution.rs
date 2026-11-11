@@ -449,7 +449,6 @@ struct Ledger {
     expected: Option<usize>,
     mutants: usize,
     families: usize,
-    infrastructure: bool,
 }
 
 struct FamilySink<'a, S> {
@@ -462,11 +461,9 @@ struct FamilySink<'a, S> {
 impl<S: CampaignEvents> FamilyEvents for FamilySink<'_, S> {
     fn emit(&mut self, event: Value) -> io::Result<()> {
         let mutant = event["kind"] == "mutant";
-        let infrastructure = mutant && event["record"]["outcome"] == "INFRA_ERROR";
         self.stream
             .emit_campaign(json!({"kind":"family_event","family":self.family,"event":event}))?;
         self.ledger.mutants += usize::from(mutant);
-        self.ledger.infrastructure |= infrastructure;
         Ok(())
     }
     fn finish(
@@ -662,28 +659,23 @@ fn terminal_state(
     ledger: &Ledger,
     expected_families: usize,
 ) -> (&'static str, Option<String>) {
-    if ledger.infrastructure {
-        (
-            "failed",
-            Some("infrastructure failure during campaign; see records".to_owned()),
-        )
-    } else {
-        match result {
-            Err(NamespaceError::Cancelled(_)) => ("cancelled", None),
-            Err(error) => ("failed", Some(error.to_string())),
-            Ok(()) if cancel.signum().is_some() => ("cancelled", None),
-            Ok(())
-                if ledger.expected != Some(ledger.mutants)
-                    || ledger.families != expected_families =>
-            {
-                (
-                    "failed",
-                    Some("campaign lacks complete family results".to_owned()),
-                )
-            }
-            Ok(()) if ledger.expected == Some(0) => ("no_mutants", None),
-            Ok(()) => ("completed", None),
+    // Mutant-local infrastructure errors are retained, excluded verdicts. Only
+    // execution/control/integrity failures or missing results make the campaign
+    // incomplete; the CLI exit policy independently reports those local errors.
+    match result {
+        Err(NamespaceError::Cancelled(_)) => ("cancelled", None),
+        Err(error) => ("failed", Some(error.to_string())),
+        Ok(()) if cancel.signum().is_some() => ("cancelled", None),
+        Ok(())
+            if ledger.expected != Some(ledger.mutants) || ledger.families != expected_families =>
+        {
+            (
+                "failed",
+                Some("campaign lacks complete family results".to_owned()),
+            )
         }
+        Ok(()) if ledger.expected == Some(0) => ("no_mutants", None),
+        Ok(()) => ("completed", None),
     }
 }
 

@@ -1,5 +1,5 @@
 name: failforge_dart_adapter
-version: 0.1.0
+version: 0.2.0
 publish_to: none
 description: Read-only AST mutation tooling adapter for FailForge.
 environment:
