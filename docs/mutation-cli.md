@@ -58,7 +58,7 @@ protocols; the public campaign calls the same implementations directly.
 
 ## Prepare the installation and target
 
-For FailForge `0.1.0`, follow the [installation guide](installation.md)
+For FailForge `0.2.0`, follow the [installation guide](installation.md)
 to install a matching native archive or build from source. For a source build,
 build the native executables and prepare the Dart adapter with a compatible SDK:
 
@@ -127,7 +127,7 @@ layout.
 
 ## Generate a profile
 
-Before generating a profile or starting a campaign, `0.1.0` can
+Before generating a profile or starting a campaign, FailForge can
 check local prerequisites with `failforge doctor`. Use `failforge doctor
 --config PATH` to check an existing profile's environment and literal source
 selection. This reads local state without running tests or changing files;
@@ -672,6 +672,13 @@ A/B/A confirmation; a nonzero exit alone cannot kill a mutant. Classical results
 use `mutationScore`; failure-mode results use `failureModeScore`. They are never
 combined. Failed or cancelled campaigns have no final score.
 
+In `0.2.0`, an individual mutant's `INFRA_ERROR` does not by
+itself make the campaign incomplete. If every mutant was processed, the
+original controls passed and the final integrity and cleanup checks succeeded,
+the campaign can be `completed` with a score over `KILLED + SURVIVED` and explicit
+excluded counts. It still returns `125`. Failures of those campaign-wide checks,
+or cancellation, continue to suppress the final scores.
+
 Exit codes: `0` for a completed campaign without infrastructure or inconclusive
 results (survivors and bounded mutant timeouts alone do not cause failure),
 `2` for invalid configuration, `125` for failed or inconclusive execution,
@@ -681,6 +688,40 @@ status is `completed`. Cancellation requests the active
 Rust CLI owners to stop and waits for their cleanup; it does not kill them. The
 adapter helper drains its own Runner after a closed consumer pipe. The retained
 report is marked incomplete, with no final score.
+
+## Browse a saved run as HTML
+
+The `0.2.0` command exports a direct campaign or multi-family profile
+without running tests, starting an SDK or changing retained evidence:
+
+```sh
+failforge report .failforge/runs/RUN_ID --html .failforge/report.html
+```
+
+`RUN` may also name its `summary.json`. The output file must be new and its
+parent directory must exist. Open the generated file in a browser; its styles,
+scripts, report data and bounded captured output are embedded for offline use.
+This command is not included in the published `0.1.0` archives.
+
+The HTML report uses the authoritative saved summary. File and outcome filters
+change the list of mutants; they do not change a family's score. The detail view
+shows numbered original-source context when retained, the exact `expected` and
+`replacement` edit fragments with UTF-8 byte offsets, test evidence and retained
+metadata. New results include a bounded original-source excerpt. Older runs can
+add context through `report --source-root PATH`; the exporter requires a full
+source-hash match and a matching edit before showing line numbers or nearby code.
+
+Incomplete campaigns remain unscored, including every family of an incomplete
+profile. Exporting an initial summary after a crash does not recover additional
+records from the journal or individual mutant results, resume the campaign or
+establish a successful completion. See the [HTML report guide](html-report.md)
+for input handling and capture limits. HTML exports can include sensitive code,
+paths and test output; review them before sharing.
+
+When a source location is available, **Copy location** copies its relative
+`file:line:column` directly from the standalone HTML report. Lines and columns are
+one-based, with UTF-16 columns. If the browser cannot access the clipboard, the
+report shows selected text for manual copying. No local integration is needed.
 
 ## Recovery of abandoned working copies
 

@@ -519,6 +519,7 @@ fn mutation_record_preserves_source_metadata_and_only_dart_specific_category() {
         assert_eq!(value["family"], raw["family"]);
         assert_eq!(value["operatorId"], raw["operatorId"]);
         assert_eq!(value["file"], raw["file"]);
+        assert_eq!(value["sourceHash"], raw["sourceHash"]);
         assert_eq!(value["edit"], raw["edit"]);
         assert_eq!(value["validation"], validation);
         assert_eq!(
@@ -540,6 +541,29 @@ fn mutation_record_preserves_source_metadata_and_only_dart_specific_category() {
             assert!(value.get(private).is_none());
         }
     }
+}
+
+#[test]
+fn optional_source_context_is_verified_and_never_changes_a_verdict() {
+    let fixture = Fixture::new();
+    let candidate = verify_candidate(&fixture.project.root, &fixture.candidate(true)).unwrap();
+    let mut value = record(&candidate);
+    value["outcome"] = "SURVIVED".into();
+    value["reason"] = "user_tests_passed".into();
+    retain_source_context(&fixture.project.root, &candidate, &mut value);
+    assert_eq!(value["sourceHash"], fixture.mutant.source_hash);
+    assert_eq!(value["sourceContext"]["line"], 1);
+    assert_eq!(value["sourceContext"]["column"], 15);
+    assert_eq!(
+        value["sourceContext"]["lines"],
+        json!(["const value = true;", ""])
+    );
+    fs::write(fixture.project.root.join("lib/a.dart"), "changed source").unwrap();
+    retain_source_context(&fixture.project.root, &candidate, &mut value);
+    assert!(value.get("sourceContext").is_none());
+    assert_eq!(value["sourceHash"], fixture.mutant.source_hash);
+    assert_eq!(value["outcome"], "SURVIVED");
+    assert_eq!(value["reason"], "user_tests_passed");
 }
 
 #[test]

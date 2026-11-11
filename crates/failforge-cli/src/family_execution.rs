@@ -433,7 +433,6 @@ fn mutant_request(
 struct Ledger {
     ids: BTreeSet<String>,
     inconclusive: bool,
-    infrastructure: bool,
 }
 impl Ledger {
     fn publish(
@@ -476,11 +475,9 @@ impl Ledger {
         }
         send()?;
         self.ids.insert(id.to_owned());
-        self.inconclusive |= matches!(
-            outcome,
-            "INFRA_ERROR" | "UNCLASSIFIED" | "NO_TESTS" | "CANCELLED"
-        );
-        self.infrastructure |= outcome == "INFRA_ERROR";
+        // A retained INFRA_ERROR is a processed, excluded result. It does not
+        // invalidate the passing original controls or the remaining mutants.
+        self.inconclusive |= matches!(outcome, "UNCLASSIFIED" | "NO_TESTS" | "CANCELLED");
         Ok(())
     }
 }
@@ -780,23 +777,16 @@ fn terminal_state(
     ledger: &Ledger,
     total: usize,
 ) -> (&'static str, Option<String>) {
-    if ledger.infrastructure {
-        (
+    match result {
+        Err(NamespaceError::Cancelled(_)) => ("cancelled", None),
+        Err(error) => ("failed", Some(error.to_string())),
+        Ok(()) if cancel.signum().is_some() => ("cancelled", None),
+        Ok(()) if ledger.ids.len() != total || ledger.inconclusive => (
             "failed",
-            Some("infrastructure failure during family; see records".to_owned()),
-        )
-    } else {
-        match result {
-            Err(NamespaceError::Cancelled(_)) => ("cancelled", None),
-            Err(error) => ("failed", Some(error.to_string())),
-            Ok(()) if cancel.signum().is_some() => ("cancelled", None),
-            Ok(()) if ledger.ids.len() != total || ledger.inconclusive => (
-                "failed",
-                Some("family is missing conclusive mutation results".to_owned()),
-            ),
-            Ok(()) if total == 0 => ("no_mutants", None),
-            Ok(()) => ("completed", None),
-        }
+            Some("family is missing conclusive mutation results".to_owned()),
+        ),
+        Ok(()) if total == 0 => ("no_mutants", None),
+        Ok(()) => ("completed", None),
     }
 }
 

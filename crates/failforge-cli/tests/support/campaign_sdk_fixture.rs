@@ -289,7 +289,9 @@ fn test(config: &Value) -> i32 {
     if patched && mode == "sdk_drift" {
         fs::write(config["sdk_input"].as_str().unwrap(), "changed SDK input\n").unwrap();
     }
-    if patched && mode == "garbage" {
+    if patched
+        && (mode == "garbage" || mode == "mixed_infrastructure" && source == "const value = 4;\n")
+    {
         println!("not a package:test reporter event");
         return 1;
     }
@@ -297,7 +299,9 @@ fn test(config: &Value) -> i32 {
         .iter()
         .filter(|row| row["kind"] == "test_start" && row["patched"] == false)
         .count();
-    let failed = (patched && mode != "survived")
+    let survived =
+        mode == "survived" || mode == "mixed_infrastructure" && source == "const value = 3;\n";
+    let failed = (patched && !survived)
         || mode == "baseline_failure"
         || (!patched && mode == "final_original_failure" && original_attempts == 2)
         || (!patched && mode == "later_baseline_failure" && original_attempts == 3);

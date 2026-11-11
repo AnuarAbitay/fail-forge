@@ -1,7 +1,7 @@
 # FailForge
 
 [![Main CI](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/badge/release-0.1.0-blue)](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue)](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **Find the bugs your Dart and Flutter tests would miss.**
@@ -11,20 +11,20 @@ When a test catches a change, the mutant is **killed**. When the tests still
 pass, the mutant **survives** and gives you a concrete place to review your
 assertions, edge cases or requirements.
 
-This documentation covers **FailForge `0.1.0`**. Obtain a native archive and its
-verification files from the
-[0.1.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0),
-or build the tagged source. Choose an archive for your operating system and
+This documentation covers **FailForge `0.2.0`**, including offline HTML reports.
+Use a matching native archive and its verification files from the
+[0.2.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0),
+or build the tagged source. Choose the archive for your operating system and
 architecture. Read the [installation guide](docs/installation.md) and
 [support and verification scope](docs/beta-limitations.md) before your first run.
 
-Release archives: [Linux x86_64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.1.0/failforge-0.1.0-x86_64-unknown-linux-gnu.tar.gz),
-[macOS arm64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.1.0/failforge-0.1.0-aarch64-apple-darwin.tar.gz)
-and [Windows x64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.1.0/failforge-0.1.0-x86_64-pc-windows-msvc.tar.gz).
+Native `0.2.0` archives: [Linux x86_64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.2.0/failforge-0.2.0-x86_64-unknown-linux-gnu.tar.gz),
+[macOS arm64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.2.0/failforge-0.2.0-aarch64-apple-darwin.tar.gz)
+and [Windows x64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.2.0/failforge-0.2.0-x86_64-pc-windows-msvc.tar.gz).
 Download the matching manifest and checksum file as described in the
 [installation guide](docs/installation.md#install-from-an-archive).
 
-[Download 0.1.0](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0) ·
+[Download 0.2.0](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0) ·
 [Installation](docs/installation.md) ·
 [Operators](docs/mutation-operators.md) ·
 [Profiles](#yaml-profiles) ·
@@ -63,6 +63,8 @@ be equivalent to the original for your application's valid inputs.
 - Run with one to four workers and configure per-test and whole-command timeouts.
 - See live progress and a final terminal table, with JSON reports and captured
   test output for investigation.
+- Export a saved run as one offline HTML file with source context, outcome
+  filters and retained test evidence.
 - Stop a run with Ctrl+C while retaining completed results. Abandoned working
   copies can be cleaned up on a later run.
 
@@ -89,7 +91,7 @@ transformation and family. Scores are reported separately for each family.
 
 ## Get started
 
-FailForge 0.1.0 targets **Linux x86_64, macOS arm64 and Windows x64**.
+FailForge 0.2.0 targets **Linux x86_64, macOS arm64 and Windows x64**.
 Windows requires Windows 10 version 1809 or newer and a local NTFS working
 directory; see the [Windows installation and source build guide](docs/windows.md).
 Mutation analysis accepts a stable **Dart SDK `>=3.13.0 <4.0.0`**,
@@ -114,6 +116,16 @@ archive or build FailForge, prepare its adapter and prepare your target package'
 dependencies. A native archive needs no Rust installation. A compatible SDK and
 prepared adapter dependencies are still required. See
 [support and verification scope](docs/beta-limitations.md).
+
+**Unreleased source distribution:** try the
+[local Pub launcher](https://github.com/AnuarAbitay/fail-forge/blob/main/packages/failforge/README.md) from the current checkout.
+It downloads native FailForge `0.1.0`, verifies the release and prepares the
+adapter through `failforge setup`, with no Rust build required. The launcher
+package is not yet published to pub.dev. See the
+[launcher installation steps](docs/installation.md#try-the-local-pub-launcher-unreleased)
+and [publication and verification guide](https://github.com/AnuarAbitay/fail-forge/blob/main/docs/pub-launcher.md).
+The prototype still pins `0.1.0`; the planned launcher `0.2.0` needs verified
+`0.2.0` native archive and manifest hashes before it can provide HTML export.
 
 Historical note: `doctor` and automatic SDK/profile-path defaults were added
 in `0.1.0-beta.2`. The `0.1.0-beta.1` archive has no `doctor`;
@@ -326,10 +338,35 @@ failure can be `KILLED`; an externally timed-out command remains `TIMEOUT`.
 See [result interpretation](docs/mutation-cli.md#results-and-correctness)
 for details.
 
+**Unreleased source behavior:** individual `INFRA_ERROR` results no longer
+remove the score from an otherwise completed campaign. When every mutant has
+been processed and the original controls and final checks pass, these results
+are excluded from `KILLED + SURVIVED`; the report shows the excluded counts and
+the CLI still returns `125`. A campaign-wide failure or cancellation remains
+unscored.
+
 The terminal prints the report location. Use `summary.json` for final results,
 `progress.json` for live status and the retained mutant results and test captures
-to investigate failures or survivors. Reports and captures can contain sensitive
-project data; review them before sharing.
+to investigate failures or survivors.
+
+With the `0.2.0` CLI, export a saved run as a single offline HTML report:
+
+```sh
+failforge report .failforge/runs/RUN_ID --html .failforge/report.html
+```
+
+The report groups mutants by file and outcome, shows each exact edit and retained
+test evidence, and keeps scores separate by family. It needs no SDK or prepared
+adapter. Choose a new output filename; see the [HTML report guide](docs/html-report.md).
+This command is not included in the published `0.1.0` archives.
+
+When a source location is available, **Copy location** copies the relative
+`file:line:column` from the standalone HTML report. Line and column are one-based;
+columns count UTF-16 code units. If clipboard access is unavailable, the report
+shows selected text for manual copying. No local integration is needed.
+
+Reports and captures can contain sensitive project data; review them before
+sharing.
 
 **Surviving mutants alone do not cause a nonzero exit code.** Execution and
 inconclusive-result errors can still return `125`, even when all candidates were
@@ -344,6 +381,7 @@ inspect the report to apply their own quality threshold.
 | `failforge profile generate` | Generate a profile using applicability analysis or a catalogue template. |
 | `failforge mutate` | Run a mutation campaign from YAML or command-line options. |
 | `failforge replay` | Re-run retained classical candidates with matching source and baseline evidence; see the [replay requirements](docs/mutation-cli.md#replay-a-retained-classic-transcript). |
+| `failforge report` | Export a saved run as an offline HTML report; added in `0.2.0`, see the [report guide](docs/html-report.md). |
 | `failforge run` | Run an external command with timeout, output capture and cancellation; see the [command guide](docs/cli.md). |
 
 Use `failforge --help` or `<command> --help` for available options.
@@ -351,10 +389,13 @@ Use `failforge --help` or `<command> --help` for available options.
 ## Documentation and feedback
 
 - [Installation and first run](docs/installation.md)
+- [Local Pub launcher and setup](https://github.com/AnuarAbitay/fail-forge/blob/main/packages/failforge/README.md)
+- [Prepare and verify the Pub package](https://github.com/AnuarAbitay/fail-forge/blob/main/docs/pub-launcher.md)
 - [Check environment prerequisites](docs/doctor.md)
 - [Build and verify a local release archive](docs/packaging.md)
 - [Complete mutation operator catalogue](docs/mutation-operators.md)
 - [Mutation commands and profile reference](docs/mutation-cli.md)
+- [Browse a saved run as HTML](docs/html-report.md)
 - [Support and verification scope](docs/beta-limitations.md)
 - [Changelog](CHANGELOG.md)
 - [Security policy and vulnerability reporting](SECURITY.md)

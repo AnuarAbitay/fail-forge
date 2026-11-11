@@ -1,8 +1,8 @@
 # Windows installation and source build
 
-This guide covers FailForge `0.1.0` on Windows x64. Use the matching archives
-and verification files from the
-[0.1.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.1.0),
+This guide covers FailForge `0.2.0` on Windows x64. Use the matching native
+archives and verification files from the
+[0.2.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0),
 or build the tagged source. Historical beta.3 downloads are Linux/macOS only;
 beta.4 added Windows x64.
 
@@ -10,7 +10,7 @@ beta.4 added Windows x64.
 
 - Windows 10 version 1809 or newer, x64, with a local NTFS working directory.
 - PowerShell and the Windows `tar.exe` utility for archive installation.
-- The 0.1.0 archives link the Visual C++ runtime statically and do not
+- Native archives link the Visual C++ runtime statically and do not
   require the Visual C++ Redistributable.
 - A prepared stable Dart SDK `>=3.13.0 <4.0.0`, or Flutter containing that SDK.
   Flutter projects require the Flutter SDK and prepared Flutter dependencies.
@@ -35,9 +35,9 @@ with spaces or Unicode in its path.
 
 ## Install from an archive
 
-Download these three matching assets from the 0.1.0 release:
+Download these three matching assets from the `0.2.0` release:
 
-- `failforge-0.1.0-x86_64-pc-windows-msvc.tar.gz`
+- `failforge-0.2.0-x86_64-pc-windows-msvc.tar.gz`
 - `package-manifest-x86_64-pc-windows-msvc.json`
 - `SHA256SUMS-x86_64-pc-windows-msvc`
 
@@ -49,7 +49,7 @@ source; checksums are not digital signatures.
 $ErrorActionPreference = 'Stop'
 Set-Location 'C:\Downloads\FailForge'
 $target = 'x86_64-pc-windows-msvc'
-$archiveRoot = "failforge-0.1.0-$target"
+$archiveRoot = "failforge-0.2.0-$target"
 $expected = @("$archiveRoot.tar.gz", "package-manifest-$target.json")
 $checked = @{}
 foreach ($line in Get-Content "SHA256SUMS-$target") {
@@ -92,7 +92,7 @@ In a Developer PowerShell where the MSVC linker is available:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-git clone --branch v0.1.0 --depth 1 https://github.com/AnuarAbitay/fail-forge.git
+git clone --branch v0.2.0 --depth 1 https://github.com/AnuarAbitay/fail-forge.git
 if ($LASTEXITCODE -ne 0) { throw 'Source download failed' }
 Set-Location fail-forge
 $env:FAILFORGE_HOME = (Get-Location).Path
@@ -170,6 +170,11 @@ replacement of that root summary commits the final generation. During
 publication, readers of several files can observe different generations;
 wait for final `summary.json` and check the run identifiers before combining
 files. `progress.json` remains the live checkpoint.
+
+The `0.2.0` CLI can export a retained direct or profile run with
+`failforge report RUN --html FILE`. The HTML file opens locally without an SDK
+or server. See the [HTML report guide](html-report.md) for source context,
+outcome filters, copying locations and retained evidence limits.
 
 ## Long runs, paths and terminal output
 

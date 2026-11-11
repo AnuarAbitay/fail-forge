@@ -18,6 +18,7 @@ pub(super) const FIXED: &[&str] = &[
     "docs/installation.md",
     "docs/windows.md",
     "docs/doctor.md",
+    "docs/html-report.md",
     "docs/packaging.md",
     "docs/beta-limitations.md",
     "docs/cli.md",
