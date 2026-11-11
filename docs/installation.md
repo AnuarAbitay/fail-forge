@@ -17,12 +17,12 @@ their original SDK constraints.
 | --- | --- |
 | Operating system | Linux, macOS, or Windows 10 version 1809 or newer on x64 with local NTFS. Platform support does not imply that every distribution or architecture has been tested. See the [Windows scope](windows.md#requirements). |
 | Windows archive runtime | FailForge links the Visual C++ runtime statically and needs no Redistributable. The historical published beta.4 archive requires the x64 Redistributable; see the [Windows requirements](windows.md#requirements). |
-| Rust for source builds | Rust and Cargo 1.85.1 or newer, with the platform's C linker. Not required when using a prepared native archive. |
+| Rust for source builds | Rust and Cargo 1.85.1 or newer, with the platform's C linker. Not required when using the Dart launcher or a prepared native archive. |
 | Dart adapter SDK | Stable Dart `>=3.13.0 <4.0.0`. A Flutter installation may supply this Dart SDK. |
 | Target package | One standalone Dart or Flutter package with a passing `test` or `flutter_test` suite and prepared dependencies. |
 | Disk space | Space for the original package, temporary working copies and retained reports. Larger packages and more workers require more space. |
 
-The adapter pins `analyzer` to `14.5.0`. Use the checked-in
+The adapter pins `analyzer` to `14.5.0`. Use the supplied
 `adapters/dart/pubspec.lock`; do not upgrade adapter dependencies as part of
 installation. Python is not required.
 
@@ -40,43 +40,54 @@ permissions; working-copy isolation is not a security sandbox.
 
 ## 1. Choose an installation
 
-### Try the local Pub launcher (unreleased)
+### Install the Pub launcher
 
-The current development checkout contains a Dart launcher at
-`packages/failforge`. Launcher `0.1.0-beta.1` downloads the existing native
-FailForge `0.1.0` release and prepares its adapter automatically. This package
-has not been published to pub.dev and is absent from the tagged `v0.1.0`
-source. Use a checkout containing `packages/failforge` for this local trial.
+The Dart package `failforge` version `0.2.0` downloads native FailForge `0.2.0`,
+including HTML report export, and prepares its adapter automatically. Setup
+checks pinned archive and manifest SHA-256 digests and keeps the runtime in a
+separate cache. Rust and Cargo are not required for this route.
 
-With a compatible Dart SDK on `PATH`, run these commands from that checkout's
-root. The POSIX example also adds Pub's executable directory to `PATH`:
+With a compatible Dart SDK on `PATH`, install on macOS or Linux:
 
 ```sh
 export PATH="${PUB_CACHE:-$HOME/.pub-cache}/bin:$PATH"
-dart --suppress-analytics pub global activate --source path packages/failforge
+dart --suppress-analytics pub global activate failforge 0.2.0
 failforge setup
 failforge --version
 ```
 
+On Windows, use Dart's native installer from PowerShell. If you previously
+used Pub global activation, first remove its old batch entry with
+`dart pub global deactivate failforge`.
+
+```powershell
+dart install failforge@0.2.0
+```
+
+Add the installation bin directory printed by the installer to `PATH`, then
+run:
+
+```powershell
+failforge setup
+failforge --version
+```
+
+The native Windows entry point preserves Ctrl+C/Ctrl+Break cleanup and exit
+status. Legacy VM/global activation explains how to migrate before starting
+work. Follow the [launcher quickstart](https://github.com/AnuarAbitay/fail-forge/blob/main/packages/failforge/README.md#install)
+for cache settings, target preparation, mutation commands and HTML export.
+
 For Flutter, make its bundled Dart executable available on `PATH`, for example
-by adding `/absolute/path/to/flutter/bin/cache/dart-sdk/bin`. Initial setup
-needs access to GitHub release assets and pub.dev. It checks pinned SHA-256
-digests and keeps the runtime in a separate cache; Rust and Cargo are not
-required for this route.
+by adding `/absolute/path/to/flutter/bin/cache/dart-sdk/bin`. Keep the compatible
+SDK available for later mutation analysis. Initial setup needs access to GitHub
+release assets and pub.dev.
 
-On Windows, use the [native launcher installation instructions](https://github.com/AnuarAbitay/fail-forge/blob/main/packages/failforge/README.md#try-the-local-package)
-with `dart install`; legacy VM/global activation is rejected because it cannot
-preserve Ctrl+Break cleanup and exit status. Follow the launcher README for
-cache settings, target preparation and campaign commands. The remaining
-numbered steps in this guide use `FAILFORGE_HOME` for manual native
-installations. Launcher `setup` already performs adapter preparation.
-
-Local launcher verification covers macOS arm64, Windows x64 through the native
-installer, and Linux x64 with Dart 3.13.5.
-See the [Pub launcher guide](https://github.com/AnuarAbitay/fail-forge/blob/main/docs/pub-launcher.md) for the test evidence and
-remaining platform checks. The downloaded `0.1.0` runtime has the features of
-that release. The planned launcher `0.2.0` needs the new native archives and
-updated SHA-256 pins before it can provide HTML report export.
+The remaining numbered steps in this guide use `FAILFORGE_HOME` for manual
+native installations. Launcher setup already performs adapter preparation;
+launcher users can follow its quickstart without the manual path setup.
+See the [launcher verification guide](https://github.com/AnuarAbitay/fail-forge/blob/main/docs/pub-launcher.md)
+for repeatable checks and the scope of historical results. Local development
+from a checkout is covered in the [launcher README](https://github.com/AnuarAbitay/fail-forge/blob/main/packages/failforge/README.md#local-development).
 
 ### Install from an archive
 
