@@ -133,8 +133,9 @@ Future<void> verifyRuntimeManifest(
         .split(p.relative(entity.path, from: runtime.path))
         .join('/');
     _safePath(relative);
-    if (!names.add(relative.toLowerCase()))
+    if (!names.add(relative.toLowerCase())) {
       _invalid('duplicate cached runtime path');
+    }
     if (allowGenerated &&
         (relative == 'adapters/dart/.dart_tool' ||
             relative.startsWith('adapters/dart/.dart_tool/'))) {
@@ -228,12 +229,14 @@ Map<String, String> _pax(Uint8List bytes) {
   while (offset < bytes.length) {
     var space = offset;
     while (space < bytes.length && bytes[space] != 32) {
-      if (bytes[space] < 48 || bytes[space] > 57)
+      if (bytes[space] < 48 || bytes[space] > 57) {
         _invalid('invalid PAX length');
+      }
       space++;
     }
-    if (space == offset || space >= bytes.length)
+    if (space == offset || space >= bytes.length) {
       _invalid('invalid PAX header');
+    }
     final length = int.tryParse(ascii.decode(bytes.sublist(offset, space)));
     if (length == null ||
         length <= space - offset + 2 ||
@@ -290,8 +293,9 @@ Map<String, _Entry> _readTar(Uint8List bytes, String root) {
     if (type != 120 && type != 76 && pendingPax?['size'] != null) {
       size = int.tryParse(pendingPax!['size']!) ?? -1;
     }
-    if (size < 0 || size > _maxUnpackedBytes)
+    if (size < 0 || size > _maxUnpackedBytes) {
       _invalid('invalid tar entry size');
+    }
     offset += _blockSize;
     final paddedSize = ((size + _blockSize - 1) ~/ _blockSize) * _blockSize;
     if (offset + paddedSize > bytes.length) _invalid('truncated tar entry');
@@ -327,8 +331,9 @@ Map<String, _Entry> _readTar(Uint8List bytes, String root) {
     );
     pendingPax = null;
     longName = null;
-    if (!names.add(name.toLowerCase()))
+    if (!names.add(name.toLowerCase())) {
       _invalid('duplicate archive path: $name');
+    }
     if (name == root) {
       if (!directory) _invalid('archive root must be a directory');
       continue;
@@ -419,8 +424,9 @@ Map<String, Map<String, dynamic>> _verifyManifest(
     'LICENSE',
     'NOTICE',
   ]) {
-    if (!listed.containsKey(name))
+    if (!listed.containsKey(name)) {
       _invalid('missing required runtime file: $name');
+    }
   }
   for (final name in [
     'bin/failforge$suffix',
