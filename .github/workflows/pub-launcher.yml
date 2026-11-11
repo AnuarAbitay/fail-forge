@@ -1,0 +1,91 @@
+name: Pub launcher
+
+on:
+  push:
+    paths:
+      - 'packages/failforge/**'
+      - '.github/workflows/pub-launcher.yml'
+  pull_request:
+    paths:
+      - 'packages/failforge/**'
+      - '.github/workflows/pub-launcher.yml'
+  workflow_dispatch:
+
+# Source revisions are fetched anonymously. This workflow has no repository
+# token permissions and never publishes a package or downloads a native release.
+permissions: {}
+
+concurrency:
+  group: pub-launcher-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Dart ${{ matrix.sdk }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        sdk: ['3.13.0', '3.13.5']
+    defaults:
+      run:
+        working-directory: packages/failforge
+    steps:
+      - name: Check out the exact public revision without authentication
+        if: runner.os != 'Windows'
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init --quiet "$GITHUB_WORKSPACE"
+          GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+            GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false \
+            git -c credential.helper= -c http.extraHeader= fetch --quiet --no-tags --depth=1 \
+              "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" "$GITHUB_SHA"
+          git -c core.autocrlf=false checkout --quiet --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Check out the exact public revision without authentication on Windows
+        if: runner.os == 'Windows'
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:GIT_CONFIG_NOSYSTEM = '1'
+          $env:GIT_CONFIG_GLOBAL = Join-Path $env:RUNNER_TEMP 'anonymous-gitconfig'
+          [IO.File]::WriteAllText($env:GIT_CONFIG_GLOBAL, '')
+          $env:GIT_TERMINAL_PROMPT = '0'
+          git init --quiet $env:GITHUB_WORKSPACE
+          git -c credential.helper= -c http.extraHeader= fetch --quiet --no-tags --depth=1 "${env:GITHUB_SERVER_URL}/${env:GITHUB_REPOSITORY}.git" $env:GITHUB_SHA
+          git -c core.autocrlf=false checkout --quiet --detach FETCH_HEAD
+          if ((git rev-parse HEAD) -ne $env:GITHUB_SHA) { throw 'Checkout SHA differs from requested revision' }
+      - name: Configure isolated caches on Unix
+        if: runner.os != 'Windows'
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "PUB_CACHE=$RUNNER_TEMP/pub-cache" >> "$GITHUB_ENV"
+          echo "FAILFORGE_CACHE=$RUNNER_TEMP/failforge-runtime-cache" >> "$GITHUB_ENV"
+      - name: Configure isolated caches on Windows
+        if: runner.os == 'Windows'
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          "PUB_CACHE=$(Join-Path $env:RUNNER_TEMP 'pub-cache')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "FAILFORGE_CACHE=$(Join-Path $env:RUNNER_TEMP 'failforge-runtime-cache')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Install the pinned Dart SDK
+        uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1
+        with:
+          sdk: ${{ matrix.sdk }}
+      - name: Resolve locked package dependencies
+        run: dart --suppress-analytics pub get --enforce-lockfile
+      - name: Check formatting
+        run: dart --suppress-analytics format --output=none --set-exit-if-changed bin lib test
+      - name: Analyze
+        run: dart --suppress-analytics analyze
+      - name: Test
+        run: dart --suppress-analytics test

@@ -30,6 +30,8 @@ pub(crate) enum Commands {
     Mutate(Box<MutateArgs>),
     /// Replay a retained classic discovery transcript against fresh isolated copies.
     Replay(Box<ReplayArgs>),
+    /// Export a retained mutation run as a self-contained, offline HTML report.
+    Report(ReportArgs),
     /// Generate mutation profiles using static analysis or a catalogue template.
     Profile(ProfileArgs),
     /// Internal prepared-input operations for the campaign controller.
@@ -76,6 +78,19 @@ pub(crate) enum Commands {
     #[command(hide = true)]
     #[cfg(unix)]
     CampaignPublish,
+}
+
+#[derive(Args)]
+pub(crate) struct ReportArgs {
+    /// Retained run directory or its authoritative summary.json file.
+    #[arg(value_name = "RUN")]
+    pub(crate) run: PathBuf,
+    /// New HTML file to create; its parent directory must already exist.
+    #[arg(long, value_name = "FILE")]
+    pub(crate) html: PathBuf,
+    /// Original package root for hash-verified context in older saved runs.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) source_root: Option<PathBuf>,
 }
 
 #[derive(Args)]

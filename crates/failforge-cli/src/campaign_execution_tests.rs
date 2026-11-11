@@ -137,7 +137,6 @@ fn completion_requires_every_family_and_mutant_even_with_no_task_error() {
             expected,
             mutants,
             families,
-            infrastructure: false,
         };
         assert_eq!(terminal_state(Ok(()), &cancel, &ledger, 2).0, "failed");
     }
@@ -154,7 +153,6 @@ fn completion_requires_every_family_and_mutant_even_with_no_task_error() {
         expected: Some(3),
         mutants: 3,
         families: 2,
-        infrastructure: false,
     };
     assert_eq!(
         terminal_state(Ok(()), &cancel, &complete, 2),
@@ -168,6 +166,64 @@ fn completion_requires_every_family_and_mutant_even_with_no_task_error() {
 }
 
 #[test]
+fn retained_mutant_infrastructure_error_does_not_make_a_complete_campaign_fail() {
+    #[derive(Default)]
+    struct Events(Vec<Value>);
+    impl CampaignEvents for Events {
+        fn emit_campaign(&mut self, event: Value) -> io::Result<()> {
+            self.0.push(event);
+            Ok(())
+        }
+
+        fn finish_campaign(
+            &mut self,
+            _status: &str,
+            _error: Option<&str>,
+            _completed_families: usize,
+            _expected_families: usize,
+            _completed_mutants: usize,
+            _expected_mutants: Option<usize>,
+        ) -> io::Result<()> {
+            panic!("this test finalizes the family through its campaign sink")
+        }
+    }
+
+    let cancel = Cancellation::default();
+    let mut events = Events::default();
+    let mut ledger = Ledger {
+        expected: Some(1),
+        ..Default::default()
+    };
+    {
+        let mut sink = FamilySink {
+            stream: &mut events,
+            ledger: &mut ledger,
+            family: "classic",
+            started: Instant::now(),
+            terminal: None,
+        };
+        sink.emit(json!({"kind":"mutant","record":{"outcome":"INFRA_ERROR"}}))
+            .unwrap();
+        sink.finish("completed", None, 1, 1).unwrap();
+    }
+    assert_eq!(ledger.mutants, 1);
+    assert_eq!(ledger.families, 1);
+    assert_eq!(events.0[0]["event"]["record"]["outcome"], "INFRA_ERROR");
+    assert_eq!(
+        terminal_state(Ok(()), &cancel, &ledger, 1),
+        ("completed", None)
+    );
+    let failure = terminal_state(Err(invalid("original source changed")), &cancel, &ledger, 1);
+    assert_eq!(failure.0, "failed");
+    assert!(failure.1.unwrap().contains("original source changed"));
+    cancel.request(libc::SIGTERM);
+    assert_eq!(
+        terminal_state(Ok(()), &cancel, &ledger, 1),
+        ("cancelled", None)
+    );
+}
+
+#[test]
 fn integrity_and_aggregate_failures_are_never_reclassified_as_cancellation() {
     let cancel = Cancellation::default();
     cancel.request(libc::SIGINT);
@@ -175,7 +231,6 @@ fn integrity_and_aggregate_failures_are_never_reclassified_as_cancellation() {
         expected: Some(3),
         mutants: 1,
         families: 0,
-        infrastructure: false,
     };
     let result = terminal_state(
         Err(invalid("original source changed")),
@@ -185,19 +240,15 @@ fn integrity_and_aggregate_failures_are_never_reclassified_as_cancellation() {
     );
     assert_eq!(result.0, "failed");
     assert!(result.1.unwrap().contains("original source changed"));
-    let infrastructure = Ledger {
-        infrastructure: true,
-        ..partial
-    };
     assert_eq!(
         terminal_state(
             Err(NamespaceError::Cancelled(libc::SIGINT)),
             &cancel,
-            &infrastructure,
+            &partial,
             2
         )
         .0,
-        "failed"
+        "cancelled"
     );
     let excessive = Ledger {
         expected: Some(30000),

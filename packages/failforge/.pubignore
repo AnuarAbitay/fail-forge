@@ -1,0 +1,13 @@
+.dart_tool/
+.pub/
+.pub-cache/
+build/
+coverage/
+test/
+pubspec.lock
+pubspec_overrides.yaml
+.env
+.env.*
+*.log
+*.tmp
+.DS_Store

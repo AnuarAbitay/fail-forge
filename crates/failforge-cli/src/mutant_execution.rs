@@ -236,7 +236,7 @@ fn record(candidate: &VerifiedCandidate) -> Value {
     let mutant = &candidate.raw_mutant;
     let mut value = json!({"recordKind":"mutation","mutantId":mutant["id"],
         "family":mutant["family"],"operatorId":mutant["operatorId"],"file":mutant["file"],
-        "edit":mutant["edit"],"validation":candidate.validation});
+        "edit":mutant["edit"],"sourceHash":candidate.mutant.source_hash,"validation":candidate.validation});
     if candidate.mutant.family == failforge_dart::MutationFamily::LanguageSpecific {
         value["language"] = "dart".into();
         if let Some((category, _)) = failforge_config::catalogue::DART_OPERATOR_GROUPS
@@ -551,10 +551,33 @@ async fn run_owned_inner(
             &request.workspace.campaign,
             &Cancellation::default(),
         )?;
-        let completed = finalize_result(result, original)?;
+        let mut completed = finalize_result(result, original)?;
+        retain_source_context(&request.project.root, &candidate, &mut completed.record);
         seal_completed(completed, caps, &finalizing, retain_transport)
     })
     .await
+}
+
+fn retain_source_context(
+    root: &std::path::Path,
+    candidate: &VerifiedCandidate,
+    record: &mut Value,
+) {
+    record["sourceHash"] = candidate.mutant.source_hash.clone().into();
+    record
+        .as_object_mut()
+        .expect("mutation record")
+        .remove("sourceContext");
+    // Display context is optional. The normal source guard remains authoritative
+    // for verdicts; an unreadable or changed source must never invent a location.
+    if let Ok(context) = crate::source_context::capture(
+        root,
+        &candidate.mutant.file,
+        &candidate.mutant.source_hash,
+        &candidate.raw_mutant["edit"],
+    ) {
+        record["sourceContext"] = context;
+    }
 }
 
 fn seal_completed(
