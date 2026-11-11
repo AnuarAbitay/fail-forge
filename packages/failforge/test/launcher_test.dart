@@ -85,11 +85,18 @@ void main() {
     await process.stdin.close();
 
     expect(await process.exitCode.timeout(const Duration(seconds: 15)), 37);
-    expect(jsonDecode(await output), {
+    final payload = jsonDecode(await output) as Map<String, dynamic>;
+    final actualCwd = payload.remove('cwd') as String;
+    expect(payload, {
       'arguments': arguments,
-      'cwd': temporary.resolveSymbolicLinksSync(),
       'inputBase64': base64Encode(input),
     });
+    if (Platform.isWindows) {
+      // Windows can report the runner profile through its 8.3 alias.
+      expect(FileSystemEntity.identicalSync(actualCwd, temporary.path), isTrue);
+    } else {
+      expect(actualCwd, temporary.resolveSymbolicLinksSync());
+    }
     expect(await errors, 'fixture stderr: ошибка\n');
     expect(await File('${temporary.path}/must-not-exist').exists(), isFalse);
   });

@@ -178,8 +178,8 @@ targets. The native release supports Linux x86_64, macOS arm64 and Windows x64;
 the launcher must be exercised on each before claiming launcher support.
 
 The [Pub launcher workflow](../.github/workflows/pub-launcher.yml) is configured
-to check formatting, analysis and tests with Dart `3.13.5` on Linux, macOS and
-Windows when launcher files change. It does not download a native release or
+to check formatting, analysis and tests with Dart `3.13.0` and `3.13.5` on Linux,
+macOS and Windows when launcher files change. It does not download a native release or
 publish the package. Adding the workflow does not establish that its jobs have
 run or passed.
 

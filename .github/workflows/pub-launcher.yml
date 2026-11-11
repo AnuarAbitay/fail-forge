@@ -21,13 +21,14 @@ concurrency:
 
 jobs:
   package:
-    name: Dart 3.13.5 / ${{ matrix.os }}
+    name: Dart ${{ matrix.sdk }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        sdk: ['3.13.0', '3.13.5']
     defaults:
       run:
         working-directory: packages/failforge
@@ -79,7 +80,7 @@ jobs:
       - name: Install the pinned Dart SDK
         uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1
         with:
-          sdk: '3.13.5'
+          sdk: ${{ matrix.sdk }}
       - name: Resolve locked package dependencies
         run: dart --suppress-analytics pub get --enforce-lockfile
       - name: Check formatting
