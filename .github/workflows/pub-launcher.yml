@@ -84,8 +84,8 @@ jobs:
       - name: Resolve locked package dependencies
         run: dart --suppress-analytics pub get --enforce-lockfile
       - name: Check formatting
-        run: dart --suppress-analytics format --output=none --set-exit-if-changed bin lib test
+        run: dart --suppress-analytics format --output=none --set-exit-if-changed bin lib test example
       - name: Analyze
-        run: dart --suppress-analytics analyze
+        run: dart --suppress-analytics analyze --fatal-infos
       - name: Test
         run: dart --suppress-analytics test

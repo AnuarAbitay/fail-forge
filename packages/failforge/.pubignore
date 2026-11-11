@@ -1,9 +1,10 @@
 .dart_tool/
 .pub/
 .pub-cache/
+.failforge/
 build/
 coverage/
-test/
+/test/
 pubspec.lock
 pubspec_overrides.yaml
 .env

@@ -230,14 +230,16 @@ class RuntimeManager {
   Future<bool> _isPrepared(Map<String, String> fingerprint) async {
     try {
       if (await FileSystemEntity.type(_prepared.path, followLinks: false) !=
-          FileSystemEntityType.file)
+          FileSystemEntityType.file) {
         return false;
+      }
       if (await _prepared.length() > 16384) return false;
       final saved = jsonDecode(await _prepared.readAsString());
       if (saved is! Map ||
           saved.length != fingerprint.length ||
-          fingerprint.entries.any((entry) => saved[entry.key] != entry.value))
+          fingerprint.entries.any((entry) => saved[entry.key] != entry.value)) {
         return false;
+      }
       return await _packageRootsExist();
     } on FileSystemException {
       return false;
@@ -262,13 +264,15 @@ class RuntimeManager {
       if (data is! Map ||
           data['configVersion'] != 2 ||
           data['packages'] is! List ||
-          (data['packages'] as List).isEmpty)
+          (data['packages'] as List).isEmpty) {
         return false;
+      }
       for (final package in data['packages'] as List) {
         if (package is! Map || package['rootUri'] is! String) return false;
         final uri = config.uri.resolve(package['rootUri'] as String);
-        if (uri.scheme != 'file' || !await Directory.fromUri(uri).exists())
+        if (uri.scheme != 'file' || !await Directory.fromUri(uri).exists()) {
           return false;
+        }
       }
       return true;
     } on FileSystemException {
@@ -295,7 +299,7 @@ const maxDownloadBytes = 128 * 1024 * 1024;
 /// No authentication, persisted cookies, or mutable "latest" release lookup.
 Future<void> downloadRelease(Uri uri, File destination) async {
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 30);
-  client.userAgent = 'failforge-dart-launcher/0.2.0';
+  client.userAgent = 'failforge-dart-launcher/0.2.1';
   RandomAccessFile? output;
   try {
     var current = uri;
@@ -314,8 +318,9 @@ Future<void> downloadRelease(Uri uri, File destination) async {
       );
       if ([301, 302, 303, 307, 308].contains(response.statusCode)) {
         final location = response.headers.value(HttpHeaders.locationHeader);
-        if (location == null)
+        if (location == null) {
           throw const HttpException('Release redirect has no location.');
+        }
         current = current.resolve(location);
         continue;
       }

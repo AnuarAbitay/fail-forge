@@ -1,6 +1,6 @@
 # Pub launcher installation and verification
 
-The Dart package `failforge` provides the `failforge` command. Launcher `0.2.0`
+The Dart package `failforge` provides the `failforge` command. Launcher `0.2.1`
 selects native FailForge `0.2.0`, including offline HTML export, using pinned
 archive and package manifest SHA-256 digests for Linux x64 (glibc), macOS arm64
 and Windows x64. Native archives provide the Rust executables, Dart adapter and
@@ -15,7 +15,7 @@ Use a stable Dart SDK `>=3.13.0 <4.0.0`, or Flutter with a Dart SDK in that rang
 On macOS or Linux:
 
 ```sh
-dart pub global activate failforge 0.2.0
+dart pub global activate failforge 0.2.1
 ```
 
 Add Pub's executable directory to `PATH` if needed; its default is
@@ -25,7 +25,7 @@ On Windows, remove a previous Pub global entry with
 `dart pub global deactivate failforge` if one exists, then use PowerShell:
 
 ```powershell
-dart install failforge@0.2.0
+dart install failforge@0.2.1
 ```
 
 Add the installation bin directory printed by `dart install` to `PATH`.
@@ -255,8 +255,8 @@ acceptance.
 ## Version and publication
 
 Keep the Pub package version and native runtime version explicit. Launcher
-`0.2.0` and native `0.2.0` use matching version numbers for this release, but
-they have separate source revisions and publication steps. The launcher must
+`0.2.1` selects native `0.2.0`; the package and runtime have separate source
+revisions and publication steps. The launcher must
 select release-specific URLs and verified SHA-256 digests. Publishing the Dart
 package does not bundle other native changes from the repository working tree.
 
@@ -273,7 +273,11 @@ For each package publication:
    cancellation regressions alongside mutation/HTML smoke.
 4. Review README/CHANGELOG, included files and `dart pub publish --dry-run`.
    SDKs, credentials, reports, caches and downloaded runtimes do not belong in
-   the Pub payload.
+   the Pub payload. Run Pana on an isolated copy of the publishable files with
+   the current stable Dart SDK, review every scoring category and record the
+   tool versions. Pana can modify its input directory. Package CI enforces
+   Dart core lints with `--fatal-infos`; the runnable example must also remain
+   in the published archive. See the [Pub scoring guide](https://pub.dev/help/scoring).
 5. Publish with the intended Google account. For an initial package, confirm
    that pub.dev accepts the intended name and records the intended uploader.
 6. Dispatch fresh `hosted` acceptance against the same committed package

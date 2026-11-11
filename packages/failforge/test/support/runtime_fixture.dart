@@ -60,8 +60,9 @@ Future<void> extractFixture(
     await file.writeAsBytes(entry.value);
     if (!Platform.isWindows && entry.key.startsWith('bin/')) {
       final result = await Process.run('chmod', ['755', file.path]);
-      if (result.exitCode != 0)
+      if (result.exitCode != 0) {
         throw StateError('Cannot mark fixture executable.');
+      }
     }
   }
   await File(p.join(destination.path, 'package-manifest.json'))

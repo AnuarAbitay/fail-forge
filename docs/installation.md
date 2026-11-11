@@ -42,7 +42,7 @@ permissions; working-copy isolation is not a security sandbox.
 
 ### Install the Pub launcher
 
-The Dart package `failforge` version `0.2.0` downloads native FailForge `0.2.0`,
+The Dart package `failforge` version `0.2.1` downloads native FailForge `0.2.0`,
 including HTML report export, and prepares its adapter automatically. Setup
 checks pinned archive and manifest SHA-256 digests and keeps the runtime in a
 separate cache. Rust and Cargo are not required for this route.
@@ -51,7 +51,7 @@ With a compatible Dart SDK on `PATH`, install on macOS or Linux:
 
 ```sh
 export PATH="${PUB_CACHE:-$HOME/.pub-cache}/bin:$PATH"
-dart --suppress-analytics pub global activate failforge 0.2.0
+dart --suppress-analytics pub global activate failforge 0.2.1
 failforge setup
 failforge --version
 ```
@@ -61,7 +61,7 @@ used Pub global activation, first remove its old batch entry with
 `dart pub global deactivate failforge`.
 
 ```powershell
-dart install failforge@0.2.0
+dart install failforge@0.2.1
 ```
 
 Add the installation bin directory printed by the installer to `PATH`, then

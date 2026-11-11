@@ -4,6 +4,12 @@ User-visible changes are recorded by version. Check
 [GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for published
 downloads and their verification results.
 
+## 0.2.1 — Dart launcher
+
+- Add a runnable CLI example covering a boundary mutation and offline HTML export.
+- Enable Dart core lints and enforce informational diagnostics in package CI.
+- Use the verified native runtime `0.2.0`.
+
 ## 0.2.0
 
 The native CLI and Dart launcher are distributed separately. Launcher `0.2.0`
