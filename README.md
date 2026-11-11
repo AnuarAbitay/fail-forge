@@ -117,22 +117,25 @@ dependencies. A native archive needs no Rust installation. A compatible SDK and
 prepared adapter dependencies are still required. See
 [support and verification scope](docs/beta-limitations.md).
 
-**Unreleased source distribution:** try the
-[local Pub launcher](https://github.com/AnuarAbitay/fail-forge/blob/main/packages/failforge/README.md) from the current checkout.
-It downloads native FailForge `0.1.0`, verifies the release and prepares the
-adapter through `failforge setup`, with no Rust build required. The launcher
-package is not yet published to pub.dev. See the
-[launcher installation steps](docs/installation.md#try-the-local-pub-launcher-unreleased)
-and [publication and verification guide](https://github.com/AnuarAbitay/fail-forge/blob/main/docs/pub-launcher.md).
-The prototype still pins `0.1.0`; the planned launcher `0.2.0` needs verified
-`0.2.0` native archive and manifest hashes before it can provide HTML export.
+Install the Dart launcher **`0.2.0`** to download and prepare native FailForge
+**`0.2.0`**, including HTML export. On macOS/Linux, use
+`dart pub global activate failforge 0.2.0`; on Windows, use
+`dart install failforge@0.2.0`. Then run `failforge setup`.
+See the [launcher quickstart](https://github.com/AnuarAbitay/fail-forge/blob/main/packages/failforge/README.md),
+[installation steps](docs/installation.md#install-the-pub-launcher) and
+[launcher verification guide](https://github.com/AnuarAbitay/fail-forge/blob/main/docs/pub-launcher.md).
+This route needs a compatible Dart SDK and no Rust build. The manual archive
+and source-build path setup below is unnecessary for the launcher; its setup
+selects and prepares the installation automatically.
 
 Historical note: `doctor` and automatic SDK/profile-path defaults were added
 in `0.1.0-beta.2`. The `0.1.0-beta.1` archive has no `doctor`;
 supply `--dart-sdk` or `--flutter-sdk` and `profile generate --output` explicitly
 when using that archive.
 
-The examples below run from the **target package root**, with these paths set:
+For a manual native installation, the examples below run from the **target
+package root**, with these paths set. With the Pub launcher, use `failforge`
+directly and omit the explicit `--installation` option shown below.
 
 ```sh
 export FAILFORGE_HOME=/absolute/path/to/fail-forge
@@ -338,7 +341,7 @@ failure can be `KILLED`; an externally timed-out command remains `TIMEOUT`.
 See [result interpretation](docs/mutation-cli.md#results-and-correctness)
 for details.
 
-**Unreleased source behavior:** individual `INFRA_ERROR` results no longer
+In `0.2.0`, individual `INFRA_ERROR` results no longer
 remove the score from an otherwise completed campaign. When every mutant has
 been processed and the original controls and final checks pass, these results
 are excluded from `KILLED + SURVIVED`; the report shows the excluded counts and
@@ -389,7 +392,7 @@ Use `failforge --help` or `<command> --help` for available options.
 ## Documentation and feedback
 
 - [Installation and first run](docs/installation.md)
-- [Local Pub launcher and setup](https://github.com/AnuarAbitay/fail-forge/blob/main/packages/failforge/README.md)
+- [Pub launcher and setup](https://github.com/AnuarAbitay/fail-forge/blob/main/packages/failforge/README.md)
 - [Prepare and verify the Pub package](https://github.com/AnuarAbitay/fail-forge/blob/main/docs/pub-launcher.md)
 - [Check environment prerequisites](docs/doctor.md)
 - [Build and verify a local release archive](docs/packaging.md)

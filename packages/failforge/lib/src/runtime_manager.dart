@@ -295,7 +295,7 @@ const maxDownloadBytes = 128 * 1024 * 1024;
 /// No authentication, persisted cookies, or mutable "latest" release lookup.
 Future<void> downloadRelease(Uri uri, File destination) async {
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 30);
-  client.userAgent = 'failforge-dart-launcher/0.1.0-beta.1';
+  client.userAgent = 'failforge-dart-launcher/0.2.0';
   RandomAccessFile? output;
   try {
     var current = uri;
