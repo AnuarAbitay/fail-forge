@@ -6,7 +6,7 @@ FailForge makes small changes to your source code and runs your tests against
 them. Changes that survive identify behavior your assertions may not cover.
 
 This package provides the `failforge` command through a small Dart launcher.
-Launcher **`0.2.0`** installs native FailForge **`0.2.0`**, including offline HTML
+Launcher **`0.2.1`** installs native FailForge **`0.2.0`**, including offline HTML
 reports. It downloads the runtime for your platform and prepares its Dart
 adapter. Rust is not required on your machine.
 
@@ -23,7 +23,7 @@ adapter. Rust is not required on your machine.
 On macOS or Linux:
 
 ```sh
-dart pub global activate failforge 0.2.0
+dart pub global activate failforge 0.2.1
 ```
 
 Add Pub's executable directory to `PATH` if `failforge` is not found. On macOS
@@ -35,7 +35,7 @@ used Pub global activation, first remove its old batch entry with
 `dart pub global deactivate failforge`.
 
 ```powershell
-dart install failforge@0.2.0
+dart install failforge@0.2.1
 ```
 
 Add the installation bin directory printed by `dart install` to `PATH`.

@@ -28,7 +28,11 @@ SOURCE = ("// Кошелёк α 🧪\r\n"
           "  /* 🧪 */ return balance >= amount;\r\n}\r\n")
 TARGETS = {"Darwin": "aarch64-apple-darwin", "Linux": "x86_64-unknown-linux-gnu",
            "Windows": "x86_64-pc-windows-msvc"}
-PAYLOAD_ROOT_FILES = {"README.md", "CHANGELOG.md", "LICENSE", "NOTICE", "pubspec.yaml"}
+PAYLOAD_ROOT_FILES = {"README.md", "CHANGELOG.md", "LICENSE", "NOTICE", "pubspec.yaml",
+                      "analysis_options.yaml"}
+PAYLOAD_EXAMPLE_FILES = {"example/README.md", "example/analysis_options.yaml",
+                         "example/pubspec.yaml", "example/lib/boundary.dart",
+                         "example/test/boundary_test.dart"}
 
 
 def require(condition, message):
@@ -55,7 +59,8 @@ def tree(root):
 
 def payload_tree(root):
     return {relative: digest for relative, digest in tree(root).items()
-            if relative in PAYLOAD_ROOT_FILES or relative.startswith(("bin/", "lib/"))}
+            if relative in PAYLOAD_ROOT_FILES or relative in PAYLOAD_EXAMPLE_FILES
+            or relative.startswith(("bin/", "lib/"))}
 
 
 def generate_fixture(project, source_root):
