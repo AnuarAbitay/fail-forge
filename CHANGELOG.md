@@ -6,19 +6,19 @@ downloads and their verification results.
 
 ## 0.2.0
 
-This native version includes the local Pub launcher `0.1.0-beta.1` prototype,
-which pins native `0.1.0`. Launcher `0.2.0` requires a separate package update
-with the verified archive and manifest hashes of the matching native assets.
+The native CLI and Dart launcher are distributed separately. Launcher `0.2.0`
+selects native `0.2.0` using pinned archive and package manifest SHA-256 digests.
+Their source revisions are recorded separately in the release verification.
 
 ### Added
 
-- A local Dart Pub launcher prototype in `packages/failforge`, version
-  `0.1.0-beta.1`, installs native FailForge `0.1.0` through `failforge setup` or
-  first use. It verifies pinned release and payload hashes, prepares adapter
-  dependencies, isolates SDK/Pub cache configurations and preserves native
-  command arguments, streams, exit status and Unix cancellation. Includes
-  package documentation, tests and a three-platform CI workflow. The package
-  has not yet been published to pub.dev.
+- A Dart command-line package, `failforge` version `0.2.0`, installs native
+  FailForge `0.2.0` through `failforge setup` or first use. It verifies pinned
+  release and payload hashes, prepares adapter dependencies, isolates SDK/Pub
+  cache configurations and preserves native arguments, streams, exit status
+  and Unix cancellation. Includes package documentation, a six-job SDK test
+  matrix and a workflow for fresh-install acceptance on Linux, macOS and
+  Windows. Hosted acceptance is available through a separate manual run.
 - `failforge report RUN --html FILE` exports a saved direct campaign or
   multi-family profile as one offline HTML report. Browse source files and
   mutant outcomes, inspect exact mutation edits, and review retained test

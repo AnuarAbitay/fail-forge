@@ -23,29 +23,29 @@ class ReleaseArtifact {
   );
 }
 
-// Verified against GitHub's public v0.1.0 release asset digests and retained
-// SHA256SUMS on 2026-11-10. Updating these also requires installation smoke tests.
+// Verified against the native v0.2.0 release assets on 2026-11-11.
+// Source: ea503af463cf861459d719f5ffbe6182421e24f7. Updating pins requires installation smoke tests.
 const releaseArtifacts = {
   'aarch64-apple-darwin': ReleaseArtifact(
-    version: '0.1.0',
+    version: '0.2.0',
     target: 'aarch64-apple-darwin',
-    sha256: 'd6dad09004b4bf46082c39194d8002ff12a849c7398eacad59c2f5acf8a8b515',
+    sha256: '2b831e7341c3d55cf2719672bef2e9a77033f56e205a511dac18f247d862e443',
     manifestSha256:
-        '34680c7352a84015d7889f31a390092e61db2f7bf1dd7ffe8178b998c2117c8f',
+        '08341640a4894df1be97773ddef7ec8c3f7bbe8b78a0af37e9098dc016969d25',
   ),
   'x86_64-unknown-linux-gnu': ReleaseArtifact(
-    version: '0.1.0',
+    version: '0.2.0',
     target: 'x86_64-unknown-linux-gnu',
-    sha256: 'b75136cf25d31167fe59900c19ae66d1d91f8be8b42d67f8818584d2fde1f310',
+    sha256: '24d176d1059b4e3fc6881be33f134d521c673ff16cde98b10e244b05f162e4bc',
     manifestSha256:
-        '649e30c2dbd490807938281925d35a3ef200b7780f0c8d73d6b42df1c10f91cd',
+        '90aa3ca50973730ad34ba31babe9d82b1eeef5af7afa272d324d44a67bcc306b',
   ),
   'x86_64-pc-windows-msvc': ReleaseArtifact(
-    version: '0.1.0',
+    version: '0.2.0',
     target: 'x86_64-pc-windows-msvc',
-    sha256: '62d96bee3a3cc3dd87a76279e8028a66e6c52b0ba4e402c91b57658c8d86cfc1',
+    sha256: '6de7b7be8e5744f82ddfb2942b91369b0ef188a7de2eb0a83648f8bca3e4f4fe',
     manifestSha256:
-        'df21e51fa06da2f455e1fe6304bdf8cb7002c35ec68f0fbc581dd046172ba7c1',
+        'b48f7c9464a94c375bb0cebd1f106aec814293db3677e4bf91a32adbb9f1a103',
   ),
 };
 
