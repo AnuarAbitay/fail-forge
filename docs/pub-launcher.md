@@ -1,17 +1,46 @@
-# Prepare the Pub launcher
+# Pub launcher installation and verification
 
-`packages/failforge` is a local prototype of the Dart package that will expose
-the `failforge` command through pub.dev. Launcher version `0.1.0-beta.1` installs
-the existing native release `0.1.0`. Native release archives remain the source
-of the Rust executables, Dart adapter and runtime notices.
-
-Native `0.2.0` includes HTML export. The prototype's package version and `0.1.0`
-runtime pins remain unchanged until the new native archives and their manifest
-hashes have been verified. Launcher
-`0.2.0` is the planned follow-up publication, not an already published package.
+The Dart package `failforge` provides the `failforge` command. Launcher `0.2.0`
+selects native FailForge `0.2.0`, including offline HTML export, using pinned
+archive and package manifest SHA-256 digests for Linux x64 (glibc), macOS arm64
+and Windows x64. Native archives provide the Rust executables, Dart adapter and
+runtime notices; no Rust installation is needed on the user's machine.
 
 The adapter at `adapters/dart` remains an internal package with
 `publish_to: none`. Publishing it alone would not provide the native CLI.
+
+## Install from pub.dev
+
+Use a stable Dart SDK `>=3.13.0 <4.0.0`, or Flutter with a Dart SDK in that range.
+On macOS or Linux:
+
+```sh
+dart pub global activate failforge 0.2.0
+```
+
+Add Pub's executable directory to `PATH` if needed; its default is
+`$HOME/.pub-cache/bin`. A custom `PUB_CACHE` changes that directory.
+
+On Windows, remove a previous Pub global entry with
+`dart pub global deactivate failforge` if one exists, then use PowerShell:
+
+```powershell
+dart install failforge@0.2.0
+```
+
+Add the installation bin directory printed by `dart install` to `PATH`.
+On every platform, prepare and check the runtime:
+
+```sh
+failforge setup
+failforge --version
+```
+
+Keep the compatible SDK on `PATH` or set `DART_SDK` for adapter preparation and
+mutation analysis. The [launcher quickstart](https://github.com/AnuarAbitay/fail-forge/blob/main/packages/failforge/README.md)
+covers target preparation, mutation runs, HTML export, cache settings and
+uninstallation. Local checkout installation is an additional development route,
+shown below; it is separate from hosted package acceptance.
 
 ## Local checks
 
@@ -19,7 +48,7 @@ Use a stable Dart SDK `>=3.13.0 <4.0.0`:
 
 ```sh
 cd packages/failforge
-dart pub get
+dart pub get --enforce-lockfile
 dart format --output=none --set-exit-if-changed .
 dart analyze
 dart test
@@ -74,6 +103,13 @@ Then use a prepared test package to run `doctor`, generate a profile and execute
 a small mutation campaign. Check reports, source preservation and cleanup.
 Also check Ctrl+C during a campaign, installation paths containing spaces,
 repeated invocations, concurrent setup and recovery after interrupted setup.
+
+## Historical launcher verification
+
+The records below cover the prepublication `0.1.0-beta.1` launcher selecting
+native `0.1.0` and its follow-up fix snapshot, before the final `0.2.0` pins.
+They retain their original source and platform scope; they are not hosted
+installation results or CI results for another package revision.
 
 ### Local verification, 2026-11-10
 
@@ -130,8 +166,8 @@ evidence.
 
 ### Fix verification, 2026-11-11
 
-The final package source passed formatting, analysis and its full test suite on
-all three local test hosts with Dart 3.13.5:
+The prepublication fix snapshot passed formatting, analysis and its full test
+suite on all three local test hosts with Dart 3.13.5:
 
 | Platform | Passed | Expected skips |
 | --- | ---: | ---: |
@@ -165,53 +201,86 @@ Evidence is retained under `artifacts/pub-fix-windows-break-20261111/` and
 `artifacts/pub-fixes-html-20261111/fixed-pub-source-manifest.json`.
 The combined result is `artifacts/pub-fixes-html-20261111/verification.json`.
 
-The HTML feature added in native `0.2.0` was separately built and exercised
-in real browsers
-on Windows and Linux; see [HTML report verification](html-report.md#platform-verification).
-Before a combined release, publish matching native archives containing that
-feature and update the launcher's version-specific URLs and SHA-256 pins. This
-local prototype still points to the existing native `0.1.0` release. These
-checks do not replace CI on the intended committed release revision.
+HTML export was separately built from the then-unreleased native source and
+exercised in real browsers on Windows and Linux; see
+[HTML report verification](html-report.md#platform-verification). At this point,
+the prototype still selected native `0.1.0`. The archive and manifest pins were
+subsequently updated for launcher `0.2.0`, which selects native `0.2.0`.
+These historical checks do not replace CI and installation checks on the
+intended committed package revision.
 
 Verification on one host does not establish results for the other supported
 targets. The native release supports Linux x86_64, macOS arm64 and Windows x64;
 the launcher must be exercised on each before claiming launcher support.
 
-The [Pub launcher workflow](../.github/workflows/pub-launcher.yml) is configured
-to check formatting, analysis and tests with Dart `3.13.0` and `3.13.5` on Linux,
-macOS and Windows when launcher files change. It does not download a native release or
-publish the package. Adding the workflow does not establish that its jobs have
-run or passed.
+## Automated verification
+
+The [Pub launcher workflow](../.github/workflows/pub-launcher.yml) checks
+formatting, analysis and tests with Dart `3.13.0` and `3.13.5` on Linux, macOS
+and Windows: six SDK/platform jobs. It does not download a native release or
+publish the package. Results must be checked for the intended package revision;
+the workflow definition alone does not establish a passing run.
+
+The [fresh-install acceptance workflow](../.github/workflows/pub-acceptance.yml)
+runs in `path` mode on changes to the launcher or acceptance harness. It checks
+out the exact pushed SHA anonymously. Manual dispatch accepts a full immutable
+`source_ref`, `mode` (`path` or `hosted`) and an exact launcher package `version`.
+Use `path` before Pub upload and `hosted` after upload. The native version is
+read separately from the launcher's pins, so a launcher patch need not change
+the native CLI version.
+
+Fresh acceptance uses Dart `3.13.5` on Linux, macOS and Windows, with isolated
+`PUB_CACHE`, `DART_DATA_HOME` and `FAILFORGE_CACHE`. It installs the actual
+command, runs setup and version checks, validates the manifested native payload,
+and executes one real `RELATIONAL_BOUNDARY` mutant through direct and generated
+YAML campaigns. It checks healthy original controls, one `KILLED` result per
+campaign, matching IDs, preserved inputs and cleanup. HTML checks cover retained
+Unicode/CRLF source, UTF-16 coordinates, embedded data, CSP and external resource
+references. Hosted mode also compares the installed package payload with the
+intended source revision.
+
+The browser probe uses Playwright core `1.65.0` with a system Chrome/Edge browser
+for offline desktop/mobile UI checks. A browser is required on Linux/Windows;
+macOS records a skip if the required local browser tools are unavailable.
+Screenshots stay on the runner and do not establish manual visual review.
+The workflow grants no repository token permissions, performs no login or
+publication, and prints synthetic verification receipts and bounded failure
+logs without uploading artifacts.
+
+The Python script's explicit local `--native-control` and `--fixture-only`
+modes help validate the harness. They are forbidden in GitHub Actions, record
+`launcherAcceptance: false`, and do not replace path or hosted installation
+acceptance.
 
 ## Version and publication
 
-Keep the Pub package version and native runtime version explicit. The launcher
-must use release-specific archive URLs and matching SHA-256 digests. A new
-native feature requires a new native release and a launcher update; publishing
-this package does not ship the working tree's unreleased Rust changes.
+Keep the Pub package version and native runtime version explicit. Launcher
+`0.2.0` and native `0.2.0` use matching version numbers for this release, but
+they have separate source revisions and publication steps. The launcher must
+select release-specific URLs and verified SHA-256 digests. Publishing the Dart
+package does not bundle other native changes from the repository working tree.
 
-Before the first publication:
+For each package publication:
 
-1. Confirm the desired package name is available on pub.dev.
-2. Finish the native `0.2.0` candidate in a clean committed revision. Require
-   that exact revision's Linux/macOS and Windows CI, matching version tag,
-   relocated fresh-cache package smoke and all three native archives.
-3. Verify the native archive and manifest SHA-256 digests, then update the
-   launcher's runtime version and pins in a separate follow-up commit. Archive
-   hashes cannot be known before those exact native assets have been built;
-   keep their native source revision distinct from the follow-up Pub revision.
-4. Set the launcher package version to `0.2.0`, update README/CHANGELOG with
-   verified release details, and repeat the local checks and fresh-cache
-   install/mutation/HTML smoke on all three platforms. Use `dart install` on
-   Windows and check real Ctrl+C/Ctrl+Break cleanup and exit codes.
-5. Require the Pub launcher workflow's three platform jobs for that follow-up
-   revision as well. The native uploader's existing CI gate does not check
-   this separate workflow. Review `dart pub publish --dry-run` output.
-6. Publish with the intended Google account, then check fresh hosted installs
-   and real mutation/HTML runs on the supported platforms.
+1. Identify the immutable package revision and the intended native release.
+   Require the native release's exact-source CI, matching tag, three verified
+   native archives and relocated fresh-cache smoke results.
+2. Verify archive and manifest SHA-256 digests, then update launcher pins and
+   package metadata in the committed package revision. Keep native and package
+   source revisions distinct when the pin update follows the native build.
+3. Require the six SDK/platform jobs and the three fresh `path` acceptance jobs
+   for that package revision. Check Windows native installation and the console
+   cancellation regressions alongside mutation/HTML smoke.
+4. Review README/CHANGELOG, included files and `dart pub publish --dry-run`.
+   SDKs, credentials, reports, caches and downloaded runtimes do not belong in
+   the Pub payload.
+5. Publish with the intended Google account. For an initial package, confirm
+   that pub.dev accepts the intended name and records the intended uploader.
+6. Dispatch fresh `hosted` acceptance against the same committed package
+   revision after upload; check hosted installation, payload equality and real
+   mutation/HTML results on all three platforms.
 
-Initial publication is a separate step. No upload is performed by local
-activation, `failforge setup` or `dart pub publish --dry-run`.
-
+Publication is separate from verification. Local activation, `failforge setup`,
+CI and `dart pub publish --dry-run` do not upload a Pub package.
 See Dart's [publishing guide](https://dart.dev/tools/pub/publishing) for account
 and package requirements.

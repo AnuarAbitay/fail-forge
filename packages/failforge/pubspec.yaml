@@ -1,5 +1,5 @@
 name: failforge
-version: 0.1.0-beta.1
+version: 0.2.0
 description: Mutation testing for Dart and Flutter, with a verified native FailForge runtime managed by a small command-line launcher.
 repository: https://github.com/AnuarAbitay/fail-forge/tree/main/packages/failforge
 homepage: https://github.com/AnuarAbitay/fail-forge

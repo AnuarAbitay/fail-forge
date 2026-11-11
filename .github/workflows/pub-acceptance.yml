@@ -1,0 +1,174 @@
+name: Fresh Pub launcher acceptance
+
+on:
+  push:
+    paths:
+      - '.github/scripts/pub_acceptance*'
+      - '.github/scripts/pub_browser_check.cjs'
+      - '.github/workflows/pub-acceptance.yml'
+      - 'packages/failforge/bin/**'
+      - 'packages/failforge/lib/**'
+      - 'packages/failforge/pubspec.yaml'
+      - 'packages/failforge/pubspec.lock'
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Full immutable source SHA containing final launcher pins
+        type: string
+        required: true
+      mode:
+        description: Local path candidate before Pub upload, or hosted package after upload
+        type: choice
+        options: [path, hosted]
+        default: path
+        required: true
+      version:
+        description: Exact launcher package version; native version is read from pins
+        type: string
+        default: '0.2.0'
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: pub-acceptance-${{ inputs.source_ref || github.sha }}-${{ inputs.mode || 'path' }}
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    name: Fresh ${{ inputs.mode || 'path' }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            browser: required
+          - os: macos-latest
+            browser: auto
+          - os: windows-latest
+            browser: required
+    env:
+      ACCEPTANCE_SOURCE_SHA: ${{ inputs.source_ref || github.sha }}
+      ACCEPTANCE_MODE: ${{ inputs.mode || 'path' }}
+      ACCEPTANCE_VERSION: ${{ inputs.version || '' }}
+      ACCEPTANCE_BROWSER: ${{ matrix.browser }}
+    steps:
+      - name: Validate immutable inputs and dispatch account
+        shell: python
+        run: |
+          import os, re
+          if not re.fullmatch(r'[0-9a-f]{40}', os.environ['ACCEPTANCE_SOURCE_SHA']):
+              raise SystemExit('source_ref must be a full immutable SHA')
+          if os.environ['ACCEPTANCE_VERSION'] and not re.fullmatch(r'(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)', os.environ['ACCEPTANCE_VERSION']):
+              raise SystemExit('version must be an exact stable SemVer')
+          if os.environ['ACCEPTANCE_MODE'] not in ('path', 'hosted'):
+              raise SystemExit('Unexpected package source mode')
+          if os.environ['GITHUB_REPOSITORY'] != 'AnuarAbitay/fail-forge':
+              raise SystemExit('Unexpected repository')
+          if os.environ['GITHUB_ACTOR'] != 'AnuarAbitay' or os.environ['GITHUB_TRIGGERING_ACTOR'] != 'AnuarAbitay':
+              raise SystemExit('Only AnuarAbitay may dispatch this acceptance')
+      - name: Check out exact public source without authentication on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init --quiet "$GITHUB_WORKSPACE"
+          GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+            GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false \
+            git -c credential.helper= -c http.extraHeader= fetch --quiet --no-tags --depth=1 \
+              'https://github.com/AnuarAbitay/fail-forge.git' "$ACCEPTANCE_SOURCE_SHA"
+          git -c core.autocrlf=false checkout --quiet --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$ACCEPTANCE_SOURCE_SHA"
+      - name: Check out exact public source without authentication on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:GIT_CONFIG_NOSYSTEM = '1'
+          $env:GIT_CONFIG_GLOBAL = Join-Path $env:RUNNER_TEMP 'anonymous-pub-gitconfig'
+          [IO.File]::WriteAllText($env:GIT_CONFIG_GLOBAL, '')
+          $env:GIT_TERMINAL_PROMPT = '0'
+          git init --quiet $env:GITHUB_WORKSPACE
+          git -c credential.helper= -c http.extraHeader= fetch --quiet --no-tags --depth=1 'https://github.com/AnuarAbitay/fail-forge.git' $env:ACCEPTANCE_SOURCE_SHA
+          git -c core.autocrlf=false checkout --quiet --detach FETCH_HEAD
+          if ((git rev-parse HEAD) -ne $env:ACCEPTANCE_SOURCE_SHA) { throw 'Checkout SHA differs from requested source' }
+      - name: Configure fresh owned caches through GITHUB_ENV
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'failforge-pub-acceptance'
+          root.mkdir(exist_ok=False)
+          values = {'ACCEPTANCE_ROOT': root, 'PUB_CACHE': root / 'pub-cache',
+                    'DART_DATA_HOME': root / 'dart-data', 'FAILFORGE_CACHE': root / 'runtime-cache',
+                    'PLAYWRIGHT_ROOT': root / 'browser-tools/node_modules/playwright-core'}
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as stream:
+              for key, value in values.items():
+                  stream.write(f'{key}={value}\n')
+              stream.write('DART_SUPPRESS_ANALYTICS=true\nFLUTTER_SUPPRESS_ANALYTICS=true\n')
+      - name: Install pinned Dart SDK
+        uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1
+        with:
+          sdk: '3.13.5'
+      - name: Install owned Playwright core on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --ignore-scripts --no-audit --no-fund --cache "$ACCEPTANCE_ROOT/npm-cache" --registry https://registry.npmjs.org --prefix "$ACCEPTANCE_ROOT/browser-tools" playwright-core@1.65.0
+      - name: Install owned Playwright core on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          npm install --ignore-scripts --no-audit --no-fund --cache (Join-Path $env:ACCEPTANCE_ROOT 'npm-cache') --registry https://registry.npmjs.org --prefix (Join-Path $env:ACCEPTANCE_ROOT 'browser-tools') playwright-core@1.65.0
+      - name: Check fresh launcher and real mutation reports
+        shell: python
+        run: |
+          import os, subprocess, sys
+          from pathlib import Path
+          root = Path(os.environ['ACCEPTANCE_ROOT'])
+          arguments = [sys.executable, '.github/scripts/pub_acceptance.py',
+              '--source-root', os.environ['GITHUB_WORKSPACE'],
+              '--source-sha', os.environ['ACCEPTANCE_SOURCE_SHA'],
+              '--output', str(root / 'evidence'), '--cache-root', str(root),
+              '--mode', os.environ['ACCEPTANCE_MODE'],
+              '--browser', os.environ['ACCEPTANCE_BROWSER']]
+          if os.environ['ACCEPTANCE_VERSION']:
+              arguments += ['--version', os.environ['ACCEPTANCE_VERSION']]
+          subprocess.run(arguments, check=True)
+      - name: Print synthetic acceptance receipts and failure log tails
+        if: always()
+        env:
+          ACCEPTANCE_JOB_STATUS: ${{ job.status }}
+        shell: python
+        run: |
+          import os, sys
+          from pathlib import Path
+          sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+          owned = os.environ.get('ACCEPTANCE_ROOT')
+          if not owned:
+              print('Acceptance directory was not configured; no owned receipts exist.')
+              raise SystemExit(0)
+          evidence = Path(owned) / 'evidence'
+          receipt = evidence / 'verification.json'
+          if receipt.is_file():
+              print('Acceptance verification.json:')
+              print(receipt.read_text(encoding='utf-8', errors='replace'))
+          else:
+              print('No acceptance verification.json was created.')
+          if os.environ['ACCEPTANCE_JOB_STATUS'] != 'success':
+              commands = evidence / 'commands'
+              logs = sorted(commands.glob('*.stderr.log')) + sorted(commands.glob('*.stdout.log'))
+              for log in logs:
+                  with log.open('rb') as stream:
+                      stream.seek(max(0, log.stat().st_size - 8192))
+                      tail = '\n'.join(stream.read().decode('utf-8', errors='replace').splitlines()[-40:])
+                  if tail:
+                      print(f'Owned command tail: {log.name}')
+                      print(tail)
+          print('Screenshots remain local to the runner; no artifact upload or manual CI image review is performed.')
