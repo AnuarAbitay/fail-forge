@@ -189,6 +189,46 @@ For a prepared offline environment, supply `--offline` and an existing populated
 installation. The smoke check is Dart-only; it does not replace the Flutter,
 cancellation, recovery or full mutation regression suites.
 
+### Source SDK gate validation
+
+The source-only `.github/scripts/sdk_smoke_runner.py` can repeat the two-worker
+quality-gate scenario against a disposable extracted archive and an existing
+public Pub cache, without building the developer tool:
+
+```sh
+python3 .github/scripts/sdk_smoke_runner.py \
+  --installation "$PWD" \
+  --expected-source-sha "$(git rev-parse HEAD)" \
+  --archive-installation /absolute/new-extracted-installation \
+  --dart-sdk /absolute/path/to/dart-sdk \
+  --pub-cache /absolute/prepared-public-pub-cache \
+  --output /absolute/new-gate-results \
+  --real-gates-only --only-case all-admitted-completed
+```
+
+Start from a clean committed checkout. The runner copies public dependencies to
+its own cache, uses offline resolution, and checks that the checkout, SDK and
+original public cache remain unchanged. Use short installation/result paths on
+Windows as described in the [Windows guide](windows.md).
+
+The killed mutant must print a nonce-bound observation of the retained gate
+event before the expected boolean assertion fails. Sharing/lock errors are
+retried only within the barrier's deadline; runtime errors, missing proof and
+unexpected test failures reject the scenario. Cleanup and HTML export are
+checked separately. The result records both the harness and binary source SHA.
+An explicit `--product-source-sha` can reuse an older archive for a harness-only
+change; any difference in product inputs requires rebuilding that archive.
+
+Run the harness regressions from the checkout:
+
+```sh
+python3 -B -m unittest discover -s .github/scripts -p 'test_*.py'
+dart .github/scripts/fixtures/real_gate_barrier_regressions.dart
+```
+
+The Dart runner needs no Pub dependencies. CI runs it on Unix, Windows and the
+minimum Dart SDK; the Windows probe must recover from a real journal byte lock.
+
 ### Publication checks
 
 Before publication:

@@ -154,6 +154,12 @@ jobs:
             if ($env:FLUTTER_VERSION -eq 'stable') { & $dart $flutterTools --suppress-analytics pub get }
             else { & $dart $flutterTools --suppress-analytics pub get --enforce-lockfile }
           } finally { Pop-Location }
+      - name: Check SDK gate barrier and native journal lock regressions
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:DART_SUPPRESS_ANALYTICS = 'true'
+          & (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk/bin/dart.exe') .github/scripts/fixtures/real_gate_barrier_regressions.dart
       - name: Verify native Dart adapter startup with file URI arguments
         run: |
           $ErrorActionPreference = 'Stop'
@@ -206,7 +212,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          & (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk/bin/dart.exe') --suppress-analytics format --output=none --set-exit-if-changed adapters/dart examples/flutter_fixture
+          & (Join-Path $env:FLUTTER_ROOT 'bin/cache/dart-sdk/bin/dart.exe') --suppress-analytics format --output=none --set-exit-if-changed adapters/dart examples/flutter_fixture .github/scripts/fixtures
       - name: Build native tools and verify the public doctor command
         run: |
           $ErrorActionPreference = 'Stop'

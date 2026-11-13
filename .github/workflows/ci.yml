@@ -148,10 +148,15 @@ jobs:
           else
             (cd examples/flutter_fixture && flutter --suppress-analytics pub get --enforce-lockfile)
           fi
+      - name: Check SDK gate barrier regressions
+        env:
+          DART_SUPPRESS_ANALYTICS: 'true'
+        shell: bash
+        run: dart .github/scripts/fixtures/real_gate_barrier_regressions.dart
       - name: Dart formatting on the pinned SDK
         if: matrix.flutter != 'stable'
         shell: bash
-        run: dart --suppress-analytics format --output=none --set-exit-if-changed adapters/dart examples/flutter_fixture
+        run: dart --suppress-analytics format --output=none --set-exit-if-changed adapters/dart examples/flutter_fixture .github/scripts/fixtures
       - name: Dart analysis and tests
         env:
           FAILFORGE_OPERATOR_SCALING_PROBE: ${{ runner.temp }}/operator-scaling.json
@@ -235,6 +240,11 @@ jobs:
           echo "PUB_CACHE=$PUB_CACHE" >> "$GITHUB_ENV"
           dart --version
           dart --suppress-analytics pub get --enforce-lockfile --directory adapters/dart
+      - name: Check SDK gate barrier on the minimum Dart SDK
+        env:
+          DART_SUPPRESS_ANALYTICS: 'true'
+        shell: bash
+        run: dart .github/scripts/fixtures/real_gate_barrier_regressions.dart
       - name: Analyze and run Dart-only adapter tests on the minimum SDK
         working-directory: adapters/dart
         shell: bash
