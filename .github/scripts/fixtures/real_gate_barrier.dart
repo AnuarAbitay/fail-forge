@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'real_gate_journal_reader.dart';
+
 const gateBarrierMarkerKind = 'failforge_gate_barrier_observed';
 
 /// Runs the actual test assertion only after the false mutant observes its
@@ -34,7 +36,7 @@ Future<void> assertEnabledAfterGate({
   final watch = Stopwatch()..start();
   final clock = elapsed ?? () => watch.elapsed;
   final delay = pause ?? Future<void>.delayed;
-  final read = readJournal ?? (path) => File(path).readAsStringSync();
+  final read = readJournal ?? readGateJournal;
   final onWindows = windows ?? Platform.isWindows;
   final deadline = clock() + timeout;
   FileSystemException? lastLockError;

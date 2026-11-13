@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'real_gate_barrier.dart';
+import 'real_gate_journal_reader.dart';
+import 'real_gate_journal_reader_windows_regression.dart';
 
 class ExpectedAssertion implements Exception {}
 
@@ -368,7 +370,7 @@ Future<void> main() async {
           pollInterval: const Duration(milliseconds: 2),
           readJournal: (path) {
             try {
-              return File(path).readAsStringSync();
+              return readGateJournal(path);
             } on FileSystemException catch (error) {
               if (Platform.isWindows &&
                   [32, 33].contains(error.osError?.errorCode)) {
@@ -418,6 +420,142 @@ Future<void> main() async {
     } finally {
       release?.cancel();
       lock?.closeSync();
+      directory.deleteSync(recursive: true);
+    }
+  });
+
+  await run('native-retained-delete-writer-compatible-reader', () async {
+    final directory = Directory.systemTemp.createTempSync(
+      'failforge-shared-journal-',
+    );
+    final journal = File('${directory.path}/events.jsonl')
+      ..writeAsStringSync(completeEvent());
+    WindowsDeleteWriter? writer;
+    int? legacyError;
+    final order = <String>[];
+    try {
+      if (Platform.isWindows) {
+        writer = WindowsDeleteWriter(journal.path);
+        writer.writeBytes(utf8.encode(completeEvent()));
+        try {
+          journal.readAsStringSync();
+        } on FileSystemException catch (error) {
+          legacyError = error.osError?.errorCode;
+        }
+        check(
+          legacyError == 32,
+          'Legacy Dart reader did not reproduce DELETE-sharing error32',
+        );
+      }
+      final error = await failure(
+        () => assertEnabledAfterGate(
+          value: false,
+          journal: journal.path,
+          nonce: 'retained-delete-writer-nonce',
+          timeout: const Duration(seconds: 5),
+          emitMarker: (marker) {
+            check(
+              marker['nonce'] == 'retained-delete-writer-nonce',
+              'Shared reader nonce changed',
+            );
+            if (Platform.isWindows)
+              check(writer!.isOpen, 'Writer closed before marker');
+            order.add('marker');
+          },
+          assertion: (value) {
+            if (Platform.isWindows)
+              check(writer!.isOpen, 'Writer closed before assertion');
+            check(!value, 'Mutant value changed');
+            order.add('assert:false');
+            throw ExpectedAssertion();
+          },
+        ),
+      );
+      check(
+        error is ExpectedAssertion,
+        'Compatible journal reader failed: $error',
+      );
+      check(
+        order.join(',') == 'marker,assert:false',
+        'Shared reader did not reach intended assertion',
+      );
+      print(
+        jsonEncode({
+          'kind': 'native_gate_shared_reader_probe',
+          'platform': Platform.operatingSystem,
+          'retainedDeleteWriterExercised': Platform.isWindows,
+          'legacyErrorCode': legacyError,
+          'compatibleReaderSucceededWhileWriterHeld':
+              Platform.isWindows && writer!.isOpen,
+          'portableReaderSucceeded': true,
+        }),
+      );
+    } finally {
+      writer?.close();
+      directory.deleteSync(recursive: true);
+    }
+  });
+
+  await run('native-reader-multichunk-unicode-is-not-aliased', () async {
+    final directory = Directory.systemTemp.createTempSync(
+      'failforge-multichunk-journal-',
+    );
+    try {
+      final expected = '${'A' * 65530}第一🙂€${'B' * 65537}${'尾я' * 7000}';
+      final bytes = utf8.encode(expected);
+      check(
+        bytes.length > 2 * 65536 && bytes.length < maxGateJournalBytes,
+        'Wrong multichunk fixture size',
+      );
+      final file = File('${directory.path}/journal')..writeAsBytesSync(bytes);
+      check(
+        readGateJournal(file.path) == expected,
+        'Multi-chunk reader aliased or corrupted UTF-8 bytes',
+      );
+      print(
+        jsonEncode({
+          'kind': 'native_gate_multichunk_probe',
+          'platform': Platform.operatingSystem,
+          'windowsNativeReaderExercised': Platform.isWindows,
+          'bytes': bytes.length,
+          'contentConfirmed': true,
+        }),
+      );
+    } finally {
+      directory.deleteSync(recursive: true);
+    }
+  });
+
+  await run('native-reader-size-policy', () async {
+    final directory = Directory.systemTemp.createTempSync(
+      'failforge-capped-journal-',
+    );
+    try {
+      final file = File('${directory.path}/journal')
+        ..writeAsStringSync('x' * (maxGateJournalBytes + 1));
+      if (Platform.isWindows) {
+        final error = await failure(() async {
+          readGateJournal(file.path);
+        });
+        check(
+          error is FileSystemException && '$error'.contains('1 MiB limit'),
+          'Windows reader accepted oversized journal',
+        );
+      } else {
+        check(
+          readGateJournal(file.path).length == maxGateJournalBytes + 1,
+          'Ordinary non-Windows file reader changed',
+        );
+      }
+      print(
+        jsonEncode({
+          'kind': 'native_gate_size_cap_probe',
+          'platform': Platform.operatingSystem,
+          'windowsSizeCapEnforced': Platform.isWindows,
+          'inputBytes': maxGateJournalBytes + 1,
+        }),
+      );
+    } finally {
       directory.deleteSync(recursive: true);
     }
   });

@@ -212,8 +212,10 @@ original public cache remain unchanged. Use short installation/result paths on
 Windows as described in the [Windows guide](windows.md).
 
 The killed mutant must print a nonce-bound observation of the retained gate
-event before the expected boolean assertion fails. Sharing/lock errors are
-retried only within the barrier's deadline; runtime errors, missing proof and
+event before the expected boolean assertion fails. On Windows its read-only
+journal handle shares read, write and delete access with the publisher's retained
+handle. Transient sharing/lock errors are retried only within the barrier's
+deadline; runtime errors, missing proof and
 unexpected test failures reject the scenario. Cleanup and HTML export are
 checked separately. The result records both the harness and binary source SHA.
 An explicit `--product-source-sha` can reuse an older archive for a harness-only

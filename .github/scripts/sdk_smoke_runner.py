@@ -586,6 +586,7 @@ def make_project(root, adapter, unused, barrier):
     if barrier:
         fixtures = Path(__file__).with_name("fixtures")
         shutil.copy2(fixtures / "real_gate_barrier.dart", root / "test/real_gate_barrier.dart")
+        shutil.copy2(fixtures / "real_gate_journal_reader.dart", root / "test/real_gate_journal_reader.dart")
         test = (fixtures / "real_gate_barrier_test.dart").read_text(encoding="utf-8")
     else:
         test = "import 'package:test/test.dart';\nimport 'package:failforge_platform_sdk_gate/value.dart';\nvoid main() { test('enabled', () => expect(enabled(), isTrue)); }\n"
