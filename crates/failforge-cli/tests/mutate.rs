@@ -157,6 +157,14 @@ impl Fixture {
         put(&path, text);
         vec!["--config".into(), path.into_os_string()]
     }
+    fn profile_gate(&self, thresholds: &str, early_stop: bool) {
+        let path = self.project().join("profile.yml");
+        let mut text = fs::read_to_string(&path).unwrap();
+        text.push_str(&format!(
+            "quality_gate:\n  stop_when_unreachable: {early_stop}\n  min_scores: {thresholds}\n"
+        ));
+        put(path, text);
+    }
     fn spawn(&mut self, arguments: &[OsString], close_stdin: bool) -> u32 {
         self.spawn_kind("mutate", arguments, close_stdin)
     }
@@ -847,6 +855,299 @@ fn survived_mutant_remains_in_score_and_static_invalid_is_excluded() {
     assert_eq!(summary["mutationScore"]["denominator"], 1);
     assert_eq!(summary["mutationScore"]["percent"], 0.0);
     assert_eq!(f.rows("test_start").len(), 3);
+    f.assert_clean(true);
+}
+
+fn assert_exit(output: &Output, expected: i32) {
+    assert_eq!(
+        output.status.code(),
+        Some(expected),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn quality_gate_full_campaign_preserves_scores_and_checks_inclusive_exact_thresholds() {
+    for (threshold, expected_exit, verdict) in [
+        ("50", 0, "passed"),
+        ("50.01", 1, "failed"),
+        ("0", 0, "passed"),
+        ("100", 1, "failed"),
+    ] {
+        let mut f = Fixture::new();
+        f.configure("gate_mixed", json!({"classic":["2","3"]}));
+        let mut args = f.direct();
+        args.extend(["--min-score".into(), threshold.into()]);
+        let output = f.run(&args);
+        assert_exit(&output, expected_exit);
+        let summary = f.summary();
+        assert_eq!(summary["status"], "completed");
+        assert_eq!(summary["complete"], true);
+        assert_eq!(summary["completedMutants"], 2);
+        assert_eq!(summary["mutationScore"]["percent"], 50.0);
+        assert_eq!(summary["qualityGate"]["status"], verdict);
+        assert_eq!(summary["qualityGate"]["actualPercent"], 50.0);
+        assert_eq!(f.rows("test_start").len(), 4);
+        assert!(String::from_utf8_lossy(&output.stdout).contains("Quality gate"));
+        f.assert_clean(true);
+        f.assert_progress();
+    }
+}
+
+#[test]
+fn quality_gate_allows_recovery_and_does_not_stop_at_an_equal_upper_bound() {
+    let mut f = Fixture::new();
+    f.configure("gate_mixed", json!({"classic":["2","3","4","5","6"]}));
+    let mut args = f.direct();
+    args.extend([
+        "--min-score".into(),
+        "80".into(),
+        "--stop-when-unreachable".into(),
+    ]);
+    success(&f.run(&args));
+    let summary = f.summary();
+    assert_eq!(summary["status"], "completed");
+    assert_eq!(summary["completedMutants"], 5);
+    assert_eq!(summary["mutationScore"]["percent"], 80.0);
+    assert_eq!(summary["qualityGate"]["status"], "passed");
+    f.assert_clean(true);
+}
+
+#[test]
+fn quality_gate_stops_only_unreachable_work_and_exports_the_partial_report() {
+    let mut f = Fixture::new();
+    f.configure("survived", json!({"classic":["2","3","4","5","6"]}));
+    let mut args = f.direct();
+    args.extend([
+        "--min-score".into(),
+        "80".into(),
+        "--stop-when-unreachable".into(),
+    ]);
+    assert_exit(&f.run(&args), 1);
+    let summary = f.summary();
+    assert_eq!(summary["status"], "quality_stopped");
+    assert_eq!(summary["complete"], false);
+    assert_eq!(summary["completedMutants"], 2);
+    assert_eq!(summary["expectedMutants"], 5);
+    assert_eq!(summary["outcomeCounts"], json!({"SURVIVED":2}));
+    assert_eq!(summary["mutationScore"], Value::Null);
+    assert_eq!(summary["qualityGate"]["status"], "failed");
+    assert_eq!(summary["qualityGate"]["reason"], "threshold_unreachable");
+    assert_eq!(summary["qualityGate"]["maxPossiblePercent"], 60.0);
+    assert_eq!(summary["qualityGate"]["notRunMutants"], 3);
+    assert_eq!(f.rows("test_start").len(), 4);
+    assert_eq!(summary["originalControls"].as_array().unwrap().len(), 1);
+    f.assert_clean(true);
+    f.assert_progress();
+
+    let html = f.root.join("early-stop.html");
+    let exported = Command::new(env!("CARGO_BIN_EXE_failforge"))
+        .arg("report")
+        .arg(f.output())
+        .arg("--html")
+        .arg(&html)
+        .env("PATH", "/nonexistent-path")
+        .output()
+        .unwrap();
+    success(&exported);
+    let html = fs::read_to_string(html).unwrap();
+    assert!(html.contains("threshold_unreachable"));
+    assert!(html.contains("qualityGate"));
+}
+
+#[test]
+fn quality_gate_drains_started_workers_and_does_not_admit_the_next_mutant() {
+    let mut f = Fixture::new();
+    f.configure("gate_drain", json!({"classic":["2","3","4"]}));
+    let mut args = f.direct();
+    args.extend([
+        "--min-score".into(),
+        "100".into(),
+        "--stop-when-unreachable".into(),
+        "--workers".into(),
+        "2".into(),
+    ]);
+    assert_exit(&f.run(&args), 1);
+    let summary = f.summary();
+    assert_eq!(summary["status"], "quality_stopped");
+    assert_eq!(summary["completedMutants"], 2);
+    assert_eq!(summary["outcomeCounts"], json!({"KILLED":1,"SURVIVED":1}));
+    assert_eq!(summary["qualityGate"]["notRunMutants"], 1);
+    let started = f.rows("test_start");
+    assert_eq!(
+        started.iter().filter(|row| row["patched"] == true).count(),
+        2
+    );
+    assert_eq!(f.rows("test_end").len(), 4);
+    f.assert_clean(true);
+}
+
+#[test]
+fn quality_gate_excludes_invalid_mutants_and_requires_scored_evidence_even_at_zero() {
+    for (cases, threshold, expected_exit, gate_status) in [
+        (json!(["2", "missing"]), "100", 0, "passed"),
+        (json!(["missing"]), "0", 125, "not_evaluated"),
+        (json!([]), "0", 125, "not_evaluated"),
+    ] {
+        let mut f = Fixture::new();
+        f.configure("ordinary", json!({"classic":cases}));
+        let mut args = f.direct();
+        args.extend(["--min-score".into(), threshold.into()]);
+        assert_exit(&f.run(&args), expected_exit);
+        assert_eq!(f.summary()["qualityGate"]["status"], gate_status);
+        f.assert_clean(true);
+    }
+}
+
+#[test]
+fn quality_gate_never_hides_infrastructure_or_final_original_control_failure() {
+    for mode in ["mixed_infrastructure", "gate_final_original_failure"] {
+        let mut f = Fixture::new();
+        f.configure(mode, json!({"classic":["2","3","4","5","6"]}));
+        let mut args = f.direct();
+        args.extend([
+            "--min-score".into(),
+            if mode == "mixed_infrastructure" {
+                "0"
+            } else {
+                "80"
+            }
+            .into(),
+        ]);
+        if mode == "gate_final_original_failure" {
+            args.push("--stop-when-unreachable".into());
+        }
+        assert_exit(&f.run(&args), 125);
+        let summary = f.summary();
+        if mode == "mixed_infrastructure" {
+            assert_eq!(summary["outcomeCounts"]["INFRA_ERROR"], 1);
+        } else {
+            assert_eq!(summary["status"], "failed");
+            assert_eq!(summary["mutationScore"], Value::Null);
+        }
+        f.assert_clean(true);
+    }
+}
+
+#[test]
+fn quality_gate_profile_evaluates_separate_thresholds_after_the_full_run() {
+    for (classic_threshold, expected_exit) in [("50", 0), ("50.01", 1)] {
+        let mut f = Fixture::new();
+        f.configure(
+            "gate_mixed",
+            json!({"classic":["2","3"],"failure_mode":["3"]}),
+        );
+        let args = f.profile(&["classic", "failure_mode"], 10);
+        f.profile_gate(
+            &format!("{{classic: {classic_threshold}, failure_mode: 100}}"),
+            false,
+        );
+        assert_exit(&f.run(&args), expected_exit);
+        let summary = f.summary();
+        assert_eq!(summary["status"], "completed");
+        assert_eq!(summary["complete"], true);
+        assert_eq!(summary["mutationScore"], Value::Null);
+        assert_eq!(
+            summary["families"]["classic"]["summary"]["mutationScore"]["percent"],
+            50.0
+        );
+        assert_eq!(
+            summary["families"]["failure_mode"]["summary"]["failureModeScore"]["percent"],
+            100.0
+        );
+        assert_eq!(
+            summary["qualityGate"]["families"]["failure_mode"]["status"],
+            "passed"
+        );
+        f.assert_clean(true);
+        f.assert_progress();
+    }
+}
+
+#[test]
+fn quality_gate_profile_skips_later_families_without_claiming_their_thresholds_passed() {
+    let mut f = Fixture::new();
+    f.configure(
+        "survived",
+        json!({"classic":["2","3","4","5","6"],"failure_mode":["2"]}),
+    );
+    let args = f.profile(&["classic", "failure_mode"], 10);
+    f.profile_gate("{classic: 80, failure_mode: 80}", true);
+    assert_exit(&f.run(&args), 1);
+    let summary = f.summary();
+    assert_eq!(summary["status"], "quality_stopped");
+    assert_eq!(summary["complete"], false);
+    assert_eq!(summary["families"]["failure_mode"]["status"], "not_started");
+    assert_eq!(summary["qualityGate"]["status"], "failed");
+    assert_eq!(
+        summary["qualityGate"]["families"]["classic"]["status"],
+        "failed"
+    );
+    assert_eq!(
+        summary["qualityGate"]["families"]["failure_mode"]["status"],
+        "not_evaluated"
+    );
+    assert_eq!(f.rows("discovery").len(), 2);
+    assert_eq!(f.rows("test_start").len(), 4);
+    f.assert_clean(true);
+    f.assert_progress();
+}
+
+#[test]
+fn quality_gate_profile_stops_after_a_completed_failing_family_and_keeps_atomic_reports() {
+    let mut f = Fixture::new();
+    f.configure("gate_mixed", json!({"classic":["2"],"failure_mode":["3"]}));
+    let args = f.profile(&["classic", "failure_mode"], 10);
+    f.profile_gate("{classic: 100, failure_mode: 100}", true);
+    assert_exit(&f.run(&args), 1);
+    let summary = f.summary();
+    assert_eq!(summary["status"], "quality_stopped");
+    assert_eq!(summary["families"]["classic"]["status"], "completed");
+    assert_eq!(summary["families"]["failure_mode"]["status"], "not_started");
+    assert_eq!(
+        summary["qualityGate"]["families"]["classic"]["actualPercent"],
+        0.0
+    );
+    assert_eq!(f.rows("test_start").len(), 3);
+    for family in ["classic", "failure_mode"] {
+        let child = f.read_json(&format!("families/{family}/summary.json"));
+        assert_eq!(child, summary["families"][family]["summary"]);
+        assert_eq!(child["mutationScore"], Value::Null);
+    }
+    let exported = Command::new(env!("CARGO_BIN_EXE_failforge"))
+        .arg("report")
+        .arg(f.output())
+        .arg("--html")
+        .arg(f.root.join("profile-gate.html"))
+        .output()
+        .unwrap();
+    success(&exported);
+    f.assert_clean(true);
+}
+
+#[test]
+fn quality_gate_profile_missing_evidence_takes_priority_over_another_failed_threshold() {
+    let mut f = Fixture::new();
+    f.configure(
+        "survived",
+        json!({"classic":["2"],"failure_mode":["missing"]}),
+    );
+    let args = f.profile(&["classic", "failure_mode"], 10);
+    f.profile_gate("{classic: 80, failure_mode: 80}", false);
+    assert_exit(&f.run(&args), 125);
+    let summary = f.summary();
+    assert_eq!(summary["status"], "completed");
+    assert_eq!(summary["qualityGate"]["status"], "not_evaluated");
+    assert_eq!(
+        summary["qualityGate"]["families"]["classic"]["status"],
+        "failed"
+    );
+    assert_eq!(
+        summary["qualityGate"]["families"]["failure_mode"]["reason"],
+        "no_scored_mutants"
+    );
     f.assert_clean(true);
 }
 #[test]

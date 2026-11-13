@@ -92,6 +92,7 @@ impl<W: FrameWriter> Stream<W> {
                 "original_before",
                 "mutant",
                 "original_after",
+                "quality_gate_stopped",
             ],
         )
     }
@@ -129,8 +130,10 @@ impl<W: FrameWriter> Stream<W> {
     }
 
     pub(crate) fn finish_session(&mut self, status: &str, error: Option<&str>) -> io::Result<()> {
-        if !matches!(status, "completed" | "no_mutants" | "failed" | "cancelled")
-            || (matches!(status, "completed" | "no_mutants") && error.is_some())
+        if !matches!(
+            status,
+            "completed" | "no_mutants" | "failed" | "cancelled" | "quality_stopped"
+        ) || (matches!(status, "completed" | "no_mutants") && error.is_some())
         {
             return Err(invalid("invalid session terminal"));
         }
@@ -181,8 +184,10 @@ impl<W: FrameWriter> Stream<W> {
         completed: usize,
         total: usize,
     ) -> io::Result<()> {
-        if !matches!(status, "completed" | "no_mutants" | "failed" | "cancelled")
-            || completed > total
+        if !matches!(
+            status,
+            "completed" | "no_mutants" | "failed" | "cancelled" | "quality_stopped"
+        ) || completed > total
         {
             return Err(invalid("invalid family terminal"));
         }
@@ -199,8 +204,10 @@ impl<W: FrameWriter> Stream<W> {
         completed_mutants: usize,
         expected_mutants: Option<usize>,
     ) -> io::Result<()> {
-        if !matches!(status, "completed" | "no_mutants" | "failed" | "cancelled")
-            || completed_families > expected_families
+        if !matches!(
+            status,
+            "completed" | "no_mutants" | "failed" | "cancelled" | "quality_stopped"
+        ) || completed_families > expected_families
             || expected_mutants.is_some_and(|total| completed_mutants > total)
             || (expected_mutants.is_none()
                 && (completed_mutants != 0 || matches!(status, "completed" | "no_mutants")))

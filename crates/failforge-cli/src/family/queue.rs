@@ -22,6 +22,8 @@ pub(crate) struct QueueSummary {
     /// Results accepted by the sink without error.
     pub emitted: usize,
     pub error: Option<NamespaceError>,
+    /// A policy stopped admission; active tasks still drained normally.
+    pub stopped: bool,
 }
 
 fn invalid(message: &str) -> NamespaceError {
@@ -57,7 +59,29 @@ impl QueueSummary {
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn run<I, T, F, Fut, S>(
+    items: impl IntoIterator<Item = I>,
+    workers: usize,
+    cancel: &Cancellation,
+    start: F,
+    mut sink: S,
+) -> QueueSummary
+where
+    T: Send + 'static,
+    F: FnMut(usize, I) -> Fut,
+    Fut: Future<Output = Result<T, NamespaceError>> + Send + 'static,
+    S: FnMut(usize, T) -> Result<(), NamespaceError>,
+{
+    run_until(items, workers, cancel, start, |index, value| {
+        sink(index, value).map(|()| false)
+    })
+    .await
+}
+
+/// A successful sink may request an admission stop without cancelling workers.
+/// This preserves sealed evidence and lets normal final controls run afterward.
+pub(crate) async fn run_until<I, T, F, Fut, S>(
     items: impl IntoIterator<Item = I>,
     workers: usize,
     cancel: &Cancellation,
@@ -68,7 +92,7 @@ where
     T: Send + 'static,
     F: FnMut(usize, I) -> Fut,
     Fut: Future<Output = Result<T, NamespaceError>> + Send + 'static,
-    S: FnMut(usize, T) -> Result<(), NamespaceError>,
+    S: FnMut(usize, T) -> Result<bool, NamespaceError>,
 {
     let mut summary = QueueSummary::default();
     if workers == 0 {
@@ -79,7 +103,11 @@ where
     let mut active = JoinSet::new();
     let mut sink_available = true;
     loop {
-        while active.len() < workers && summary.error.is_none() && cancel.signum().is_none() {
+        while active.len() < workers
+            && summary.error.is_none()
+            && !summary.stopped
+            && cancel.signum().is_none()
+        {
             let Some((index, item)) = pending.next() else {
                 break;
             };
@@ -116,7 +144,10 @@ where
                     let emitted = catch_unwind(AssertUnwindSafe(|| sink(index, result)))
                         .unwrap_or_else(|_| Err(invalid("native family result sink panicked")));
                     match emitted {
-                        Ok(()) => summary.emitted += 1,
+                        Ok(stop) => {
+                            summary.emitted += 1;
+                            summary.stopped |= stop;
+                        }
                         Err(error) => {
                             sink_available = false;
                             summary.fail(error, cancel);

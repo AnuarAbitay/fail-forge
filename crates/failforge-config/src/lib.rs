@@ -10,6 +10,7 @@ pub mod models;
 pub mod normalize;
 pub mod paths;
 pub mod platform;
+pub mod quality_gate;
 mod sdk_discovery;
 pub mod yaml;
 
@@ -138,6 +139,8 @@ pub fn resolve_config(args: &Value, context: &Context) -> Result<RunConfig, Conf
         "adapter_root",
         "output",
         "language",
+        "min_score",
+        "stop_when_unreachable",
     ];
     let mut unknown = values
         .keys()
@@ -201,6 +204,13 @@ pub fn resolve_config(args: &Value, context: &Context) -> Result<RunConfig, Conf
             ][..],
         ),
         ("limits", &[("max_mutants", "max_mutants")][..]),
+        (
+            "quality_gate",
+            &[
+                ("min_score", "min_score"),
+                ("stop_when_unreachable", "stop_when_unreachable"),
+            ][..],
+        ),
     ] {
         let mut selected = serde_json::Map::new();
         for (input, output) in keys {

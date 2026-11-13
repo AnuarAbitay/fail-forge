@@ -124,6 +124,11 @@ fetch packages, check a release binary, or prove that the dependency lockfiles
 still match the snapshot. The inventory's `inputs` entries record the hashes of
 `Cargo.lock`, `adapters/dart/pubspec.yaml` and `adapters/dart/pubspec.lock`.
 
+On 2026-11-13, the Cargo input digest was refreshed after `failforge-config`
+declared a direct dependency on the already locked `serde` package. The
+third-party package entries, versions and archive checksums were unchanged;
+the retained notice files were checked against `third-party/SHA256SUMS`.
+
 After changing dependencies or distribution contents:
 
 1. Resolve and lock the new graph; compare all locked package identities and

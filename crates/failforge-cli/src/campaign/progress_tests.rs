@@ -566,3 +566,33 @@ fn read_only_output_returns_error_without_overwriting_checkpoint() {
     assert!(writer.write(&json!({"new":true})).is_err());
     assert_eq!(temp.read(), json!({"old":true}));
 }
+
+#[test]
+fn quality_stopped_profile_checkpoints_keep_partial_counts_and_unstarted_families() {
+    let mut state = state("profile", &["classic", "failure_mode"]);
+    discover(&mut state, "classic", 10);
+    discover(&mut state, "failure_mode", 5);
+    state
+        .observe(&json!({"kind":"discovery_finished","expectedMutants":15}))
+        .unwrap();
+    state
+        .observe(&json!({"kind":"family_started","family":"classic"}))
+        .unwrap();
+    mutation(&mut state, "classic", "first", "SURVIVED");
+    state
+        .observe(&json!({"kind":"family_finished","family":"classic","status":"quality_stopped"}))
+        .unwrap();
+    let checkpoint = state.snapshot(1.0, Some("quality_stopped")).unwrap();
+    assert_eq!(checkpoint["complete"], false);
+    assert_eq!(checkpoint["completedMutants"], 1);
+    assert_eq!(
+        checkpoint["families"]["classic"]["status"],
+        "quality_stopped"
+    );
+    assert_eq!(
+        checkpoint["families"]["failure_mode"]["status"],
+        "not_started"
+    );
+    validate_final(&checkpoint, RUN, Path::new("/tmp/report"), false).unwrap();
+    assert!(validate_final(&checkpoint, RUN, Path::new("/tmp/report"), true).is_err());
+}

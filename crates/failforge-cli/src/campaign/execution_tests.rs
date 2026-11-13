@@ -137,6 +137,7 @@ fn completion_requires_every_family_and_mutant_even_with_no_task_error() {
             expected,
             mutants,
             families,
+            ..Default::default()
         };
         assert_eq!(terminal_state(Ok(()), &cancel, &ledger, 2).0, "failed");
     }
@@ -153,6 +154,7 @@ fn completion_requires_every_family_and_mutant_even_with_no_task_error() {
         expected: Some(3),
         mutants: 3,
         families: 2,
+        ..Default::default()
     };
     assert_eq!(
         terminal_state(Ok(()), &cancel, &complete, 2),
@@ -201,6 +203,8 @@ fn retained_mutant_infrastructure_error_does_not_make_a_complete_campaign_fail()
             family: "classic",
             started: Instant::now(),
             terminal: None,
+            killed: 0,
+            survived: 0,
         };
         sink.emit(json!({"kind":"mutant","record":{"outcome":"INFRA_ERROR"}}))
             .unwrap();
@@ -231,6 +235,7 @@ fn integrity_and_aggregate_failures_are_never_reclassified_as_cancellation() {
         expected: Some(3),
         mutants: 1,
         families: 0,
+        ..Default::default()
     };
     let result = terminal_state(
         Err(invalid("original source changed")),
@@ -263,4 +268,31 @@ fn integrity_and_aggregate_failures_are_never_reclassified_as_cancellation() {
     assert_eq!(result.0, "failed");
     assert!(result.1.unwrap().contains("limit exceeded"));
     assert_eq!(excessive.expected, Some(30000));
+}
+
+#[test]
+fn quality_policy_is_threaded_to_family_and_terminal_preserves_error_priority() {
+    let mut input = value();
+    input["families"][1]["qualityGate"] = json!({"minScore":80,"stopWhenUnreachable":true});
+    let campaign = request(&input).unwrap();
+    let family = family_request(&campaign, &campaign.families[0], Vec::new()).unwrap();
+    assert_eq!(family.quality_gate.min_score.unwrap().percent(), 80.0);
+    assert!(family.quality_gate.stop_when_unreachable);
+    let ledger = Ledger {
+        expected: Some(10),
+        mutants: 3,
+        families: 0,
+        quality_stopped: true,
+    };
+    let cancel = Cancellation::default();
+    assert_eq!(
+        terminal_state(Ok(()), &cancel, &ledger, 2),
+        ("quality_stopped", None)
+    );
+    assert_eq!(
+        terminal_state(Err(invalid("source changed")), &cancel, &ledger, 2).0,
+        "failed"
+    );
+    cancel.request(libc::SIGINT);
+    assert_eq!(terminal_state(Ok(()), &cancel, &ledger, 2).0, "cancelled");
 }

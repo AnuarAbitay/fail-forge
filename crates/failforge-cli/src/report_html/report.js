@@ -103,6 +103,24 @@
   function fileOptions(files) {
     return `<option value="">All files</option>` + files.map(file => `<option value="${e(file)}" ${state.file===file?'selected':''}>${e(file)}</option>`).join('');
   }
+  function qualityBanner(family) {
+    const overall=data.run.qualityGate;
+    if (!overall) return '';
+    const gate=family.qualityGate;
+    const details=[];
+    if (gate) {
+      details.push(`Required: ${gate.minScore.toFixed(2)}%`);
+      if (number(gate.actualPercent)!==null) details.push(`Actual: ${gate.actualPercent.toFixed(2)}%`);
+      if (number(gate.maxPossiblePercent)!==null) details.push(`Maximum possible score: ${gate.maxPossiblePercent.toFixed(2)}%`);
+      if (number(gate.notRunMutants)>0) details.push(`${gate.notRunMutants} mutants not run`);
+      const reasons={threshold_unreachable:'The required score cannot be reached.',below_threshold:'The score is below the required threshold.',no_scored_mutants:'No killed or surviving mutants are available to check the threshold.',skipped_due_to_gate:'This family was not started because a quality requirement could not be met.',campaign_incomplete:'The incomplete campaign does not establish a quality verdict.'};
+      if (gate.reason) details.push(reasons[gate.reason]||gate.reason);
+    }
+    const verdict=value=>e(String(value).toUpperCase().replaceAll('_',' '));
+    const label=overall.families?'Profile quality gate':'Quality gate';
+    const familyVerdict=overall.families?(gate?`<strong>${e(familyNames[family.id]||family.id)} gate: ${verdict(gate.status)}.</strong> `:'No quality threshold is configured for this family. '):'';
+    return `<div class="ff-score-warning" role="note"><strong>${label}: ${verdict(overall.status)}.</strong> ${familyVerdict}${details.map(e).join(' · ')}</div>`;
+  }
   function render(focusKey) {
     const family = activeFamily(), all = activeRows(), total = counts(all.records);
     const scoped = counts(all.records.filter(sameFile));
@@ -120,7 +138,7 @@
     const scored = complete && family.complete === true && family.score && number(family.score.percent) !== null && number(family.score.denominator) > 0;
     const score = scored ? `${family.score.percent.toFixed(1)}<span class="ff-percent">%</span>` : 'N/A';
     const scoreCaption = !complete ? 'Campaign incomplete' : !family.complete ? 'Family incomplete' : total.killed+total.survived === 0 ? 'No scored mutants' : !scored ? 'Final score not recorded' : `${family.score.killed} / ${family.score.denominator} scored mutants`;
-    const statusText = !complete ? (data.run.status==='cancelled'?'Run cancelled':data.run.status==='failed'?'Run failed':'Run incomplete') : infrastructureErrors>0 ? 'Run completed with errors' : ({completed:'Run completed',no_mutants:'No mutants found'}[data.run.status]||'Run completed');
+    const statusText = !complete ? (data.run.status==='quality_stopped'?'Stopped at quality threshold':data.run.status==='cancelled'?'Run cancelled':data.run.status==='failed'?'Run failed':'Run incomplete') : infrastructureErrors>0 ? 'Run completed with errors' : ({completed:'Run completed',no_mutants:'No mutants found'}[data.run.status]||'Run completed');
     const configuration = data.configuration && typeof data.configuration === 'object' ? data.configuration : {};
     const projectName = basename(configuration.project) || 'Retained run';
     const exclusions = outcomes.filter(o=>!['KILLED','SURVIVED'].includes(o)&&total.outcomes[o]).map(o=>`${total.outcomes[o]} ${o.toLowerCase()}`).join(' · ');
@@ -134,6 +152,7 @@
       ${data.run.error?`<div class="ff-runerror" role="note">${e(data.run.error)}</div>`:''}
       <nav class="ff-familybar" aria-label="Mutation families" role="tablist">${families.map((f,index)=>button('family',index,`${e(familyNames[f.id]||f.id)}<span class="ff-count">${f.enabled?byFamily[index].records.length:'Off'}</span>`,'ff-family',`role="tab" id="ff-family-${index}" aria-selected="${index===state.family}" aria-controls="ff-family-content" ${f.enabled?'':'disabled'}`)).join('')}</nav>
       <div id="ff-family-content" role="tabpanel" aria-labelledby="ff-family-${state.family}">
+        ${qualityBanner(family)}
         ${complete&&family.complete===true&&total.outcomes.INFRA_ERROR>0?`<div class="ff-score-warning" role="note"><strong>${total.outcomes.INFRA_ERROR} infrastructure ${total.outcomes.INFRA_ERROR===1?'error':'errors'} excluded.</strong> ${total.killed+total.survived>0?`This family's score uses ${total.killed+total.survived} of ${total.total} mutants (KILLED + SURVIVED).`:'No killed or surviving mutants are available for a numeric score.'}</div>`:''}
         <section class="ff-stats" aria-label="Family totals across all files">
           <div class="ff-stat"><div class="ff-stat-label">${e(familyNames[family.id]||family.id)} score · all files</div><div class="ff-stat-num">${score}</div><div class="ff-stat-caption">${e(scoreCaption)}</div>${scored?`<div class="ff-scorebar" role="img" aria-label="${total.killed} killed, ${total.survived} survived"><span class="ff-killmark" style="width:${total.killed/(total.killed+total.survived)*100}%"></span><span class="ff-survivemark" style="width:${total.survived/(total.killed+total.survived)*100}%"></span></div>`:''}</div>

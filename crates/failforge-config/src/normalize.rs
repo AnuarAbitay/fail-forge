@@ -7,6 +7,7 @@ use crate::models::{
     validate_strings,
 };
 use crate::paths::resolve_path;
+use crate::quality_gate::{QualityGate, ScoreThreshold};
 use crate::{ConfigError, Context, MAX_RULE_VALUES};
 use serde_json::{Map, Value, json};
 use std::collections::HashSet;
@@ -25,6 +26,7 @@ const ROOT_KEYS: &[&str] = &[
     "output",
     "language",
     "mutations",
+    "quality_gate",
 ];
 const PROFILE_KEYS: &[&str] = &[
     "workers",
@@ -36,6 +38,7 @@ const PROFILE_KEYS: &[&str] = &[
     "adapter_root",
     "output",
     "mutations",
+    "quality_gate",
 ];
 const RULE_KEYS: &[&str] = &[
     "operators",
@@ -379,6 +382,23 @@ pub fn from_mapping(
         .filter(|value| !value.is_null())
         .map(|value| resolve_path(value, "output", &base))
         .transpose()?;
+    let gate = object(
+        values.get("quality_gate").unwrap_or(&empty),
+        "quality_gate",
+        &["min_score", "stop_when_unreachable"],
+    )?;
+    let quality_gate = QualityGate {
+        min_score: gate
+            .get("min_score")
+            .map(ScoreThreshold::from_value)
+            .transpose()?,
+        stop_when_unreachable: gate
+            .get("stop_when_unreachable")
+            .map(|value| boolean(value, "quality_gate.stop_when_unreachable"))
+            .transpose()?
+            .unwrap_or(false),
+    };
+    quality_gate.validate()?;
     Ok(CampaignConfig {
         project,
         family: family.into(),
@@ -392,6 +412,7 @@ pub fn from_mapping(
         adapter_root,
         output,
         language,
+        quality_gate,
     })
 }
 
@@ -470,9 +491,35 @@ pub fn from_profile_mapping(
             "profile has no enabled mutation operators",
         ));
     }
+    let gate = object(
+        values.get("quality_gate").unwrap_or(&empty),
+        "quality_gate",
+        &["min_scores", "stop_when_unreachable"],
+    )?;
+    let thresholds = object(
+        gate.get("min_scores").unwrap_or(&empty),
+        "quality_gate.min_scores",
+        FAMILIES,
+    )?;
+    let thresholds = thresholds.iter().map(|(family, value)| {
+        if !selections.iter().any(|selection| selection.family == *family && !selection.active_operators().is_empty()) {
+            return Err(ConfigError::new(format!("quality gate threshold requires an active family with enabled operators: {family}")));
+        }
+        ScoreThreshold::from_value(value).map(|score| (family.clone(), score))
+    }).collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
+    let stop_when_unreachable = gate
+        .get("stop_when_unreachable")
+        .map(|value| boolean(value, "quality_gate.stop_when_unreachable"))
+        .transpose()?
+        .unwrap_or(false);
+    if stop_when_unreachable && thresholds.is_empty() {
+        return Err(ConfigError::new(
+            "stop_when_unreachable requires at least one minimum score",
+        ));
+    }
     let mut common: Map<_, _> = values
         .iter()
-        .filter(|(key, _)| key.as_str() != "mutations")
+        .filter(|(key, _)| !matches!(key.as_str(), "mutations" | "quality_gate"))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect();
     common.insert("project".into(), path_value(&project, "project")?);
@@ -497,6 +544,11 @@ pub fn from_profile_mapping(
             campaign.family.clone_from(&selection.family);
             campaign.language.clone_from(&selection.language);
             campaign.rules.operators = Some(active);
+            campaign.quality_gate = QualityGate {
+                min_score: thresholds.get(&selection.family).copied(),
+                stop_when_unreachable: stop_when_unreachable
+                    && thresholds.contains_key(&selection.family),
+            };
             Some(campaign)
         })
         .collect();
@@ -522,6 +574,99 @@ mod tests {
             values["mutations"] = active();
         }
         from_profile_mapping(&values, &context().cwd, &context(), None)
+    }
+
+    #[test]
+    fn direct_quality_gate_is_opt_in_and_requires_an_exact_numeric_threshold() {
+        let config = direct(json!({"family":"classic", "quality_gate":{"min_score":79.99,"stop_when_unreachable":true}})).unwrap();
+        assert_eq!(config.quality_gate.min_score.unwrap().basis_points(), 7999);
+        assert!(config.quality_gate.stop_when_unreachable);
+        assert_eq!(
+            config.to_value()["quality_gate"],
+            json!({"min_score":79.99,"stop_when_unreachable":true})
+        );
+        assert!(
+            direct(json!({"family":"classic"}))
+                .unwrap()
+                .to_value()
+                .get("quality_gate")
+                .is_none()
+        );
+        for gate in [
+            Value::Null,
+            json!([]),
+            json!({"min_score":"80"}),
+            json!({"min_score":80.001}),
+            json!({"min_score":101}),
+            json!({"min_score":null}),
+            json!({"stop_when_unreachable":true}),
+            json!({"min_score":80,"stop_when_unreachable":"true"}),
+            json!({"min_scores":{"classic":80}}),
+            json!({"unknown":true}),
+        ] {
+            assert!(
+                direct(json!({"family":"classic","quality_gate":gate})).is_err(),
+                "{gate}"
+            );
+        }
+    }
+
+    #[test]
+    fn profile_quality_gate_keeps_thresholds_independent_and_roundtrips() {
+        let mutations = json!({"classic":{"enabled":true,"operators":{"BOOLEAN_LITERAL_FLIP":true}}, "failure_mode":{"enabled":true,"operators":{"EXCEPTION_AT_ENTRY":true}}});
+        let config = profile(json!({"mutations":mutations, "quality_gate":{"min_scores":{"classic":80,"failure_mode":70.25},"stop_when_unreachable":true}})).unwrap();
+        assert_eq!(
+            config.campaigns[0]
+                .quality_gate
+                .min_score
+                .unwrap()
+                .basis_points(),
+            8000
+        );
+        assert_eq!(
+            config.campaigns[1]
+                .quality_gate
+                .min_score
+                .unwrap()
+                .basis_points(),
+            7025
+        );
+        assert!(
+            config
+                .campaigns
+                .iter()
+                .all(|campaign| campaign.quality_gate.stop_when_unreachable)
+        );
+        let mut inconsistent = config.clone();
+        inconsistent.campaigns[1].quality_gate.stop_when_unreachable = false;
+        assert!(inconsistent.validate().is_err());
+        assert_eq!(
+            config.to_value()["quality_gate"],
+            json!({"min_scores":{"classic":80.0,"failure_mode":70.25},"stop_when_unreachable":true})
+        );
+        let mut effective = config.to_value();
+        effective.as_object_mut().unwrap().remove("project");
+        effective.as_object_mut().unwrap().remove("kind");
+        assert_eq!(profile(effective).unwrap(), config);
+        let partial = profile(json!({"mutations":mutations,"quality_gate":{"min_scores":{"failure_mode":70},"stop_when_unreachable":true}})).unwrap();
+        assert_eq!(partial.campaigns[0].quality_gate, QualityGate::default());
+        assert!(partial.campaigns[1].quality_gate.stop_when_unreachable);
+        for gate in [
+            Value::Null,
+            json!([]),
+            json!({"min_scores":null}),
+            json!({"min_scores":{"unknown":80}}),
+            json!({"min_scores":{"failure_mode":80}}),
+            json!({"min_scores":{"classic":"80"}}),
+            json!({"min_scores":{"classic":80.001}}),
+            json!({"min_scores":{"classic":-1}}),
+            json!({"min_scores":{},"stop_when_unreachable":true}),
+            json!({"min_score":80}),
+            json!({"min_scores":{"classic":80},"stop_when_unreachable":"true"}),
+        ] {
+            assert!(profile(json!({"quality_gate":gate})).is_err(), "{gate}");
+        }
+        assert!(profile(json!({"mutations":{"classic":{"enabled":true,"operators":{"BOOLEAN_LITERAL_FLIP":true}}, "failure_mode":{"enabled":true,"operators":{"EXCEPTION_AT_ENTRY":false}}},"quality_gate":{"min_scores":{"failure_mode":80}}})).is_err());
     }
 
     #[test]

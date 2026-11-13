@@ -796,7 +796,7 @@ fn full_ten_thousand_mutant_report_uses_compact_projection_and_exact_sorted_tota
         )
         .unwrap();
     }
-    let projected = run.projected("classic");
+    let projected = run.projected("classic").unwrap();
     assert!(serde_json::to_vec(&projected).unwrap().len() < 2 * 1024 * 1024);
     assert!(
         projected["records"]
@@ -836,7 +836,12 @@ fn opaque_evidence_larger_than_private_request_limit_is_hydrated_locally() {
     let run = fixture.reports.families.get_mut("classic").unwrap();
     run.records.push(record);
     run.ids.insert("large".into());
-    assert!(serde_json::to_vec(&run.projected("classic")).unwrap().len() < 1024);
+    assert!(
+        serde_json::to_vec(&run.projected("classic").unwrap())
+            .unwrap()
+            .len()
+            < 1024
+    );
     let summary = fixture
         .reports
         .summary("failed", Some("interrupted"))
@@ -846,4 +851,61 @@ fn opaque_evidence_larger_than_private_request_limit_is_hydrated_locally() {
     assert!(payload.bytes().all(|byte| byte == b'x'));
     assert_eq!(summary["completedMutants"], 1);
     assert!(summary["mutationScore"].is_null());
+}
+
+#[test]
+fn early_quality_stop_is_committed_with_proof_controls_and_unrun_count() {
+    let mut fixture = Fixture::new("direct", &["classic"]);
+    fixture
+        .reports
+        .families
+        .get_mut("classic")
+        .unwrap()
+        .configuration["quality_gate"] = json!({"min_score":80,"stop_when_unreachable":true});
+    fixture.prepare();
+    fixture.discover(4);
+    let initial = fixture.read("summary.json");
+    assert_eq!(initial["qualityGate"]["campaignStatus"], "running");
+    assert_eq!(initial["qualityGate"]["status"], "not_evaluated");
+    assert!(crate::report_html::data::load(&fixture.output).is_ok());
+    fixture
+        .event(json!({"kind":"family_started","family":"classic"}))
+        .unwrap();
+    fixture
+        .event(json!({"kind":"family_event","family":"classic","event":{
+        "kind":"mutant","record":{"recordKind":"mutation","family":"classic","mutantId":"survivor",
+        "outcome":"SURVIVED","reason":"passed"}}}))
+        .unwrap();
+    fixture
+        .event(json!({"kind":"family_event","family":"classic","event":{
+        "kind":"quality_gate_stopped","minScore":80,"maxPossiblePercent":75.0,
+        "killed":0,"survived":1,"remaining":3}}))
+        .unwrap();
+    fixture
+        .event(json!({"kind":"family_event","family":"classic","event":{
+        "kind":"original_after","attempt":{"outcome":"SURVIVED"}}}))
+        .unwrap();
+    fixture
+        .event(
+            json!({"kind":"family_finished","family":"classic","status":"quality_stopped",
+        "error":null,"wallSeconds":0.125}),
+        )
+        .unwrap();
+    fixture.cleanup();
+    let report = fixture.reports.finish("quality_stopped", None).unwrap();
+    assert_eq!(
+        report.summary["qualityGate"]["reason"],
+        "threshold_unreachable"
+    );
+    assert_eq!(report.summary["qualityGate"]["notRunMutants"], 3);
+    assert_eq!(
+        report.summary["originalControls"].as_array().unwrap().len(),
+        1
+    );
+    assert!(report.summary["mutationScore"].is_null());
+    assert!(report.terminal.contains("Quality gate: FAILED"));
+    assert!(report.terminal.contains("Maximum possible score: 75.00%"));
+    assert_eq!(fixture.read("summary.json"), report.summary);
+    let events = fs::read_to_string(fixture.output.join("events.jsonl")).unwrap();
+    assert!(events.contains("quality_gate_stopped"));
 }

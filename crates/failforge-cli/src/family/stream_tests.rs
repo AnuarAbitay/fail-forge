@@ -538,3 +538,26 @@ fn oversized_discovery_can_close_its_stage_and_seal_the_unchanged_prefix() {
             "eventSha256":format!("{:x}",Sha256::digest(&prefix))})
     );
 }
+
+#[test]
+fn policy_stop_proof_and_terminal_are_sealed_without_claiming_cancellation() {
+    let mut stream = Stream::new(Vec::new());
+    stream
+        .emit(
+            json!({"kind":"quality_gate_stopped","minScore":80,"maxPossiblePercent":75,
+        "killed":60,"survived":25,"remaining":15}),
+        )
+        .unwrap();
+    let prefix = stream.writer.clone();
+    stream.finish("quality_stopped", None, 85, 100).unwrap();
+    let events = rows(&stream.writer);
+    assert_eq!(events[1]["status"], "quality_stopped");
+    assert_eq!(events[1]["eventCount"], 1);
+    assert_eq!(
+        events[1]["eventSha256"],
+        format!("{:x}", Sha256::digest(prefix))
+    );
+    let mut outer = Stream::new(Vec::new());
+    outer.finish_session("quality_stopped", None).unwrap();
+    assert_eq!(rows(&outer.writer)[0]["status"], "quality_stopped");
+}

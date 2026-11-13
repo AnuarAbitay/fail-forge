@@ -89,7 +89,7 @@ fn complete(value: &Value, family: bool) -> io::Result<bool> {
     let status = text(value, "status")?;
     if !matches!(
         status,
-        "completed" | "no_mutants" | "failed" | "cancelled" | "running"
+        "completed" | "no_mutants" | "failed" | "cancelled" | "running" | "quality_stopped"
     ) && !(family && status == "not_started")
     {
         return Err(invalid("unknown report status"));
@@ -367,6 +367,9 @@ pub(crate) fn load_with_source(input: &Path, source_root: Option<&Path>) -> io::
         remaining_context: MAX_CONTEXT_BYTES,
     };
     let publication_complete = complete(&summary, false)?;
+    if summary["status"] == "quality_stopped" && summary.get("qualityGate").is_none() {
+        return Err(invalid("quality-stopped report lacks a gate decision"));
+    }
     let profile_complete = optional_bool(&summary, "profileComplete")?;
     let run_complete = publication_complete && profile_complete != Some(false);
     if !summary["error"].is_null() && !summary["error"].is_string() {
@@ -391,6 +394,7 @@ pub(crate) fn load_with_source(input: &Path, source_root: Option<&Path>) -> io::
     let mut families = Vec::new();
     let mut combined_counts = BTreeMap::new();
     let mut combined_records = BTreeMap::new();
+    let mut quality_gates = BTreeMap::new();
     let selected = if profile {
         let object = summary["families"]
             .as_object()
@@ -426,6 +430,13 @@ pub(crate) fn load_with_source(input: &Path, source_root: Option<&Path>) -> io::
             return Err(invalid("profile summary family or run identity disagrees"));
         }
         let child_complete = complete(child, true)?;
+        if summary["status"] == "quality_stopped"
+            && matches!(text(child, "status")?, "failed" | "cancelled" | "running")
+        {
+            return Err(invalid(
+                "quality stop cannot mask a failed or active family",
+            ));
+        }
         if run_complete && !child_complete {
             return Err(invalid("completed profile contains an incomplete family"));
         }
@@ -444,6 +455,85 @@ pub(crate) fn load_with_source(input: &Path, source_root: Option<&Path>) -> io::
         }
         let (records, counts) = validate_records(child, id, &mut record_total)?;
         let score = score(child, id, &counts, run_complete && child_complete)?;
+        let campaign_status = if !profile && profile_complete == Some(false) {
+            child["qualityGate"]["campaignStatus"]
+                .as_str()
+                .unwrap_or("failed")
+        } else {
+            text(&summary, "status")?
+        };
+        if !profile
+            && profile_complete == Some(false)
+            && matches!(campaign_status, "completed" | "no_mutants")
+        {
+            return Err(invalid(
+                "quality gate claims a complete unpublished profile",
+            ));
+        }
+        if let Some(configured) = manifest
+            .as_ref()
+            .and_then(|manifest| manifest.get("configuration"))
+            .and_then(|configuration| configuration.get("quality_gate"))
+        {
+            let threshold = if profile {
+                &configured["min_scores"][id]
+            } else {
+                &configured["min_score"]
+            };
+            if !threshold.is_null() && child.get("qualityGate").is_none() {
+                return Err(invalid(
+                    "configured quality gate is absent from retained summary",
+                ));
+            }
+        }
+        let quality_gate = crate::campaign::quality_gate::validate_stored(
+            child.get("qualityGate"),
+            text(child, "status")?,
+            campaign_status,
+            optional_count(child, "expectedMutants")?,
+            &counts,
+            records.len() as u64,
+        )?;
+        if !quality_gate.is_null() {
+            if matches!(
+                campaign_status,
+                "completed" | "no_mutants" | "quality_stopped"
+            ) && (child["originalProjectFilesUnchanged"] != true
+                || child["temporarySnapshotCleaned"] != true
+                || child["workspaceCleanupDeferred"] != false
+                || !child["error"].is_null())
+            {
+                return Err(invalid("quality gate lacks clean execution evidence"));
+            }
+            if let Some(configuration) = manifest
+                .as_ref()
+                .and_then(|manifest| manifest.get("configuration"))
+            {
+                if configuration.is_object() {
+                    let configured = configuration.get("quality_gate").ok_or_else(|| {
+                        invalid("quality gate is absent from retained configuration")
+                    })?;
+                    let threshold = if profile {
+                        &configured["min_scores"][id]
+                    } else {
+                        &configured["min_score"]
+                    };
+                    if failforge_config::quality_gate::ScoreThreshold::from_value(threshold).ok()
+                        != failforge_config::quality_gate::ScoreThreshold::from_value(
+                            &quality_gate["minScore"],
+                        )
+                        .ok()
+                        || configured["stop_when_unreachable"]
+                            != quality_gate["stopWhenUnreachable"]
+                    {
+                        return Err(invalid(
+                            "quality gate threshold disagrees with retained configuration",
+                        ));
+                    }
+                }
+            }
+            quality_gates.insert(id.to_owned(), quality_gate.clone());
+        }
         for (outcome, count) in &counts {
             *combined_counts.entry(outcome.clone()).or_insert(0u64) += count;
         }
@@ -458,16 +548,25 @@ pub(crate) fn load_with_source(input: &Path, source_root: Option<&Path>) -> io::
                 record
             })
             .collect::<Vec<_>>();
-        families.push(
-            json!({"id":id,"enabled":true,"status":child["status"],"complete":child_complete,
+        let mut projected_family = json!({"id":id,"enabled":true,"status":child["status"],"complete":child_complete,
             "expectedMutants":child["expectedMutants"],"outcomeCounts":counts,"score":score,
-            "records":records}),
-        );
+            "records":records});
+        if !quality_gate.is_null() {
+            projected_family["qualityGate"] = quality_gate;
+        }
+        families.push(projected_family);
     }
     if !families.iter().any(|family| family["enabled"] == true) {
         return Err(invalid("profile has no enabled mutation family"));
     }
     if profile {
+        let rebuilt =
+            crate::campaign::quality_gate::profile(quality_gates, text(&summary, "status")?);
+        if summary.get("qualityGate") != rebuilt.as_ref() {
+            return Err(invalid(
+                "profile quality gate disagrees with family decisions",
+            ));
+        }
         let records = summary["records"]
             .as_array()
             .ok_or_else(|| invalid("profile records must be an array"))?;
@@ -517,14 +616,18 @@ pub(crate) fn load_with_source(input: &Path, source_root: Option<&Path>) -> io::
         .and_then(|manifest| manifest.get("configuration").cloned())
         .filter(Value::is_object)
         .unwrap_or(Value::Null);
-    Ok(json!({"schemaVersion":1,
+    let mut result = json!({"schemaVersion":1,
         "run":{"id":run_id,"status":summary["status"],"complete":run_complete,
             "error":summary["error"],"wallSeconds":summary["wallSeconds"],
             "expectedMutants":summary["expectedMutants"],"completedMutants":record_total,
             "originalProjectFilesUnchanged":summary["originalProjectFilesUnchanged"],
             "temporarySnapshotCleaned":summary["temporarySnapshotCleaned"],
             "workspaceCleanupDeferred":summary["workspaceCleanupDeferred"]},
-        "configuration":configuration,"families":families}))
+        "configuration":configuration,"families":families});
+    if let Some(gate) = summary.get("qualityGate") {
+        result["run"]["qualityGate"] = gate.clone();
+    }
+    Ok(result)
 }
 
 struct SourceContexts<'a> {

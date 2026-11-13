@@ -90,6 +90,65 @@ fn score(value: Option<&Value>) -> Result<String> {
     ))
 }
 
+fn quality_lines(summary: &Value) -> Result<Vec<String>> {
+    let Some(gate) = summary.get("qualityGate") else {
+        return Ok(vec![]);
+    };
+    object(gate)?;
+    let status = text(gate, "status")?;
+    if !matches!(status, "passed" | "failed" | "not_evaluated") {
+        return Err(invalid("invalid terminal quality gate status"));
+    }
+    let mut lines = vec![format!("Quality gate: {}", status.to_uppercase())];
+    let rows = if let Some(families) = gate.get("families") {
+        object(families)?
+            .iter()
+            .map(|(name, row)| (name.as_str(), row))
+            .collect::<Vec<_>>()
+    } else {
+        vec![("", gate)]
+    };
+    for (name, row) in rows {
+        let prefix = if name.is_empty() {
+            String::new()
+        } else {
+            format!("  {name}: ")
+        };
+        let threshold = number(field(row, "minScore")?)?;
+        if !name.is_empty() {
+            lines.push(format!("{prefix}{}", text(row, "status")?.to_uppercase()));
+        }
+        lines.push(format!("{prefix}Required: {threshold:.2}%"));
+        if let Some(actual) = row.get("actualPercent").filter(|value| !value.is_null()) {
+            lines.push(format!("{prefix}Actual: {:.2}%", number(actual)?));
+        }
+        if let Some(maximum) = row
+            .get("maxPossiblePercent")
+            .filter(|value| !value.is_null())
+        {
+            lines.push(format!(
+                "{prefix}Maximum possible score: {:.2}%",
+                number(maximum)?
+            ));
+        }
+        if let Some(reason) = row.get("reason").filter(|value| !value.is_null()) {
+            lines.push(format!(
+                "{prefix}Reason: {}",
+                reason
+                    .as_str()
+                    .ok_or_else(|| invalid("invalid terminal quality reason"))?
+            ));
+        }
+        if let Some(not_run) = row.get("notRunMutants").filter(|value| !value.is_null()) {
+            let not_run = integer(not_run)?;
+            if not_run > 0 {
+                lines.push(format!("{prefix}Mutants not run: {not_run}"));
+            }
+        }
+    }
+    Ok(lines)
+}
+
 fn border(widths: &[usize]) -> String {
     let mut line = String::from("+");
     for width in widths {
@@ -166,6 +225,7 @@ pub(crate) fn format_summary(summary: &Value) -> Result<String> {
         format!("{score_label}: {score}"),
         format!("Wall time: {:.2}s", number(field(summary, "wallSeconds")?)?),
     ]);
+    lines.extend(quality_lines(summary)?);
     Ok(lines.join("\n"))
 }
 
@@ -266,6 +326,7 @@ fn format_profile(summary: &Value) -> Result<String> {
         String::new(),
         format!("Wall time: {:.2}s", number(field(summary, "wallSeconds")?)?),
     ]);
+    lines.extend(quality_lines(summary)?);
     Ok(lines.join("\n"))
 }
 

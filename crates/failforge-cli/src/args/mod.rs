@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum, error::ErrorKind};
+use failforge_config::quality_gate::ScoreThreshold;
 use failforge_runner::{CapturePolicy, CommandSpec, EnvSpec, OutputMode, TimeoutPolicy};
 
 #[derive(Parser)]
@@ -238,7 +239,7 @@ impl ProfileGenerateArgs {
 #[derive(Args)]
 pub(crate) struct MutateArgs {
     /// Campaign configuration file; cannot be mixed with campaign flags.
-    #[arg(long, value_name = "FILE", conflicts_with_all = ["project", "family", "language", "workers", "test_timeout", "command_timeout", "output", "dart_sdk", "flutter_sdk", "operator", "include", "exclude", "method", "class", "max_mutants", "adapter_root"])]
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["project", "family", "language", "workers", "test_timeout", "command_timeout", "output", "dart_sdk", "flutter_sdk", "operator", "include", "exclude", "method", "class", "max_mutants", "adapter_root", "min_score", "stop_when_unreachable"])]
     config: Option<PathBuf>,
     /// Root of the project to mutate; defaults to the invocation directory.
     #[arg(long, value_name = "PATH", requires = "family")]
@@ -285,6 +286,12 @@ pub(crate) struct MutateArgs {
     /// Maximum retained candidates, from 0 to 10000.
     #[arg(long, value_parser = clap::value_parser!(u32).range(0..=10_000))]
     max_mutants: Option<u32>,
+    /// Require a final mutation score of at least this percentage (0 to 100).
+    #[arg(long, value_name = "PERCENT", value_parser = ScoreThreshold::parse)]
+    min_score: Option<ScoreThreshold>,
+    /// Stop admitting mutants once the required score can no longer be reached.
+    #[arg(long, requires = "min_score")]
+    stop_when_unreachable: bool,
     /// Explicit prepared Dart adapter directory.
     #[arg(long, value_name = "PATH")]
     adapter_root: Option<PathBuf>,
@@ -351,6 +358,8 @@ impl ReplayArgs {
             method: Vec::new(),
             class: Vec::new(),
             max_mutants: Some(10_000),
+            min_score: None,
+            stop_when_unreachable: false,
             adapter_root: self.adapter_root,
             installation: self.installation,
         };
@@ -388,6 +397,12 @@ impl MutateArgs {
         }
         if let Some(maximum) = self.max_mutants {
             values.insert("max_mutants".into(), maximum.into());
+        }
+        if let Some(score) = self.min_score {
+            values.insert("min_score".into(), serde_json::json!(score));
+        }
+        if self.stop_when_unreachable {
+            values.insert("stop_when_unreachable".into(), true.into());
         }
         for (name, value) in [
             ("test_timeout", self.test_timeout.as_ref()),

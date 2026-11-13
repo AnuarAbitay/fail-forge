@@ -558,3 +558,91 @@ async fn typed_family_request_is_revalidated_before_effects() {
     assert!(sink.terminal.is_none());
     sink.assert_released();
 }
+
+#[test]
+fn quality_gate_stops_only_after_accepted_results_make_threshold_unreachable() {
+    let mut input = value();
+    input["qualityGate"] = json!({"minScore":80,"stopWhenUnreachable":true});
+    input["candidates"] = json!(
+        (0..10)
+            .map(|index| json!({"mutant":{"id":index.to_string(),"family":"classic"}}))
+            .collect::<Vec<_>>()
+    );
+    let request = decode_value(&input).unwrap();
+    let mut ledger = Ledger::default();
+    let record = |index: usize, outcome: &str| json!({"recordKind":"mutation","mutantId":index.to_string(),"family":"classic","outcome":outcome,"reason":"test"});
+    // A temporarily low 0% can recover. Equal maximum 80% must continue.
+    ledger
+        .publish(&request, 0, &record(0, "SURVIVED"), || Ok(()))
+        .unwrap();
+    assert!(ledger.gate_stop(&request).is_none());
+    ledger
+        .publish(&request, 1, &record(1, "SURVIVED"), || Ok(()))
+        .unwrap();
+    assert!(ledger.gate_stop(&request).is_none());
+    // Rejected publication cannot affect counts or the stop decision.
+    assert!(
+        ledger
+            .publish(&request, 2, &record(2, "SURVIVED"), || Err(invalid(
+                "publication failed"
+            )))
+            .is_err()
+    );
+    assert!(ledger.gate_stop(&request).is_none());
+    // Excluded INVALID reduces remaining opportunities without becoming SURVIVED.
+    ledger
+        .publish(&request, 2, &record(2, "INVALID"), || Ok(()))
+        .unwrap();
+    let event = ledger.gate_stop(&request).unwrap();
+    assert_eq!(event["survived"], 2);
+    assert_eq!(event["killed"], 0);
+    assert_eq!(event["remaining"], 7);
+    assert!((event["maxPossiblePercent"].as_f64().unwrap() - 700.0 / 9.0).abs() < 1e-10);
+    let mut no_stop = request.clone();
+    no_stop.quality_gate.stop_when_unreachable = false;
+    assert!(ledger.gate_stop(&no_stop).is_none());
+    ledger.quality_stopped = true;
+    assert!(ledger.gate_stop(&request).is_none());
+}
+
+#[test]
+fn quality_stop_is_distinct_from_error_cancellation_and_completed_drain() {
+    let cancel = Cancellation::default();
+    let mut ledger = Ledger {
+        quality_stopped: true,
+        ..Default::default()
+    };
+    ledger.ids.insert("a".into());
+    assert_eq!(
+        terminal_state(Ok(()), &cancel, &ledger, 3),
+        ("quality_stopped", None)
+    );
+    assert_eq!(
+        terminal_state(Ok(()), &cancel, &ledger, 1),
+        ("completed", None)
+    );
+    assert_eq!(
+        terminal_state(Err(invalid("original-after failed")), &cancel, &ledger, 3).0,
+        "failed"
+    );
+    ledger.inconclusive = true;
+    assert_eq!(terminal_state(Ok(()), &cancel, &ledger, 3).0, "failed");
+    ledger.inconclusive = false;
+    cancel.request(libc::SIGTERM);
+    assert_eq!(terminal_state(Ok(()), &cancel, &ledger, 3).0, "cancelled");
+}
+
+#[test]
+fn family_quality_gate_rejects_malformed_or_unbounded_settings() {
+    for gate in [
+        json!([]),
+        json!(null),
+        json!({"minScore":101}),
+        json!({"minScore":80.001}),
+        json!({"stopWhenUnreachable":true}),
+    ] {
+        let mut input = value();
+        input["qualityGate"] = gate;
+        assert!(decode_value(&input).is_err(), "{}", input["qualityGate"]);
+    }
+}

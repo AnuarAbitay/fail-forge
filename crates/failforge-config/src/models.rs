@@ -1,6 +1,7 @@
 //! Typed effective settings and fresh JSON projections for execution manifests.
 
 use crate::catalogue::{FAMILIES, operators, valid_operator_id};
+use crate::quality_gate::QualityGate;
 use crate::{ConfigError, MAX_RULE_VALUES};
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
@@ -124,6 +125,7 @@ pub struct CampaignConfig {
     pub adapter_root: PathBuf,
     pub output: Option<PathBuf>,
     pub language: Option<String>,
+    pub quality_gate: QualityGate,
 }
 
 impl CampaignConfig {
@@ -137,6 +139,9 @@ impl CampaignConfig {
             "output":self.output.as_ref().map(|path| path.to_string_lossy())});
         if let Some(language) = &self.language {
             value["language"] = json!(language);
+        }
+        if self.quality_gate.min_score.is_some() {
+            value["quality_gate"] = self.quality_gate.to_value();
         }
         value
     }
@@ -286,7 +291,20 @@ impl ProfileConfig {
                 "profile campaigns must match active mutation selections in family order",
             ));
         }
+        let stop_when_unreachable = self
+            .campaigns
+            .iter()
+            .find(|campaign| campaign.quality_gate.min_score.is_some())
+            .map(|campaign| campaign.quality_gate.stop_when_unreachable);
         for campaign in &self.campaigns {
+            campaign.quality_gate.validate()?;
+            if campaign.quality_gate.min_score.is_some()
+                && stop_when_unreachable != Some(campaign.quality_gate.stop_when_unreachable)
+            {
+                return Err(ConfigError::new(
+                    "profile thresholds must share stop_when_unreachable",
+                ));
+            }
             let selection = selections[campaign.family.as_str()];
             if campaign.language != selection.language {
                 return Err(ConfigError::new(
@@ -333,6 +351,7 @@ impl ProfileConfig {
             let mut comparable = campaign.clone();
             comparable.family.clone_from(&common.family);
             comparable.language.clone_from(&common.language);
+            comparable.quality_gate = common.quality_gate;
             comparable
                 .rules
                 .operators
@@ -363,6 +382,23 @@ impl ProfileConfig {
         value.insert("kind".into(), json!("profile"));
         value.remove("family");
         value.remove("language");
+        value.remove("quality_gate");
+        let thresholds: Map<String, Value> = self
+            .campaigns
+            .iter()
+            .filter_map(|campaign| {
+                campaign
+                    .quality_gate
+                    .min_score
+                    .map(|threshold| (campaign.family.clone(), json!(threshold)))
+            })
+            .collect();
+        if !thresholds.is_empty() {
+            value.insert("quality_gate".into(), json!({
+                "min_scores":thresholds,
+                "stop_when_unreachable":self.campaigns.iter().any(|campaign| campaign.quality_gate.stop_when_unreachable)
+            }));
+        }
         if let Some(Value::Object(rules)) = value.get_mut("rules") {
             rules.remove("operators");
         }

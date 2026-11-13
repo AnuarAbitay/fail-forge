@@ -263,3 +263,24 @@ fn inherited_mixed_case_overrides_do_not_create_duplicate_child_keys() {
     );
     std::fs::remove_dir_all(installation).unwrap();
 }
+
+#[test]
+fn quality_exit_codes_distinguish_gate_failure_unknown_score_and_execution_errors() {
+    for (status, complete, gate, expected) in [
+        ("completed", true, "passed", 0),
+        ("completed", true, "failed", 1),
+        ("quality_stopped", false, "failed", 1),
+        ("completed", true, "not_evaluated", 125),
+        ("quality_stopped", false, "not_evaluated", 125),
+        ("failed", false, "failed", 125),
+        ("cancelled", false, "failed", 130),
+    ] {
+        let mut summary =
+            json!({"status":status,"complete":complete,"records":[],"qualityGate":{"status":gate}});
+        assert_eq!(exit_status(&summary, None), expected, "{summary}");
+        if status != "cancelled" {
+            summary["records"] = json!([{"outcome":"INFRA_ERROR"}]);
+            assert_eq!(exit_status(&summary, None), 125);
+        }
+    }
+}

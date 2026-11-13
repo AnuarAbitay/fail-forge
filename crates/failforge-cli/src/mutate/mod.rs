@@ -113,7 +113,8 @@ fn prepare(
         .ok_or_else(|| crate::namespace::invalid("campaign has no selected families"))?;
     let selections = configs.iter().map(|config| json!({
         "family":config.family,"rules":config.rules.to_adapter_rules(),"workers":config.workers,
-        "config":{"commandTimeout":config.command_timeout,"testTimeout":config.test_timeout}
+        "config":{"commandTimeout":config.command_timeout,"testTimeout":config.test_timeout},
+        "qualityGate":config.quality_gate
     })).collect::<Vec<_>>();
     let request = json!({"operation":"campaign-run","mode":mode,"runId":run_id,
         "project":first.project,"output":first.output,"registry":null,
@@ -223,19 +224,34 @@ fn exit_status(summary: &Value, signal: Option<i32>) -> u8 {
             130
         };
     }
-    if summary["complete"] != true
-        || summary["records"].as_array().is_none_or(|records| {
-            records.iter().any(|record| {
-                matches!(
-                    record["outcome"].as_str(),
-                    Some("INFRA_ERROR" | "UNCLASSIFIED" | "NO_TESTS")
-                )
-            })
+    if summary["records"].as_array().is_none_or(|records| {
+        records.iter().any(|record| {
+            matches!(
+                record["outcome"].as_str(),
+                Some("INFRA_ERROR" | "UNCLASSIFIED" | "NO_TESTS")
+            )
         })
-    {
+    }) {
         return 125;
     }
-    0
+    if summary["qualityGate"]["status"] == "not_evaluated" {
+        return 125;
+    }
+    if summary["status"] == "quality_stopped" {
+        return if summary["qualityGate"]["status"] == "failed" {
+            1
+        } else {
+            125
+        };
+    }
+    if summary["complete"] != true {
+        return 125;
+    }
+    if summary["qualityGate"]["status"] == "failed" {
+        1
+    } else {
+        0
+    }
 }
 
 async fn run(

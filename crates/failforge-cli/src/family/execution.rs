@@ -55,6 +55,8 @@ pub(crate) struct Request {
     pub(crate) family: String,
     pub(crate) workers: usize,
     pub(crate) empty_policy: EmptyPolicy,
+    #[serde(default)]
+    pub(crate) quality_gate: failforge_config::quality_gate::QualityGate,
     pub(crate) frozen: Value,
     pub(crate) environment: BTreeMap<String, String>,
     #[serde(default)]
@@ -86,6 +88,12 @@ pub(crate) fn decode_value(value: Value) -> Result<Request, NamespaceError> {
             return Err(invalid("family request must use named JSON objects"));
         }
     }
+    if value
+        .get("qualityGate")
+        .is_some_and(|gate| !gate.is_object())
+    {
+        return Err(invalid("quality gate requires a named object"));
+    }
     let request: Request =
         serde_json::from_value(value).map_err(|_| invalid("invalid native family request"))?;
     validate_request(&request)?;
@@ -105,6 +113,10 @@ fn validate_request(request: &Request) -> Result<(), NamespaceError> {
     {
         return Err(invalid("invalid native family configuration"));
     }
+    request
+        .quality_gate
+        .validate()
+        .map_err(|error| invalid(&error.to_string()))?;
     absolute(&request.output)?;
     absolute(&request.runtime.installation)?;
     if request.retained_expected.is_some() != request.framework_root.is_some() {
@@ -433,6 +445,9 @@ fn mutant_request(
 struct Ledger {
     ids: BTreeSet<String>,
     inconclusive: bool,
+    killed: u64,
+    survived: u64,
+    quality_stopped: bool,
 }
 impl Ledger {
     fn publish(
@@ -475,10 +490,29 @@ impl Ledger {
         }
         send()?;
         self.ids.insert(id.to_owned());
+        self.killed += u64::from(outcome == "KILLED");
+        self.survived += u64::from(outcome == "SURVIVED");
         // A retained INFRA_ERROR is a processed, excluded result. It does not
         // invalidate the passing original controls or the remaining mutants.
         self.inconclusive |= matches!(outcome, "UNCLASSIFIED" | "NO_TESTS" | "CANCELLED");
         Ok(())
+    }
+
+    fn gate_stop(&self, request: &Request) -> Option<Value> {
+        let remaining = request.candidates.len().checked_sub(self.ids.len())? as u64;
+        let minimum = request.quality_gate.min_score?;
+        if self.quality_stopped
+            || !request.quality_gate.stop_when_unreachable
+            || remaining == 0
+            || !minimum.unreachable(self.killed, self.survived, remaining)
+        {
+            return None;
+        }
+        Some(
+            json!({"kind":"quality_gate_stopped", "minScore":minimum.percent(),
+            "maxPossiblePercent":100.0 * (self.killed + remaining) as f64 / (self.killed + self.survived + remaining) as f64,
+            "killed":self.killed,"survived":self.survived,"remaining":remaining}),
+        )
     }
 }
 
@@ -624,7 +658,7 @@ async fn run_family(
     let next_baseline = Arc::clone(&baseline);
     let next_output = inputs.output.canonical.clone();
     let next_cancel = cancel.clone();
-    let summary = crate::family::queue::run(
+    let summary = crate::family::queue::run_until(
         0..request.candidates.len(),
         request.workers,
         cancel,
@@ -645,7 +679,12 @@ async fn run_family(
             ledger.publish(&request, index, &owned.record, || {
                 stream.emit(json!({"kind":"mutant","index":index,"record":owned.record}))?;
                 Ok(())
-            })
+            })?;
+            if let Some(event) = ledger.gate_stop(&request) {
+                stream.emit(event)?;
+                ledger.quality_stopped = true;
+            }
+            Ok(ledger.quality_stopped)
         },
     )
     .await;
@@ -686,7 +725,7 @@ async fn run_family(
             awake.suspended_elapsed(),
         ),
     )?;
-    if ledger.ids.len() != request.candidates.len() {
+    if ledger.ids.len() != request.candidates.len() && !ledger.quality_stopped {
         return Err(invalid("family did not process every discovered mutant"));
     }
     if ledger.inconclusive {
@@ -781,7 +820,12 @@ fn terminal_state(
         Err(NamespaceError::Cancelled(_)) => ("cancelled", None),
         Err(error) => ("failed", Some(error.to_string())),
         Ok(()) if cancel.signum().is_some() => ("cancelled", None),
-        Ok(()) if ledger.ids.len() != total || ledger.inconclusive => (
+        Ok(()) if ledger.inconclusive => (
+            "failed",
+            Some("family is missing conclusive mutation results".to_owned()),
+        ),
+        Ok(()) if ledger.quality_stopped && ledger.ids.len() < total => ("quality_stopped", None),
+        Ok(()) if ledger.ids.len() != total => (
             "failed",
             Some("family is missing conclusive mutation results".to_owned()),
         ),

@@ -56,13 +56,15 @@ pub(crate) struct Family {
     pub(crate) rules: Value,
     pub(crate) workers: usize,
     pub(crate) config: Config,
+    #[serde(default, rename = "qualityGate")]
+    pub(crate) quality_gate: failforge_config::quality_gate::QualityGate,
 }
 
 impl Family {
     pub(crate) fn to_value(&self) -> Value {
         json!({"family":self.family,"rules":self.rules,"workers":self.workers,
             "config":{"commandTimeout":self.config.command_timeout,
-                "testTimeout":self.config.test_timeout}})
+                "testTimeout":self.config.test_timeout},"qualityGate":self.quality_gate})
     }
 }
 
@@ -118,7 +120,13 @@ pub(crate) fn decode(raw: &[u8]) -> Result<Request, NamespaceError> {
         .as_array()
         .ok_or_else(|| invalid("campaign families must be an array"))?
     {
-        if !family.is_object() || !family["config"].is_object() || !family["rules"].is_object() {
+        if !family.is_object()
+            || !family["config"].is_object()
+            || !family["rules"].is_object()
+            || family
+                .get("qualityGate")
+                .is_some_and(|gate| !gate.is_object())
+        {
             return Err(invalid("campaign families require named objects"));
         }
     }

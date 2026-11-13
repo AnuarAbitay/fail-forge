@@ -411,6 +411,17 @@ override cancellation and author-failure attribution. Baseline catalogues,
 initialization continuations and namespace caches stay private in the owner;
 public attempt records retain observations and executed control evidence.
 
+An optional family quality gate compares exact killed/surviving counts against
+an integer decimal threshold. Early stopping uses the optimistic outcome where
+every remaining candidate is killed. A strictly insufficient upper bound stops
+queue admission without requesting signal cancellation; active attempts still
+drain and original-after, input verification and cleanup still run. A
+`quality_stopped` campaign remains incomplete and unscored, while its independent
+gate verdict retains the threshold and stop proof. Completed campaigns below a
+threshold keep their final score. Profiles preserve independent family gates and
+can skip later families after an early quality failure. See
+[quality gates](quality-gates.md) for configuration and exit-code semantics.
+
 The Rust report collector binds the output descriptor before preparation metadata
 is written. It creates manifests, input bindings and initial summaries, appends
 ordered journal events and retains completed results. The first write failure is

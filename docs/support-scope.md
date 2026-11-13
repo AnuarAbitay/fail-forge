@@ -196,6 +196,13 @@ incomplete profile suppresses final scores even for a family that finished.
 Inspect outcome counts alongside the percentage, since excluded results reduce
 what that percentage says about the selected scope.
 
+Optional [quality gates](quality-gates.md) require a minimum score per family.
+They can stop new work when even the optimistic final score cannot reach the
+threshold. A gate stop retains partial evidence and a separate failed verdict;
+it does not establish a final score for the incomplete campaign. Gates are off
+by default, and execution or evidence errors retain priority over a quality
+failure.
+
 Final `summary.json` is authoritative. Completed evidence is retained where
 possible after cancellation or publication failure, but it is not a successful
 complete campaign. Atomic publication does not guarantee durability of the final

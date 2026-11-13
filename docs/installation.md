@@ -383,8 +383,10 @@ test output.
 `KILLED` means the tests detected a mutant; `SURVIVED` means they did not.
 Only those two outcomes enter the score denominator. Inspect `INVALID`,
 `TIMEOUT` and inconclusive outcomes separately. Surviving mutants alone do not
-cause a nonzero exit code; execution and inconclusive-result errors can still
-return `125`. The command is not a quality-threshold gate.
+cause a nonzero exit code unless a quality gate is configured. Use
+`--min-score 80` to require 80%, optionally with `--stop-when-unreachable` to stop when that
+threshold becomes impossible. A quality failure returns `1`; execution and
+inconclusive-result errors still return `125`. See [quality gates](quality-gates.md).
 
 Use Ctrl+C to request cancellation and allow cleanup to finish. An interrupted
 campaign has no final score and does not automatically resume on the next run.

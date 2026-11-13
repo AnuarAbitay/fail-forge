@@ -51,6 +51,8 @@ struct Family {
     rules: Value,
     workers: usize,
     config: Config,
+    #[serde(default, rename = "qualityGate")]
+    quality_gate: failforge_config::quality_gate::QualityGate,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -125,6 +127,14 @@ pub(crate) fn decode_value(value: Value) -> Result<Request, NamespaceError> {
             return Err(invalid("campaign request must use named JSON objects"));
         }
     }
+    for family in value["families"].as_array().into_iter().flatten() {
+        if family
+            .get("qualityGate")
+            .is_some_and(|gate| !gate.is_object())
+        {
+            return Err(invalid("quality gate requires a named object"));
+        }
+    }
     let mut request: Request =
         serde_json::from_value(value).map_err(|_| invalid("invalid native campaign request"))?;
     if request.operation != "campaign"
@@ -171,6 +181,7 @@ fn family_request(
         "workspace":{"root":request.workspace.root,"campaign":request.workspace.campaign},
         "config":{"commandTimeout":family.config.command_timeout,"testTimeout":family.config.test_timeout},
         "candidates":candidates, "family":family.family,"workers":family.workers,
+        "qualityGate":family.quality_gate,
         "emptyPolicy":if request.mode==Mode::Direct {"controls"} else {"skip"},
         "frozen":request.frozen,"environment":request.environment,
         "retainedExpected":request.replay.as_ref().map(|replay|&replay.expected),
@@ -451,6 +462,7 @@ struct Ledger {
     expected: Option<usize>,
     mutants: usize,
     families: usize,
+    quality_stopped: bool,
 }
 
 struct FamilySink<'a, S> {
@@ -459,6 +471,8 @@ struct FamilySink<'a, S> {
     family: &'a str,
     started: Instant,
     terminal: Option<(String, Option<String>)>,
+    killed: u64,
+    survived: u64,
 }
 impl<S: CampaignEvents> FamilyEvents for FamilySink<'_, S> {
     fn emit(&mut self, event: Value) -> io::Result<()> {
@@ -466,6 +480,10 @@ impl<S: CampaignEvents> FamilyEvents for FamilySink<'_, S> {
         self.stream
             .emit_campaign(json!({"kind":"family_event","family":self.family,"event":event}))?;
         self.ledger.mutants += usize::from(mutant);
+        if mutant {
+            self.killed += u64::from(event["record"]["outcome"] == "KILLED");
+            self.survived += u64::from(event["record"]["outcome"] == "SURVIVED");
+        }
         Ok(())
     }
     fn finish(
@@ -567,7 +585,8 @@ async fn schedule(
             request.max_mutants
         )));
     }
-    for (family, discovery) in request.families.iter().zip(&discoveries) {
+    for (family_index, (family, discovery)) in request.families.iter().zip(&discoveries).enumerate()
+    {
         cancel.check()?;
         guards.verify()?;
         if request.mode == Mode::Profile {
@@ -596,13 +615,21 @@ async fn schedule(
             family: &family.family,
             started: Instant::now(),
             terminal: None,
+            killed: 0,
+            survived: 0,
         };
         crate::family::execution::run_owned(child, child_caps, cancel, &mut sink).await?;
+        let gate_failed = family.quality_gate.stop_when_unreachable
+            && family
+                .quality_gate
+                .min_score
+                .is_some_and(|minimum| !minimum.passes(sink.killed, sink.survived));
         let (status, error) = sink
             .terminal
             .ok_or_else(|| invalid("family did not publish completion"))?;
         match status.as_str() {
             "completed" | "no_mutants" => {}
+            "quality_stopped" => {}
             "cancelled" => {
                 return Err(NamespaceError::Cancelled(
                     cancel.signum().unwrap_or(libc::SIGINT),
@@ -622,6 +649,10 @@ async fn schedule(
             cancel,
         )
         .await?;
+        if status == "quality_stopped" || gate_failed && family_index + 1 < request.families.len() {
+            ledger.quality_stopped = true;
+            break;
+        }
     }
     if request.mode == Mode::Profile {
         verify_phase(
@@ -668,6 +699,7 @@ fn terminal_state(
         Err(NamespaceError::Cancelled(_)) => ("cancelled", None),
         Err(error) => ("failed", Some(error.to_string())),
         Ok(()) if cancel.signum().is_some() => ("cancelled", None),
+        Ok(()) if ledger.quality_stopped => ("quality_stopped", None),
         Ok(())
             if ledger.expected != Some(ledger.mutants) || ledger.families != expected_families =>
         {

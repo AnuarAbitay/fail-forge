@@ -75,6 +75,10 @@ The report presents the saved run as a working area:
 
 - **Family tabs** keep `classic`, `failure_mode` and `language_specific` results
   separate. There is no combined mutation score.
+- **Quality gates**, when configured for the saved run, show each family's
+  threshold and verdict. Early-stopped runs show the maximum possible score and
+  skipped-work counts while keeping the final mutation score unavailable. See
+  [quality gates](quality-gates.md).
 - **Summary counts** describe the selected family's entire saved scope. Choosing
   a file or outcome does not recalculate that family's score.
 - **Source files and outcome filters** narrow the mutant list. Mutants that

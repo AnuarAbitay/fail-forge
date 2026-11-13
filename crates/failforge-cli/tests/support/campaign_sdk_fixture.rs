@@ -140,6 +140,26 @@ fn wait_for_workers(config: &Value, count: usize) {
     }
 }
 
+fn wait_for_quality_stop(config: &Value) {
+    let journal = Path::new(config["output"].as_str().unwrap()).join("events.jsonl");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let stopped = fs::read_to_string(&journal)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .any(|event| event["kind"] == "quality_gate_stopped");
+        if stopped {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "quality stop event was not published"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -263,6 +283,14 @@ fn test(config: &Value) -> i32 {
         "test_start",
         json!({"patched":patched,"source":source}),
     );
+    if patched && mode == "gate_drain" {
+        wait_for_workers(config, 2);
+        if source != "const value = 2;\n" {
+            // The survivor finishes first. Its peer must be drained naturally
+            // after the gate stops admission, without being cancelled.
+            wait_for_quality_stop(config);
+        }
+    }
     if patched && matches!(mode, "hold" | "progress_failure") {
         if source == "const value = 2;\n" {
             wait_for_workers(config, 2);
@@ -299,11 +327,17 @@ fn test(config: &Value) -> i32 {
         .iter()
         .filter(|row| row["kind"] == "test_start" && row["patched"] == false)
         .count();
-    let survived =
-        mode == "survived" || mode == "mixed_infrastructure" && source == "const value = 3;\n";
+    let survived = matches!(mode, "survived" | "gate_final_original_failure")
+        || mode == "mixed_infrastructure" && source == "const value = 3;\n"
+        || matches!(mode, "gate_mixed" | "gate_drain") && source == "const value = 2;\n";
     let failed = (patched && !survived)
         || mode == "baseline_failure"
-        || (!patched && mode == "final_original_failure" && original_attempts == 2)
+        || (!patched
+            && matches!(
+                mode,
+                "final_original_failure" | "gate_final_original_failure"
+            )
+            && original_attempts == 2)
         || (!patched && mode == "later_baseline_failure" && original_attempts == 3);
     for event in test_events(&root, failed) {
         println!("{event}");

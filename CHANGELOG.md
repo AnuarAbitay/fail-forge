@@ -4,6 +4,17 @@ User-visible changes are recorded by version. Check
 [GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for published
 downloads and their verification results.
 
+## Unreleased — native CLI
+
+- Add opt-in minimum mutation scores with `--min-score` and independent YAML
+  thresholds per family. A completed campaign below its threshold retains its
+  score and returns `1`.
+- Add `--stop-when-unreachable` to stop new work when the best possible final
+  score is below the threshold. Active workers drain, original controls and
+  cleanup still run, and partial reports retain a separate quality verdict.
+- Show saved quality gates in JSON, terminal summaries and offline HTML, with
+  separate profile/family verdicts and explicit unrun counts.
+
 ## 0.2.1 — Dart launcher
 
 - Add a runnable CLI example covering a boundary mutation and offline HTML export.

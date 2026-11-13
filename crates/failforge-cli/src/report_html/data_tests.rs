@@ -100,6 +100,57 @@ fn direct(family: &str, records: Vec<Value>) -> Value {
     result
 }
 
+#[test]
+fn quality_gate_must_agree_with_retained_results_and_available_configuration() {
+    use failforge_config::quality_gate::{QualityGate, ScoreThreshold};
+    let fixture = Fixture::new();
+    let mut summary = direct("classic", vec![record("classic", "survivor", "SURVIVED")]);
+    let config = QualityGate {
+        min_score: Some(ScoreThreshold::parse("80").unwrap()),
+        stop_when_unreachable: false,
+    };
+    summary["qualityGate"] = crate::campaign::quality_gate::family(
+        &config,
+        None,
+        "completed",
+        "completed",
+        Some(1),
+        &[("SURVIVED".to_owned(), 1)].into(),
+        1,
+    )
+    .unwrap()
+    .unwrap();
+    fixture.summary(&summary);
+    assert_eq!(
+        fixture.load()["families"][0]["qualityGate"]["status"],
+        "failed"
+    );
+    fixture.put(
+        "manifest.json",
+        serde_json::to_vec(&json!({"runId":"test-run","configuration":{}})).unwrap(),
+    );
+    assert!(load(&fixture.0).is_err());
+    let mut manifest = json!({"runId":"test-run","configuration":{"quality_gate":{"min_score":80,"stop_when_unreachable":false}}});
+    fixture.put("manifest.json", serde_json::to_vec(&manifest).unwrap());
+    assert_eq!(fixture.load()["run"]["qualityGate"]["status"], "failed");
+    let gate = summary
+        .as_object_mut()
+        .unwrap()
+        .remove("qualityGate")
+        .unwrap();
+    fixture.summary(&summary);
+    assert!(load(&fixture.0).is_err());
+    summary["qualityGate"] = gate;
+    summary["qualityGate"]["status"] = json!("passed");
+    fixture.summary(&summary);
+    assert!(load(&fixture.0).is_err());
+    summary["qualityGate"]["status"] = json!("failed");
+    fixture.summary(&summary);
+    manifest["configuration"]["quality_gate"]["min_score"] = json!(75);
+    fixture.put("manifest.json", serde_json::to_vec(&manifest).unwrap());
+    assert!(load(&fixture.0).is_err());
+}
+
 fn profile(classic: Value, failure: Value) -> Value {
     let records = classic["records"]
         .as_array()

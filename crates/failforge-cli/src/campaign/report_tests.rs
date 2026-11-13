@@ -43,6 +43,61 @@ fn one() -> Value {
     )
 }
 
+#[test]
+fn threshold_failure_retains_complete_score_and_early_stop_retains_only_proof() {
+    let mut input = request(
+        "direct",
+        vec![family(
+            "classic",
+            vec![record("classic", "one", "SURVIVED", "passed")],
+        )],
+    );
+    input["families"][0]["qualityGate"] = json!({"minScore":80,"stopWhenUnreachable":true});
+    let completed = build_value(&input).unwrap();
+    assert_eq!(completed["complete"], true);
+    assert_eq!(completed["mutationScore"]["percent"], 0.0);
+    assert_eq!(completed["qualityGate"]["status"], "failed");
+    input["status"] = json!("quality_stopped");
+    input["expectedMutants"] = json!(4);
+    input["families"][0]["status"] = json!("quality_stopped");
+    input["families"][0]["expectedMutants"] = json!(4);
+    input["families"][0]["qualityStop"] =
+        json!({"minScore":80,"maxPossiblePercent":75.0,"killed":0,"survived":1,"remaining":3});
+    let stopped = build_value(&input).unwrap();
+    assert_eq!(stopped["complete"], false);
+    assert!(stopped["mutationScore"].is_null());
+    assert_eq!(stopped["qualityGate"]["notRunMutants"], 3);
+    assert_eq!(stopped["qualityGate"]["maxPossiblePercent"], 75.0);
+    input["families"][0]["qualityStop"]["maxPossiblePercent"] = json!(70.0);
+    assert!(build_value(&input).is_err());
+}
+
+#[test]
+fn quality_stopped_profile_preserves_completed_family_gate_and_marks_later_gate_skipped() {
+    let mut first = family(
+        "classic",
+        vec![record("classic", "one", "SURVIVED", "passed")],
+    );
+    first["qualityGate"] = json!({"minScore":80,"stopWhenUnreachable":true});
+    let mut later = family("failure_mode", vec![]);
+    later["qualityGate"] = json!({"minScore":70,"stopWhenUnreachable":true});
+    later["status"] = json!("not_started");
+    later["expectedMutants"] = json!(1);
+    let mut input = request("profile", vec![first, later]);
+    input["status"] = json!("quality_stopped");
+    let stopped = build_value(&input).unwrap();
+    assert_eq!(stopped["qualityGate"]["status"], "failed");
+    assert_eq!(
+        stopped["qualityGate"]["families"]["classic"]["actualPercent"],
+        0.0
+    );
+    assert_eq!(
+        stopped["qualityGate"]["families"]["failure_mode"]["reason"],
+        "skipped_due_to_gate"
+    );
+    assert!(stopped["families"]["classic"]["summary"]["mutationScore"].is_null());
+}
+
 fn build_value(value: &Value) -> Result<Value, NamespaceError> {
     build(&serde_json::to_vec(value).unwrap())
 }

@@ -8,6 +8,7 @@ pub(crate) mod progress;
 pub(crate) mod publish;
 #[cfg_attr(windows, path = "publish_fs_windows.rs")]
 pub(crate) mod publish_fs;
+pub(crate) mod quality_gate;
 pub(crate) mod report;
 #[cfg(unix)]
 pub(crate) mod report_command;

@@ -678,13 +678,26 @@ or cancellation, continue to suppress the final scores.
 
 Exit codes: `0` for a completed campaign without infrastructure or inconclusive
 results (survivors and bounded mutant timeouts alone do not cause failure),
-`2` for invalid configuration, `125` for failed or inconclusive execution,
+`1` for a configured quality gate failure, `2` for invalid configuration,
+`125` for failed or inconclusive execution,
 `130` for Ctrl+C and `143` for SIGTERM. `INFRA_ERROR`, `UNCLASSIFIED` and
 `NO_TESTS` return `125` even when all candidates were processed and the report
 status is `completed`. Cancellation requests the active
 Rust CLI owners to stop and waits for their cleanup; it does not kill them. The
 adapter helper drains its own Runner after a closed consumer pipe. The retained
 report is marked incomplete, with no final score.
+
+### Minimum scores and early stopping
+
+`--min-score 80` requires the selected family's exact final score to be at least
+80%. Without early stopping the campaign completes normally and retains its score
+even when the gate fails. Add `--stop-when-unreachable` to stop admitting new
+mutants once the most optimistic final score is below the threshold. Started
+workers drain and final original controls, integrity checks and cleanup still run.
+An early-stopped campaign is incomplete and has no final score; its independent
+`qualityGate` result retains the threshold and upper-bound evidence. YAML profiles
+configure thresholds separately under `quality_gate.min_scores`. All gates are
+off by default. See [quality gates](quality-gates.md) for examples and edge cases.
 
 ## Browse a saved run as HTML
 

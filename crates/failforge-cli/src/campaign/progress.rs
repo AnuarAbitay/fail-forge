@@ -32,15 +32,22 @@ const OUTCOMES: [&str; 8] = [
     "NO_TESTS",
     "CANCELLED",
 ];
-const STATUSES: [&str; 6] = [
+const STATUSES: [&str; 7] = [
     "not_started",
     "running",
     "completed",
     "no_mutants",
     "failed",
     "cancelled",
+    "quality_stopped",
 ];
-const FINAL: [&str; 4] = ["completed", "no_mutants", "failed", "cancelled"];
+const FINAL: [&str; 5] = [
+    "completed",
+    "no_mutants",
+    "failed",
+    "cancelled",
+    "quality_stopped",
+];
 
 #[derive(Default)]
 struct Counts {

@@ -80,6 +80,83 @@ fn family_only_uses_the_invocation_project_default() {
 }
 
 #[test]
+fn quality_gate_cli_parses_exact_thresholds_and_explicit_early_stop() {
+    let args = mutate(&[
+        "failforge",
+        "mutate",
+        "--family",
+        "classic",
+        "--min-score",
+        "79.99",
+        "--stop-when-unreachable",
+    ]);
+    assert_eq!(
+        args.configuration_values().unwrap(),
+        serde_json::json!({"family":"classic","min_score":79.99,"stop_when_unreachable":true})
+    );
+    for score in ["0", "80", "100.00"] {
+        assert!(
+            Cli::try_parse_from([
+                "failforge",
+                "mutate",
+                "--family",
+                "classic",
+                "--min-score",
+                score
+            ])
+            .is_ok()
+        );
+    }
+    for score in ["-1", "101", "80.001", "NaN", "inf", "1e2", "80%"] {
+        assert!(
+            Cli::try_parse_from([
+                "failforge",
+                "mutate",
+                "--family",
+                "classic",
+                "--min-score",
+                score
+            ])
+            .is_err(),
+            "{score}"
+        );
+    }
+    assert!(
+        Cli::try_parse_from([
+            "failforge",
+            "mutate",
+            "--family",
+            "classic",
+            "--stop-when-unreachable"
+        ])
+        .is_err()
+    );
+    assert!(
+        Cli::try_parse_from([
+            "failforge",
+            "mutate",
+            "--config",
+            "profile.yml",
+            "--min-score",
+            "80"
+        ])
+        .is_err()
+    );
+    assert!(
+        Cli::try_parse_from([
+            "failforge",
+            "mutate",
+            "--config",
+            "profile.yml",
+            "--min-score",
+            "80",
+            "--stop-when-unreachable"
+        ])
+        .is_err()
+    );
+}
+
+#[test]
 fn config_accepts_runtime_selection_without_campaign_overrides() {
     let arguments = mutate(&[
         "failforge",

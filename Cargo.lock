@@ -213,6 +213,7 @@ dependencies = [
  "libc",
  "libyaml-safer",
  "regex",
+ "serde",
  "serde_json",
  "thiserror",
  "windows-sys",

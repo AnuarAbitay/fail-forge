@@ -5,6 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+use failforge_config::quality_gate::QualityGate;
 use failforge_dart::namespace::NamespaceError;
 use failforge_workspace::parse_json;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -70,9 +71,19 @@ enum Status {
     NoMutants,
     Failed,
     Cancelled,
+    QualityStopped,
 }
 
 impl Status {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::NoMutants => "no_mutants",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::QualityStopped => "quality_stopped",
+        }
+    }
     fn complete(self) -> bool {
         matches!(self, Self::Completed | Self::NoMutants)
     }
@@ -87,9 +98,21 @@ enum FamilyStatus {
     NoMutants,
     Failed,
     Cancelled,
+    QualityStopped,
 }
 
 impl FamilyStatus {
+    fn name(self) -> &'static str {
+        match self {
+            Self::NotStarted => "not_started",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::NoMutants => "no_mutants",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::QualityStopped => "quality_stopped",
+        }
+    }
     fn complete(self) -> bool {
         matches!(self, Self::Completed | Self::NoMutants)
     }
@@ -146,6 +169,10 @@ struct FamilyInput {
     original_controls: Vec<Value>,
     timings: BTreeMap<String, f64>,
     wall_seconds: f64,
+    #[serde(default)]
+    quality_gate: QualityGate,
+    #[serde(default)]
+    quality_stop: Option<super::quality_gate::StopProof>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -342,6 +369,16 @@ fn validate(request: &Request) -> Result<Vec<Counts>, NamespaceError> {
             _ => None,
         };
         counts.push(Counts::records(family.family, &family.records)?);
+        super::quality_gate::family(
+            &family.quality_gate,
+            family.quality_stop.as_ref(),
+            family.status.name(),
+            request.status.name(),
+            family.expected_mutants,
+            &counts.last().unwrap().outcomes,
+            completed,
+        )
+        .map_err(|error| invalid(&error.to_string()))?;
     }
     if request.expected_mutants.is_some() && request.expected_mutants != expected {
         return Err(invalid("inconsistent campaign report aggregate total"));
@@ -359,6 +396,42 @@ fn validate(request: &Request) -> Result<Vec<Counts>, NamespaceError> {
         return Err(invalid(
             "campaign report success lacks complete clean evidence",
         ));
+    }
+    if request.status == Status::QualityStopped {
+        let justified = request
+            .families
+            .iter()
+            .zip(&counts)
+            .any(|(family, counts)| {
+                family.quality_gate.stop_when_unreachable
+                    && family.quality_gate.min_score.is_some_and(|threshold| {
+                        family.quality_stop.is_some()
+                            || family.status.complete()
+                                && !threshold.passes(
+                                    counts.outcomes.get("KILLED").copied().unwrap_or(0),
+                                    counts.outcomes.get("SURVIVED").copied().unwrap_or(0),
+                                )
+                    })
+            });
+        if !request.cleanup.clean()
+            || request.error.is_some()
+            || request.expected_mutants.is_none()
+            || !justified
+            || request.families.iter().any(|family| {
+                matches!(
+                    family.status,
+                    FamilyStatus::Failed | FamilyStatus::Cancelled | FamilyStatus::Running
+                )
+            })
+            || request
+                .families
+                .iter()
+                .all(|family| family.status.complete())
+        {
+            return Err(invalid(
+                "quality-stopped campaign lacks clean stop evidence",
+            ));
+        }
     }
     Ok(counts)
 }
@@ -398,6 +471,19 @@ fn family_summary(
         value["language"] = "dart".into();
         value["languageSpecificScore"] = score;
     }
+    if let Some(gate) = super::quality_gate::family(
+        &family.quality_gate,
+        family.quality_stop.as_ref(),
+        family.status.name(),
+        request.status.name(),
+        family.expected_mutants,
+        &counts.outcomes,
+        family.records.len() as u64,
+    )
+    .expect("quality gate facts validated")
+    {
+        value["qualityGate"] = gate;
+    }
     value
 }
 
@@ -427,9 +513,13 @@ pub(crate) fn summarize(request: Request) -> Result<Value, NamespaceError> {
     let mut families = serde_json::Map::new();
     let mut records = Vec::new();
     let mut total = Counts::default();
+    let mut gates = BTreeMap::new();
     for name in FAMILIES {
         let value = if let Some((family, counts)) = selected.get(&name) {
             let summary = family_summary(family, counts, &request, &cleanup);
+            if let Some(gate) = summary.get("qualityGate") {
+                gates.insert(name.name().to_owned(), gate.clone());
+            }
             records.extend(summary["records"].as_array().unwrap().iter().cloned());
             total.merge(counts);
             let mut value = json!({
@@ -458,6 +548,9 @@ pub(crate) fn summarize(request: Request) -> Result<Value, NamespaceError> {
         .as_object_mut()
         .unwrap()
         .extend(cleanup.as_object().unwrap().clone());
+    if let Some(gate) = super::quality_gate::profile(gates, request.status.name()) {
+        value["qualityGate"] = gate;
+    }
     Ok(value)
 }
 

@@ -537,3 +537,80 @@ async fn empty_input_zero_workers_and_preexisting_cancellation_start_no_tasks() 
         (0, 0, 0, 0)
     );
 }
+
+#[tokio::test]
+async fn policy_stop_drains_active_workers_without_cancelling_them_or_admitting_more() {
+    let cancel = Cancellation::default();
+    let permits = Arc::new(tokio::sync::Semaphore::new(0));
+    let release = Arc::clone(&permits);
+    let mut records = Vec::new();
+    let summary = run_until(
+        0..10,
+        3,
+        &cancel,
+        move |index, _| {
+            let permits = Arc::clone(&permits);
+            async move {
+                if index != 0 {
+                    permits.acquire().await.unwrap().forget();
+                }
+                Ok(index)
+            }
+        },
+        |index, value| {
+            assert_eq!(index, value);
+            records.push(index);
+            if index == 0 {
+                release.add_permits(2);
+            }
+            Ok(index == 0)
+        },
+    )
+    .await;
+    assert!(summary.stopped);
+    assert!(summary.error.is_none());
+    assert_eq!(
+        (summary.dispatched, summary.joined, summary.emitted),
+        (3, 3, 3)
+    );
+    assert_eq!(records.len(), 3);
+    assert!(cancel.signum().is_none());
+}
+
+#[tokio::test]
+async fn worker_failure_after_policy_stop_keeps_error_and_drains_remaining_workers() {
+    let cancel = Cancellation::default();
+    let permits = Arc::new(tokio::sync::Semaphore::new(0));
+    let release = Arc::clone(&permits);
+    let summary = run_until(
+        0..10,
+        3,
+        &cancel,
+        move |index, _| {
+            let permits = Arc::clone(&permits);
+            async move {
+                if index != 0 {
+                    permits.acquire().await.unwrap().forget();
+                }
+                if index == 1 {
+                    Err(invalid("control failed while draining"))
+                } else {
+                    Ok(index)
+                }
+            }
+        },
+        |index, _| {
+            if index == 0 {
+                release.add_permits(2);
+            }
+            Ok(index == 0)
+        },
+    )
+    .await;
+    assert!(summary.stopped);
+    assert!(matches!(summary.error, Some(NamespaceError::Invalid(_))));
+    assert_eq!(
+        (summary.dispatched, summary.joined, summary.emitted),
+        (3, 3, 2)
+    );
+}

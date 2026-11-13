@@ -41,6 +41,7 @@ struct Family {
     classic_metadata: Option<Value>,
     timings: BTreeMap<String, f64>,
     wall: f64,
+    quality_stop: Option<super::quality_gate::StopProof>,
 }
 
 impl Family {
@@ -58,6 +59,7 @@ impl Family {
             classic_metadata: None,
             timings: BTreeMap::new(),
             wall: 0.0,
+            quality_stop: None,
         }
     }
 
@@ -89,7 +91,7 @@ impl Family {
         Ok(())
     }
 
-    fn projected(&self, family: &str) -> Value {
+    fn projected(&self, family: &str) -> io::Result<Value> {
         let records = self
             .records
             .iter()
@@ -99,11 +101,15 @@ impl Family {
             "outcome":row["outcome"], "reason":row["reason"]})
             })
             .collect::<Vec<_>>();
-        json!({"family":family,"language":if family == "language_specific" {json!("dart")} else {Value::Null},
+        Ok(
+            json!({"family":family,"language":if family == "language_specific" {json!("dart")} else {Value::Null},
             "output":self.output,"status":self.status,"error":self.error,"expectedMutants":self.expected,
             "records":records,"baseline":self.baseline.as_ref().map(|_| json!({})),
             "originalControls":self.controls.iter().map(|_| json!({})).collect::<Vec<_>>(),
-            "timings":self.timings,"wallSeconds":self.wall})
+            "timings":self.timings,"wallSeconds":self.wall,
+            "qualityGate":super::quality_gate::configured(self.configuration.get("quality_gate"))?,
+            "qualityStop":self.quality_stop}),
+        )
     }
 
     fn hydrate(&self, summary: &mut Value) -> io::Result<()> {
@@ -511,7 +517,10 @@ impl Reports {
                 let status = value["status"]
                     .as_str()
                     .filter(|status| {
-                        matches!(*status, "completed" | "no_mutants" | "failed" | "cancelled")
+                        matches!(
+                            *status,
+                            "completed" | "no_mutants" | "failed" | "cancelled" | "quality_stopped"
+                        )
                     })
                     .ok_or_else(|| invalid("invalid report family status"))?;
                 run.status = status.into();
@@ -539,6 +548,21 @@ impl Reports {
                     }
                 }
             }
+            "quality_gate_stopped" => {
+                let run = self
+                    .families
+                    .get_mut(family.ok_or_else(|| invalid("quality stop lacks family"))?)
+                    .ok_or_else(|| invalid("unknown quality stop family"))?;
+                if run.quality_stop.is_some() {
+                    return Err(invalid("duplicate quality stop proof"));
+                }
+                let mut proof = value.clone();
+                proof
+                    .as_object_mut()
+                    .ok_or_else(|| invalid("quality stop must be an object"))?
+                    .remove("kind");
+                run.quality_stop = Some(super::quality_gate::proof(&proof)?);
+            }
             _ => {}
         }
         if self.error.is_some() {
@@ -546,7 +570,11 @@ impl Reports {
         }
         if matches!(
             kind,
-            "stage_started" | "stage_finished" | "family_started" | "family_finished"
+            "stage_started"
+                | "stage_finished"
+                | "family_started"
+                | "family_finished"
+                | "quality_gate_stopped"
         ) {
             let mut fields = fields(value, &["kind", "family"])?;
             if let Some(family) = family {
@@ -568,6 +596,23 @@ impl Reports {
         {
             let mut summary = self.summary("failed", None)?;
             summary["status"] = "running".into();
+            // The initial report is an explicitly provisional publication. Keep
+            // its gate context consistent with the visible running status.
+            if self.mode == "direct" {
+                if let Some(gate) = summary.get_mut("qualityGate") {
+                    gate["campaignStatus"] = "running".into();
+                }
+            } else {
+                for family in self.selected() {
+                    if let Some(gate) =
+                        summary["families"][&family]["summary"].get_mut("qualityGate")
+                    {
+                        gate["campaignStatus"] = "running".into();
+                        let gate = gate.clone();
+                        summary["qualityGate"]["families"][&family] = gate;
+                    }
+                }
+            }
             let families = self.selected();
             let profile = self.mode == "profile";
             self.layout_mut()?.initial(&summary, profile, &families)?;
@@ -580,7 +625,7 @@ impl Reports {
         let request = json!({"operation":"campaign-report","mode":self.mode,"runId":self.run_id,
             "output":self.output,"status":status,"error":error,"expectedMutants":self.expected,
             "timings":self.timings,"wallSeconds":self.started.elapsed().as_secs_f64(),"cleanup":self.cleanup,
-            "families":self.selected().iter().map(|family| self.families[family].projected(family)).collect::<Vec<_>>()});
+            "families":self.selected().iter().map(|family| self.families[family].projected(family)).collect::<io::Result<Vec<_>>>()?});
         let mut summary = crate::campaign::report::build(&serde_json::to_vec(&request)?)
             .map_err(|error| invalid(&error.to_string()))?;
         if self.mode == "direct" {
@@ -609,7 +654,10 @@ impl Reports {
         if !self.prepared || self.finished {
             return Err(invalid("campaign reports cannot be finalized"));
         }
-        if !matches!(status, "completed" | "no_mutants" | "failed" | "cancelled") {
+        if !matches!(
+            status,
+            "completed" | "no_mutants" | "failed" | "cancelled" | "quality_stopped"
+        ) {
             return Err(invalid("invalid final report status"));
         }
         let mut status = status.to_owned();

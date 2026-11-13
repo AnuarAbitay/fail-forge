@@ -365,10 +365,13 @@ shows selected text for manual copying. No local integration is needed.
 Reports and captures can contain sensitive project data; review them before
 sharing.
 
-**Surviving mutants alone do not cause a nonzero exit code.** Execution and
-inconclusive-result errors can still return `125`, even when all candidates were
-processed. FailForge has no built-in minimum-score gate; CI integrations must
-inspect the report to apply their own quality threshold.
+**Surviving mutants alone do not cause a nonzero exit code unless a quality gate
+is configured.** Add `--min-score 80` to require at least 80% for the selected
+family; add `--stop-when-unreachable` to stop new work when reaching that threshold
+becomes impossible. A quality failure returns `1`. YAML profiles support separate
+thresholds per family. Execution and inconclusive-result errors still return
+`125`, even with a passing score. See [quality gates](docs/quality-gates.md) for
+configuration, early stopping and report semantics.
 
 ## Commands
 
