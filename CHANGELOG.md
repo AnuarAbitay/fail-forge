@@ -6,6 +6,11 @@ downloads and their verification results.
 
 ## Unreleased — native CLI
 
+- Treat Linux procfs's transient `pgrp=-1` exit-race records as unknown group
+  membership, allowing bounded cleanup checks to recover without retaining a
+  spurious malformed-record error. Incomplete observations cannot prove cleanup.
+- Make the executable Runner documentation example portable to Windows by
+  invoking `rustc --version` directly through `PATH`.
 - Add opt-in minimum mutation scores with `--min-score` and independent YAML
   thresholds per family. A completed campaign below its threshold retains its
   score and returns `1`.

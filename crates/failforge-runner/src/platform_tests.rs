@@ -299,21 +299,25 @@ fn two_signal_censuses_require_all_live_members_to_be_inexit_without_changing_li
         live: vec![10],
         zombies: vec![9],
         exiting: vec![10],
+        ..Default::default()
     };
     let gone = GroupSnapshot {
         live: vec![],
         zombies: vec![9, 10],
         exiting: vec![],
+        ..Default::default()
     };
     let ordinary = GroupSnapshot {
         live: vec![11],
         zombies: vec![9],
         exiting: vec![],
+        ..Default::default()
     };
     let mixed = GroupSnapshot {
         live: vec![10, 11],
         zombies: vec![9],
         exiting: vec![10],
+        ..Default::default()
     };
     for (first, second) in [(&exiting, &exiting), (&exiting, &gone), (&gone, &exiting)] {
         assert_eq!(
@@ -970,7 +974,7 @@ fn malformed_proc_stat_never_becomes_evidence_of_an_empty_group() {
         b"123 (name) SS 1 42".as_slice(),
         b"123 (name) S 1".as_slice(),
         b"123 (name) S 1 invalid".as_slice(),
-        b"123 (name) S 1 -1".as_slice(),
+        b"123 (name) S 1 -2".as_slice(),
         b"123 (name) S 1 99999999999999999999".as_slice(),
     ] {
         assert_eq!(
@@ -978,6 +982,104 @@ fn malformed_proc_stat_never_becomes_evidence_of_an_empty_group() {
             io::ErrorKind::InvalidData
         );
     }
+}
+
+fn proc_census(rows: &[(libc::pid_t, &[u8])]) -> GroupSnapshot {
+    let mut snapshot = GroupSnapshot::default();
+    for (pid, stat) in rows {
+        snapshot.include_proc_stat(42, *pid, stat).unwrap();
+    }
+    snapshot.normalize();
+    snapshot
+}
+
+fn census_state(snapshots: Vec<GroupSnapshot>) -> GroupState {
+    let mut snapshots = snapshots.into_iter();
+    group_state_with(|| Ok(snapshots.next().expect("at most two censuses"))).unwrap()
+}
+
+#[test]
+fn exiting_proc_stat_membership_is_retried_without_claiming_cleanup() {
+    // do_task_stat captures state before trying lock_task_sighand. An exit
+    // racing that lock can leave pgrp=-1 even with a nonterminal state letter.
+    for &state in b"RSZXx" {
+        let exiting = format!("70 (exiting) {} 0 -1 -1", state as char);
+        let zombie = (42, b"42 (leader) Z 1 42 42".as_slice());
+        let unknown = proc_census(&[zombie, (70, exiting.as_bytes())]);
+        assert_eq!(
+            census_state(vec![unknown, proc_census(&[zombie])]),
+            GroupState::Unknown,
+            "state={}",
+            state as char,
+        );
+        // The next pair of complete censuses can prove cleanup. No persistent
+        // malformed-record error should be attached to this kernel exit race.
+        assert_eq!(
+            census_state(vec![proc_census(&[zombie]), proc_census(&[zombie])]),
+            GroupState::NoLiveMembers { zombies: 1 },
+        );
+    }
+}
+
+#[test]
+fn unknown_proc_membership_in_either_census_never_proves_an_empty_group() {
+    let unknown = (70, b"70 (exiting) R 0 -1 -1".as_slice());
+    let live = (43, b"43 (worker) S 1 42 42".as_slice());
+    for snapshots in [
+        vec![proc_census(&[unknown]), proc_census(&[])],
+        vec![proc_census(&[]), proc_census(&[unknown])],
+        vec![proc_census(&[unknown]), proc_census(&[unknown])],
+    ] {
+        assert_eq!(census_state(snapshots), GroupState::Unknown);
+    }
+    assert_eq!(
+        census_state(vec![proc_census(&[unknown, live])]),
+        GroupState::LiveMembers { count: 1 },
+    );
+    assert_eq!(
+        census_state(vec![proc_census(&[]), proc_census(&[unknown, live])]),
+        GroupState::LiveMembers { count: 1 },
+    );
+}
+
+#[test]
+fn proc_census_retains_real_errors_and_requires_consistent_zombie_identity() {
+    for bytes in [
+        b"".as_slice(),
+        b"70 (broken) R 1 -2 -1".as_slice(),
+        b"70 (broken) R 1 invalid".as_slice(),
+    ] {
+        assert_eq!(
+            GroupSnapshot::default()
+                .include_proc_stat(42, 70, bytes)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData,
+        );
+    }
+    let mut calls = 0;
+    let result = group_state_with(|| {
+        calls += 1;
+        if calls == 1 {
+            Ok(proc_census(&[]))
+        } else {
+            Err(io::Error::from(io::ErrorKind::PermissionDenied))
+        }
+    });
+    assert_eq!(result.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+    assert_eq!(calls, 2);
+    assert_eq!(
+        census_state(vec![
+            proc_census(&[(42, b"42 (first) Z 1 42 42")]),
+            proc_census(&[(43, b"43 (second) Z 1 42 42")]),
+        ]),
+        GroupState::Unknown,
+    );
+    let other = (99, b"99 (unrelated) S 1 99 99".as_slice());
+    assert_eq!(
+        census_state(vec![proc_census(&[other]), proc_census(&[other])]),
+        GroupState::NoLiveMembers { zombies: 0 },
+    );
 }
 
 #[test]

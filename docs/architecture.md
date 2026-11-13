@@ -136,8 +136,15 @@ its native PID buffer within the same cap and
 rejects full/truncated or malformed results. Both verify the group reported for
 each candidate and treat query failures conservatively.
 
-Two consecutive snapshots with no live members and the same zombie PID set
-yield `NoLiveMembers { zombies }`. A changing zombie set yields `Unknown`.
+Linux can report `pgrp=-1` when exit races with reading a process's signal
+state. This valid but unavailable membership prevents a census from proving
+quiescence; without a known live member, the state remains `Unknown`. The
+existing cleanup deadline bounds subsequent checks. Malformed records, read
+errors and restricted visibility retain their error behavior.
+
+Two complete consecutive snapshots with no live members and the same zombie
+PID set yield `NoLiveMembers { zombies }`. Without a known live member, a
+changing zombie set or unavailable membership yields `Unknown`.
 `LiveMembers` and `Unknown` remain distinct from completion. These are bounded
 observations of the original group, not an atomic proof about every descendant.
 The final `CleanupReport` records child reap, the group observation, signal

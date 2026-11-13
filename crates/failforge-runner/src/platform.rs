@@ -188,26 +188,7 @@ impl ManagedChild {
         if self.is_retired() {
             return Ok(GroupState::Unknown);
         }
-        let first = group_snapshot(self.pid)?;
-        if !first.live.is_empty() {
-            return Ok(GroupState::LiveMembers {
-                count: first.live.len(),
-            });
-        }
-        // A second census catches ordinary fork/exit and list/read races. This
-        // remains observational evidence, never a claim about escaped processes.
-        let second = group_snapshot(self.pid)?;
-        if !second.live.is_empty() {
-            return Ok(GroupState::LiveMembers {
-                count: second.live.len(),
-            });
-        }
-        if first.zombies != second.zombies {
-            return Ok(GroupState::Unknown);
-        }
-        Ok(GroupState::NoLiveMembers {
-            zombies: second.zombies.len(),
-        })
+        group_state_with(|| group_snapshot(self.pid))
     }
 
     fn group_signal_targets(&self) -> io::Result<GroupSignalTargets> {
@@ -478,11 +459,38 @@ fn observe_pid(pid: libc::pid_t) -> io::Result<bool> {
 struct GroupSnapshot {
     live: Vec<libc::pid_t>,
     zombies: Vec<libc::pid_t>,
+    unknown_membership: bool,
     #[cfg(target_os = "macos")]
     exiting: Vec<libc::pid_t>,
 }
 
 impl GroupSnapshot {
+    #[cfg(any(target_os = "linux", test))]
+    fn include_proc_stat(
+        &mut self,
+        pgid: libc::pid_t,
+        pid: libc::pid_t,
+        bytes: &[u8],
+    ) -> io::Result<()> {
+        let (group, state) = parse_proc_stat(bytes)?;
+        if group == -1 {
+            // Linux do_task_stat reads state before lock_task_sighand. If exit
+            // wins that lock, pgrp stays -1 even with an earlier R/S state.
+            // This PID may belong to our group: only a later complete census
+            // can establish quiescence, within the existing cleanup deadline.
+            self.unknown_membership = true;
+            return Ok(());
+        }
+        if group == pgid {
+            match state {
+                b'Z' => self.zombies.push(pid),
+                b'X' | b'x' => {}
+                _ => self.live.push(pid),
+            }
+        }
+        Ok(())
+    }
+
     fn normalize(&mut self) {
         self.live.sort_unstable();
         self.live.dedup();
@@ -494,6 +502,31 @@ impl GroupSnapshot {
             self.exiting.dedup();
         }
     }
+}
+
+fn group_state_with(
+    mut snapshot: impl FnMut() -> io::Result<GroupSnapshot>,
+) -> io::Result<GroupState> {
+    let first = snapshot()?;
+    if !first.live.is_empty() {
+        return Ok(GroupState::LiveMembers {
+            count: first.live.len(),
+        });
+    }
+    // A second census catches ordinary fork/exit and list/read races. This
+    // remains observational evidence, never a claim about escaped processes.
+    let second = snapshot()?;
+    if !second.live.is_empty() {
+        return Ok(GroupState::LiveMembers {
+            count: second.live.len(),
+        });
+    }
+    if first.unknown_membership || second.unknown_membership || first.zombies != second.zombies {
+        return Ok(GroupState::Unknown);
+    }
+    Ok(GroupState::NoLiveMembers {
+        zombies: second.zombies.len(),
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -645,15 +678,7 @@ fn group_snapshot(pgid: libc::pid_t) -> io::Result<GroupSnapshot> {
             }
             Err(error) => return Err(error),
         };
-        let (group, state) = parse_proc_stat(&bytes)?;
-        if group != pgid {
-            continue;
-        }
-        match state {
-            b'Z' => snapshot.zombies.push(pid),
-            b'X' | b'x' => {}
-            _ => snapshot.live.push(pid),
-        }
+        snapshot.include_proc_stat(pgid, pid, &bytes)?;
     }
     snapshot.normalize();
     Ok(snapshot)
@@ -800,7 +825,8 @@ fn parse_proc_stat(bytes: &[u8]) -> io::Result<(libc::pid_t, u8)> {
         .next()
         .and_then(|field| std::str::from_utf8(field).ok())
         .and_then(|field| field.parse::<libc::pid_t>().ok())
-        .filter(|group| *group >= 0)
+        // -1 is the kernel's unavailable-membership sentinel during exit.
+        .filter(|group| *group >= -1)
         .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?;
     Ok((group, state))
 }
