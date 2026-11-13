@@ -235,6 +235,73 @@ fn unstarted_failure_family() -> Value {
 }
 
 #[test]
+fn unstarted_family_requires_absent_execution_evidence() {
+    let fixture = Fixture::new();
+    let mut classic = direct("classic", vec![record("classic", "first", "SURVIVED")]);
+    add_quality_gate(&mut classic, "80", true, None);
+    let mut later = unstarted_failure_family();
+    later["expectedMutants"] = 2.into();
+    add_quality_gate(&mut later, "80", true, None);
+    let valid = quality_stopped_profile(classic, later);
+    for (field, evidence) in [
+        (
+            "records",
+            json!([
+                record("failure_mode", "late-killed", "KILLED"),
+                record("failure_mode", "late-survived", "SURVIVED")
+            ]),
+        ),
+        ("baseline", json!({"outcome":"SURVIVED"})),
+        ("originalControls", json!([{"outcome":"SURVIVED"}])),
+    ] {
+        let mut invalid = valid.clone();
+        let later = &mut invalid["families"]["failure_mode"]["summary"];
+        later[field] = evidence;
+        if field == "records" {
+            later["completedMutants"] = 2.into();
+            later["outcomeCounts"] = json!({"KILLED":1,"SURVIVED":1});
+            add_quality_gate(later, "80", true, None);
+            let later_records = later["records"].as_array().unwrap().clone();
+            let later_gate = later["qualityGate"].clone();
+            invalid["records"]
+                .as_array_mut()
+                .unwrap()
+                .extend(later_records);
+            invalid["completedMutants"] = 3.into();
+            invalid["outcomeCounts"] = json!({"KILLED":1,"SURVIVED":2});
+            invalid["qualityGate"]["families"]["failure_mode"] = later_gate;
+        }
+        fixture.summary(&invalid);
+        assert!(load(&fixture.0).is_err(), "field={field}");
+    }
+}
+
+#[test]
+fn unstarted_family_preserves_discovery_only_plans() {
+    let fixture = Fixture::new();
+    for expected in [0, 2] {
+        let mut classic = direct("classic", vec![record("classic", "first", "SURVIVED")]);
+        add_quality_gate(&mut classic, "80", true, None);
+        let mut later = unstarted_failure_family();
+        later["expectedMutants"] = expected.into();
+        later["baseline"] = Value::Null;
+        later["originalControls"] = json!([]);
+        later["timings"] = json!({"discovery_validation":0.25});
+        add_quality_gate(&mut later, "80", true, None);
+        fixture.summary(&quality_stopped_profile(classic, later));
+        let value = fixture.load();
+        assert_eq!(value["families"][1]["status"], "not_started");
+        assert_eq!(value["families"][1]["expectedMutants"], expected);
+        assert!(
+            value["families"][1]["records"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
 fn quality_stopped_profiles_cannot_claim_every_family_completed() {
     let fixture = Fixture::new();
     for threshold in ["50", "50.01"] {

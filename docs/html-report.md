@@ -75,10 +75,15 @@ The report presents the saved run as a working area:
 
 - **Family tabs** keep `classic`, `failure_mode` and `language_specific` results
   separate. There is no combined mutation score.
-- **Quality gates**, when configured for the saved run, show each family's
-  threshold and verdict. Early-stopped runs show the maximum possible score and
-  skipped-work counts while keeping the final mutation score unavailable. See
-  [quality gates](quality-gates.md).
+- **Quality gates**, recorded by unreleased native source builds, show each
+  family's threshold and verdict. A bound-triggered stop shows its maximum
+  possible score and proof. A profile stopped after a completed family instead
+  shows `below_threshold`, or `not_evaluated/no_scored_mutants`, without a bound.
+  Skipped-work counts remain visible; incomplete campaigns have no final scores.
+  If all admitted work finishes and no family is skipped, the completed campaign
+  keeps its final score. Export these new gate reports with the matching source
+  build; native `0.2.0` predates the gate fields and `quality_stopped` status.
+  See [quality gates](quality-gates.md).
 - **Summary counts** describe the selected family's entire saved scope. Choosing
   a file or outcome does not recalculate that family's score.
 - **Source files and outcome filters** narrow the mutant list. Mutants that

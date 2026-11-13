@@ -101,6 +101,88 @@ fn embedded(path: &Path) -> Value {
     serde_json::from_str(data.split_once("</script>").unwrap().0).unwrap()
 }
 
+fn stopped_profile_with_later_results(retained: bool) -> Value {
+    let mut first = summary();
+    first["profileComplete"] = false.into();
+    first["mutationScore"] = Value::Null;
+    first["qualityGate"] = json!({"status":"failed","minScore":80.0,
+        "stopWhenUnreachable":true,"actualPercent":50.0,"reason":"below_threshold",
+        "campaignStatus":"quality_stopped","maxPossiblePercent":null,
+        "processedMutants":2,"notRunMutants":0,"proof":null});
+    let mut later = summary();
+    later["family"] = "failure_mode".into();
+    later["status"] = "not_started".into();
+    later["complete"] = false.into();
+    later["profileComplete"] = false.into();
+    later["mutationScore"] = Value::Null;
+    later["failureModeScore"] = Value::Null;
+    for record in later["records"].as_array_mut().unwrap() {
+        record["family"] = "failure_mode".into();
+        record["operatorId"] = "EXCEPTION_AT_ENTRY".into();
+    }
+    if !retained {
+        later["records"] = json!([]);
+        later["completedMutants"] = 0.into();
+        later["outcomeCounts"] = json!({});
+    }
+    let records: Vec<_> = first["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(later["records"].as_array().unwrap())
+        .cloned()
+        .collect();
+    let count = if retained { 2 } else { 1 };
+    json!({"kind":"profile","version":2,"runId":"report-test",
+    "status":"quality_stopped","complete":false,"error":null,"wallSeconds":1.5,
+    "expectedMutants":4,"completedMutants":records.len(),"records":records,
+    "outcomeCounts":{"KILLED":count,"SURVIVED":count},
+    "originalProjectFilesUnchanged":true,"temporarySnapshotCleaned":true,
+    "workspaceCleanupDeferred":false,
+    "qualityGate":{"status":"failed","families":{"classic":first["qualityGate"]}},
+    "families":{
+        "classic":{"enabled":true,"status":"completed","complete":true,
+            "expectedMutants":2,"summary":first},
+        "failure_mode":{"enabled":true,"status":"not_started","complete":false,
+            "expectedMutants":2,"summary":later},
+        "language_specific":{"enabled":false,"status":"disabled","complete":true,"summary":null}
+    }})
+}
+
+#[test]
+fn not_started_family_cannot_export_retained_results_but_a_real_skipped_family_can() {
+    for retained in [true, false] {
+        let fixture = Fixture::new();
+        fixture.summary(&stopped_profile_with_later_results(retained));
+        let original = fs::read(fixture.root.join("run/summary.json")).unwrap();
+        let (status, _, stderr) = fixture.run(&["report", "run", "--html", "stopped.html"]);
+        let output = fixture.root.join("stopped.html");
+        if retained {
+            assert_eq!(status.code(), Some(2), "{stderr}");
+            assert!(
+                stderr.contains("not_started family contains execution evidence"),
+                "{stderr}"
+            );
+            assert!(!output.exists());
+        } else {
+            assert!(status.success(), "{stderr}");
+            let data = embedded(&output);
+            assert_eq!(data["run"]["status"], "quality_stopped");
+            assert_eq!(data["families"][1]["status"], "not_started");
+            assert!(
+                data["families"][1]["records"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        assert_eq!(
+            fs::read(fixture.root.join("run/summary.json")).unwrap(),
+            original
+        );
+    }
+}
+
 #[test]
 fn exports_a_portable_report_with_no_sdk_and_does_not_modify_evidence() {
     let fixture = Fixture::new();

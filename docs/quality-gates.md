@@ -95,11 +95,28 @@ The scoring formula remains `100 × KILLED / (KILLED + SURVIVED)`. `INVALID`,
 An empty scored denominator is `N/A`, even with a threshold of zero; its gate is
 not evaluated and the command returns `125`.
 
-A campaign stopped before its planned work finishes has status `quality_stopped`
-and `complete: false`. Its final scores remain unavailable. A separate
-`qualityGate` object records the failed gate, `threshold_unreachable` reason,
-upper-bound proof, threshold and counts. Profiles also retain separate gate
-results for their selected families; unstarted gates are not marked passed.
+A campaign stopped by a gate before its planned work finishes has status `quality_stopped`
+and `complete: false`. Its final scores remain unavailable. The saved
+`qualityGate` records the threshold, processed/unrun counts and the decision.
+For a direct campaign this is one family gate; a profile has an aggregate status
+and a `families` map of its configured family gates. There are three stop cases:
+
+| Stop trigger | Family gate status | Reason and evidence | Exit code without other errors |
+| --- | --- | --- | --- |
+| The optimistic bound falls below the threshold while candidates remain. | `failed` | `threshold_unreachable`, with `proof` and `maxPossiblePercent`. | `1` |
+| A completed family misses its threshold and later profile families are skipped. | `failed` | `below_threshold`; `proof` and `maxPossiblePercent` are `null`. | `1` |
+| A completed family has no killed or surviving mutants and later profile families are skipped. | `not_evaluated` | `no_scored_mutants`; `proof` and `maxPossiblePercent` are `null`. | `125` |
+
+Unstarted configured gates are `not_evaluated` with `skipped_due_to_gate`. A
+profile with a failed gate and only skipped later gates has an aggregate
+`failed` verdict; a required gate with no scored evidence makes the aggregate
+`not_evaluated`. A completed family's `actualPercent` can be retained in its gate
+even though an incomplete profile withholds every final family score.
+
+If all candidates have already been admitted when a bound proves failure,
+draining can finish the entire campaign. When no later family is skipped, that
+campaign remains `completed`, retains its final score and returns `1`; it is not
+an incomplete `quality_stopped` run.
 
 The terminal and offline HTML report display the saved gate result. JSON keeps
 the threshold and decision with the run, so exporting later does not apply a

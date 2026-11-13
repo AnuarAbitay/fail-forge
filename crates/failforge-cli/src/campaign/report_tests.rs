@@ -83,6 +83,8 @@ fn quality_stopped_profile_preserves_completed_family_gate_and_marks_later_gate_
     later["qualityGate"] = json!({"minScore":70,"stopWhenUnreachable":true});
     later["status"] = json!("not_started");
     later["expectedMutants"] = json!(1);
+    later["baseline"] = Value::Null;
+    later["originalControls"] = json!([]);
     let mut input = request("profile", vec![first, later]);
     input["status"] = json!("quality_stopped");
     let stopped = build_value(&input).unwrap();
@@ -96,6 +98,69 @@ fn quality_stopped_profile_preserves_completed_family_gate_and_marks_later_gate_
         "skipped_due_to_gate"
     );
     assert!(stopped["families"]["classic"]["summary"]["mutationScore"].is_null());
+}
+
+fn unstarted_profile(expected: Option<u64>) -> Value {
+    let mut first = family(
+        "classic",
+        vec![record("classic", "first", "SURVIVED", "passed")],
+    );
+    first["qualityGate"] = json!({"minScore":80,"stopWhenUnreachable":true});
+    let mut later = family("failure_mode", vec![]);
+    later["status"] = "not_started".into();
+    later["baseline"] = Value::Null;
+    later["originalControls"] = json!([]);
+    later["timings"] = json!({"discovery_validation":0.25});
+    let mut input = request("profile", vec![first, later]);
+    input["status"] = if expected.is_some() {
+        "quality_stopped".into()
+    } else {
+        "failed".into()
+    };
+    input["expectedMutants"] = json!(expected.map(|count| count + 1));
+    input["families"][1]["expectedMutants"] = json!(expected);
+    input
+}
+
+#[test]
+fn unstarted_family_requires_absent_execution_evidence() {
+    for status in ["quality_stopped", "failed", "cancelled"] {
+        let mut valid = unstarted_profile(Some(2));
+        valid["status"] = status.into();
+        for (field, evidence) in [
+            (
+                "records",
+                json!([
+                    record("failure_mode", "late-killed", "KILLED", "assertion"),
+                    record("failure_mode", "late-survived", "SURVIVED", "passed")
+                ]),
+            ),
+            ("baseline", json!({"outcome":"SURVIVED"})),
+            ("originalControls", json!([{"outcome":"SURVIVED"}])),
+        ] {
+            let mut invalid = valid.clone();
+            invalid["families"][1][field] = evidence;
+            assert!(
+                build_value(&invalid).is_err(),
+                "status={status}, field={field}"
+            );
+        }
+    }
+}
+
+#[test]
+fn unstarted_family_preserves_discovery_only_plans() {
+    for expected in [Some(0), Some(2), None] {
+        let input = unstarted_profile(expected);
+        let value = build_value(&input).unwrap();
+        let later = &value["families"]["failure_mode"]["summary"];
+        assert_eq!(later["status"], "not_started");
+        assert_eq!(later["expectedMutants"], json!(expected));
+        assert_eq!(later["completedMutants"], 0);
+        assert_eq!(later["baseline"], Value::Null);
+        assert_eq!(later["originalControls"], json!([]));
+        assert_eq!(later["timings"]["discovery_validation"], 0.25);
+    }
 }
 
 fn build_value(value: &Value) -> Result<Value, NamespaceError> {
@@ -536,6 +601,8 @@ fn aggregate_count_overflow_is_rejected_even_for_an_incomplete_profile() {
     for family in input["families"].as_array_mut().unwrap() {
         family["status"] = "not_started".into();
         family["expectedMutants"] = u64::MAX.into();
+        family["baseline"] = Value::Null;
+        family["originalControls"] = json!([]);
     }
     assert!(build_value(&input).is_err());
 }

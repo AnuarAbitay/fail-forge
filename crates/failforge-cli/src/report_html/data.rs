@@ -142,6 +142,17 @@ fn validate_records<'a>(
     let records = summary["records"]
         .as_array()
         .ok_or_else(|| invalid("report records must be an array"))?;
+    let controls = &summary["originalControls"];
+    if summary["status"] == "not_started"
+        && (!records.is_empty()
+            || !summary["baseline"].is_null()
+            || !controls.is_null()
+                && controls
+                    .as_array()
+                    .is_none_or(|controls| !controls.is_empty()))
+    {
+        return Err(invalid("not_started family contains execution evidence"));
+    }
     *total = total
         .checked_add(records.len())
         .filter(|count| *count <= MAX_RECORDS)

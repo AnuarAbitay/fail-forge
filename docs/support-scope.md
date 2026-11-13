@@ -196,12 +196,13 @@ incomplete profile suppresses final scores even for a family that finished.
 Inspect outcome counts alongside the percentage, since excluded results reduce
 what that percentage says about the selected scope.
 
-Optional [quality gates](quality-gates.md) require a minimum score per family.
-They can stop new work when even the optimistic final score cannot reach the
-threshold. A gate stop retains partial evidence and a separate failed verdict;
-it does not establish a final score for the incomplete campaign. Gates are off
-by default, and execution or evidence errors retain priority over a quality
-failure.
+Unreleased native source builds offer optional [quality gates](quality-gates.md)
+with a minimum score per family. They can stop new work when passing a required
+gate is no longer possible. A stopped campaign retains partial evidence and a
+separate gate result; it does not establish a final score for incomplete work.
+Gates are off by default, and execution or evidence errors retain priority over a
+quality failure. The published native `0.2.0` archives, tagged source and the Dart
+launcher's pinned runtime do not include this feature.
 
 Final `summary.json` is authoritative. Completed evidence is retained where
 possible after cancellation or publication failure, but it is not a successful

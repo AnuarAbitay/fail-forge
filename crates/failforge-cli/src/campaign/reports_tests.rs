@@ -827,6 +827,9 @@ fn opaque_evidence_larger_than_private_request_limit_is_hydrated_locally() {
     let mut fixture = Fixture::new("direct", &["classic"]);
     fixture.prepare();
     fixture.discover(1);
+    fixture
+        .event(json!({"kind":"family_started","family":"classic"}))
+        .unwrap();
     let size = 64 * 1024 * 1024 + 1;
     let mut record = json!({"recordKind":"mutation","family":"classic","mutantId":"large",
         "outcome":"KILLED","reason":"test_failure"});

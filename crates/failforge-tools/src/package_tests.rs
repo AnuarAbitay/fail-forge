@@ -85,6 +85,85 @@ fn payload_allowlist_excludes_tests_tool_state_secrets_and_untracked_sources() {
 }
 
 #[test]
+fn packaged_documentation_keeps_local_markdown_links_inside_the_payload() {
+    let root = common::root();
+    let selected = assets::select(&tracked()).unwrap();
+    for source in selected.iter().filter(|path| path.ends_with(".md")) {
+        let text = fs::read_to_string(root.join(source)).unwrap();
+        let mut fence = None;
+        for line in text.lines() {
+            let line = line.trim_start();
+            if line.starts_with("```") || line.starts_with("~~~") {
+                let marker = line.as_bytes()[0];
+                fence = match fence {
+                    Some(open) if open == marker => None,
+                    None => Some(marker),
+                    other => other,
+                };
+                continue;
+            }
+            if fence.is_some() {
+                continue;
+            }
+            // The maintained guides use inline links with whitespace-free paths.
+            // Check the actual documentation, including new guides added later.
+            for link in line.split("](").skip(1) {
+                let destination = link.split(')').next().unwrap().trim();
+                let destination = destination.split_whitespace().next().unwrap_or("");
+                let destination = destination.trim_matches(['<', '>']);
+                let destination = destination.split(['#', '?']).next().unwrap();
+                if destination.contains(':') || !destination.ends_with(".md") {
+                    continue;
+                }
+                let relative = Path::new(source).parent().unwrap().join(destination);
+                let mut normalized = PathBuf::new();
+                for component in relative.components() {
+                    match component {
+                        std::path::Component::Normal(part) => normalized.push(part),
+                        std::path::Component::CurDir => {}
+                        std::path::Component::ParentDir => {
+                            assert!(
+                                normalized.pop(),
+                                "link escapes archive: {source} -> {destination}"
+                            );
+                        }
+                        _ => panic!("non-relative archive link: {source} -> {destination}"),
+                    }
+                }
+                let target = normalized.to_str().unwrap().replace('\\', "/");
+                assert!(
+                    selected.contains(&target),
+                    "packaged guide {source} links to missing payload file {target}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn documented_packaging_commands_accept_the_current_native_version() {
+    let root = common::root();
+    for source in ["crates/failforge-tools/README.md", "docs/packaging.md"] {
+        let text = fs::read_to_string(root.join(source)).unwrap();
+        let mut examples = 0;
+        for line in text.lines() {
+            let line = line.trim_start();
+            let Some(arguments) = line.strip_prefix("--expected-version ") else {
+                continue;
+            };
+            let expected = arguments.split_whitespace().next().unwrap();
+            let stdout = format!("failforge {}\n", env!("CARGO_PKG_VERSION"));
+            assert!(
+                version(stdout.as_bytes(), Some(expected)).is_ok(),
+                "documented {source} command rejects this build's version: {expected}"
+            );
+            examples += 1;
+        }
+        assert!(examples > 0, "no packaging example was checked in {source}");
+    }
+}
+
+#[test]
 fn tracked_paths_reject_traversal_alias_syntax_controls_and_non_unicode() {
     assert_eq!(
         tracked_paths(b"lib/a.dart\0file with spaces.md\0")

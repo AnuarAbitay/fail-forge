@@ -2,12 +2,16 @@
 
 `failforge mutate` runs explicitly selected mutations. A YAML profile can select
 multiple families; direct CLI arguments select one family.
-The Rust CLI validates both modes through `failforge-config`. A small Rust launcher
-starts one Rust campaign owner and forwards cancellation. That owner runs
-preflight, workspace preparation, discovery, scheduling, reports and cleanup
+The Rust CLI validates both modes through `failforge-config`. The campaign owner
+runs preflight, workspace preparation, discovery, scheduling, reports and cleanup
 in-process. It owns the workspace lease until every active worker has drained.
-If the launcher dies, a private liveness pipe closes and the owner cancels work,
-waits for Runner cleanup and retains an incomplete report.
+On Linux and macOS, a small Rust launcher starts that owner and forwards
+cancellation. If the launcher dies, a private liveness pipe closes and the owner
+cancels work, waits for Runner cleanup and retains an incomplete report when
+publication succeeds. On Windows, the CLI owns Runner Job Objects directly,
+without a separate launcher. Abrupt owner termination kills its jobs and can
+prevent final report publication; a later run can recover validated abandoned
+working copies. See [Windows process behavior](windows.md#process-and-report-behavior).
 
 Preflight checks the prepared package, paths and runtime before creating output.
 The owner recovers recognized abandoned workspaces, allocates a private snapshot,
@@ -564,19 +568,25 @@ the failure. Later families are marked `not_started`; no passing score is claime
 for an incomplete profile. The terminal prints a family/status/mutants/score table
 and counts for all eight outcomes.
 
-The root and family `summary.json` paths are symbolic links through one private
-commit pointer. Final reports become visible together only after all of them
-have been written and synchronized. Preserve the hidden `.profile-reports/`
-directory and `.profile-reports-current` link when copying the report directory,
-or dereference the public `summary.json` paths when exporting individual files.
-An interruption before the commit leaves the previous incomplete view visible.
-An interruption after the pointer switch can leave the completed report visible;
-inspect the authoritative summary after an interrupted command.
+On Linux and macOS, the root and family `summary.json` paths are symbolic links
+through one private commit pointer. Final reports become visible together only
+after all of them have been written and synchronized. Preserve the hidden
+`.profile-reports/` directory and `.profile-reports-current` link when copying
+the report directory, or dereference the public `summary.json` paths when
+exporting individual files. An interruption before the commit leaves the
+previous incomplete view visible. An interruption after the pointer switch can
+leave the completed report visible. On Windows, reports are regular files:
+family files are installed first and replacement of the root `summary.json`
+commits the generation. Readers combining several files can observe different
+generations during publication. In either case, inspect the authoritative root
+summary after an interrupted command.
 Failed or ambiguous publication can retain private staging files for inspection.
-The atomic switch guarantees consistent visibility, not persistence of the
-rename across power loss.
-The journal's `campaign_finalizing` event records an intended status, not a
-committed result; use the root `summary.json` to determine completion.
+Atomic replacement of the commit pointer or root summary does not guarantee
+persistence of the rename across power loss.
+The journal's `campaign_finished` event for a direct campaign, or
+`profile_finished` for a profile, records the intended status before final
+publication. It is not a committed result; use the root `summary.json` to
+determine completion.
 
 ### Live progress and terminal reports
 
@@ -613,8 +623,9 @@ summary to monitor a large campaign.
 A terminal report for a failed or gracefully cancelled campaign contains the
 available partial results and remains incomplete and unscored. A profile clears
 the scores of every selected family, including families that finished earlier.
-The atomic profile publication rule applies to incomplete reports too: root
-and family reports are prepared in a fresh generation and published together.
+The platform-specific profile publication rules apply to incomplete reports too:
+Unix root/family aliases switch together, while Windows commits the generation
+by replacing its root summary after installing family files.
 
 SIGKILL or a host crash can prevent terminal publication. In that case the
 initial summary can remain visible while `progress.json`, per-mutant results
@@ -689,15 +700,21 @@ report is marked incomplete, with no final score.
 
 ### Minimum scores and early stopping
 
-`--min-score 80` requires the selected family's exact final score to be at least
-80%. Without early stopping the campaign completes normally and retains its score
-even when the gate fails. Add `--stop-when-unreachable` to stop admitting new
-mutants once the most optimistic final score is below the threshold. Started
-workers drain and final original controls, integrity checks and cleanup still run.
-An early-stopped campaign is incomplete and has no final score; its independent
-`qualityGate` result retains the threshold and upper-bound evidence. YAML profiles
+In unreleased native source builds, `--min-score 80` requires the selected
+family's exact final score to be at least 80%. Without early stopping the campaign
+completes normally and retains its score even when the gate fails. Add
+`--stop-when-unreachable` to stop admitting new mutants once the most optimistic
+final score is below the threshold. Started workers drain and final original
+controls, integrity checks and cleanup still run. Skipped work leaves the campaign
+incomplete and unscored. Its independent `qualityGate` retains the threshold and,
+when a bound triggered the stop, upper-bound proof. A profile can also skip later
+families after a completed family misses its threshold (`below_threshold`) or has
+no scored results (`not_evaluated/no_scored_mutants`); those cases have no bound
+proof. If draining finishes the entire campaign and no family is skipped, its
+status stays `completed` and its final score remains available. YAML profiles
 configure thresholds separately under `quality_gate.min_scores`. All gates are
-off by default. See [quality gates](quality-gates.md) for examples and edge cases.
+off by default. See [quality gates](quality-gates.md) for all stop cases and
+exit-code semantics.
 
 ## Browse a saved run as HTML
 
@@ -746,12 +763,15 @@ inputs; a system temporary directory inside those trees is rejected before
 creating the registry.
 The Rust campaign owner holds an operating-system lock throughout execution and
 cleanup. A new campaign removes a registered directory only after acquiring that
-lock. Killing the outer launcher closes its liveness channel and cancels the owner;
-it does not release the owner's lease. The owner keeps active working copies
-protected until Runner shutdown. A reboot permits recovery once all owners are
-gone, if the operating system has retained the temporary directory. Cleanup still
-runs after cancellation. Private diagnostic interfaces can transfer retained
-capabilities through a Unix socket; the public path keeps them in one owner.
+lock. On Linux and macOS, killing the outer launcher closes its liveness channel
+and cancels the owner; it does not release the owner's lease. The owner keeps
+active working copies protected until Runner shutdown. On Windows, abrupt CLI
+owner death terminates its Job Objects and can leave working copies for startup
+recovery, without a terminal report. A reboot permits recovery once all owners
+are gone, if the operating system has retained the temporary directory. Cleanup
+still runs after cooperative cancellation. Private diagnostic interfaces can
+transfer retained capabilities through a Unix socket; the public path keeps them
+in one owner.
 
 Recovery validates directory ownership, private permissions, protocol metadata
 and lock files. Deletion stays relative to opened directory descriptors and never
@@ -782,5 +802,5 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --all-targets --locked -- --test-threads=1
 # Requires the prepared tooling and Flutter example described above:
 cargo run -p failforge-tools -- regression --output /absolute/new-evidence-directory --dart-sdk /absolute/flutter/bin/cache/dart-sdk --flutter-sdk /absolute/flutter
-cargo run -p failforge-tools -- regression --suite recovery --output /absolute/new-crash-evidence-directory
+cargo run -p failforge-tools -- regression --suite recovery --output /absolute/new-crash-evidence-directory --dart-sdk /absolute/flutter/bin/cache/dart-sdk
 ```

@@ -350,6 +350,13 @@ fn validate(request: &Request) -> Result<Vec<Counts>, NamespaceError> {
         {
             return Err(invalid("campaign report attempts must be objects"));
         }
+        if family.status == FamilyStatus::NotStarted
+            && (!family.records.is_empty()
+                || family.baseline.is_some()
+                || !family.original_controls.is_empty())
+        {
+            return Err(invalid("not_started family contains execution evidence"));
+        }
         let completed = family.records.len() as u64;
         if family
             .expected_mutants

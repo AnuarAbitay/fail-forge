@@ -16,6 +16,11 @@ downloads and their verification results.
   separate profile/family verdicts and explicit unrun counts.
 - Reject contradictory `quality_stopped` reports during HTML export, including
   profiles with every family completed or without an enabled failing stop policy.
+- Reject `not_started` families containing mutation results, baselines or original
+  controls in both native summaries and HTML exports.
+- Include the quality-gate guide in native archives and verify local Markdown
+  links inside the packaged documentation. Clarify source-only gate availability,
+  stop-result variants and platform-specific process/report guarantees.
 
 ## 0.2.1 — Dart launcher
 

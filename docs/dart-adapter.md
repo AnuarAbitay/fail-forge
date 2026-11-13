@@ -319,8 +319,12 @@ resolution, candidate discovery and analyzer-overlay validation.
 The [mutation CLI](mutation-cli.md) resolves YAML or direct settings in Rust and
 owns the complete campaign: preflight, one immutable source snapshot, discovery,
 bounded parallel attempts in fresh copies, confirmation controls, cleanup and
-reports. A small Rust launcher watches the campaign owner; loss of the launcher's
-liveness pipe requests cancellation so the owner can drain workers and clean up.
+reports. On Linux and macOS, a small Rust launcher watches the campaign owner;
+loss of the launcher's liveness pipe requests cancellation so the owner can drain
+workers and clean up. On Windows, the CLI owns Runner Job Objects directly.
+Abrupt Windows owner death terminates its jobs and can prevent a terminal report;
+validated abandoned copies can be recovered on a later run. See
+[Windows process behavior](windows.md#process-and-report-behavior).
 No Python runtime or campaign bridge is involved. Prepared standalone Dart and
 Flutter packages are supported; persistent resume and Pub workspaces remain
 outside the supported scope. Each YAML file describes one profile. `session`
@@ -457,8 +461,8 @@ the score). `recovery` checks cleanup after owner interruption. Each scenario
 validates its expected report rather than treating process success as sufficient.
 
 Available suites are `smoke`, `profiles`, `classification`, `timeouts`,
-`cancellation`, `recovery`, `applicability`, `flutter` and `all`. `all` runs them
-sequentially; Flutter scenarios are included when `--flutter-sdk` is supplied.
+`cancellation`, `recovery`, `applicability`, `flutter`, `replay` and `all`. `all`
+runs them sequentially; Flutter scenarios are included when `--flutter-sdk` is supplied.
 There is no separate `initialization` suite: those cases belong to
 `classification`.
 

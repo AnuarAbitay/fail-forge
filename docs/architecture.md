@@ -349,13 +349,16 @@ shut down other runs admitted by the shared Runner.
 The adapter's syntax/type analysis and safe-patch contract are described in the
 [Dart adapter guide](dart-adapter.md). Both public mutation modes normalize
 configuration through `failforge-config` and run the same Rust lifecycle.
-The outer Rust launcher holds a private liveness pipe, forwards SIGINT/SIGTERM
-once and waits for a Rust owner. That owner runs preparation, discovery,
-execution and reporting directly, without spawning a controller for each stage.
-If the launcher dies, pipe EOF requests cancellation in the owner. The owner
-retains its lease while admitted workers drain and workspace cleanup completes.
-Force-killing the owner itself bypasses cleanup; startup recovery handles validated
-unlocked remnants on a later run. This is process ownership, not a system sandbox.
+On Linux and macOS, the outer Rust launcher holds a private liveness pipe,
+forwards SIGINT/SIGTERM once and waits for a Rust owner. If the launcher dies,
+pipe EOF requests cancellation in the owner. The owner retains its lease while
+admitted workers drain and workspace cleanup completes. On Windows, the CLI is
+the owner and directly owns Runner Job Objects, without a reexec launcher. Both
+owners run preparation, discovery, execution and reporting directly, without a
+controller for each stage. Force-killing an owner bypasses its cleanup and can
+prevent terminal report publication; Windows terminates the owned jobs.
+Startup recovery handles validated unlocked remnants on a later run. This is
+process ownership, not a system sandbox. See [Windows process behavior](windows.md#process-and-report-behavior).
 
 `failforge-workspace` validates the prepared standalone package, source and tool
 locations before output creation. The owner recovers recognized stale registry
@@ -417,10 +420,14 @@ every remaining candidate is killed. A strictly insufficient upper bound stops
 queue admission without requesting signal cancellation; active attempts still
 drain and original-after, input verification and cleanup still run. A
 `quality_stopped` campaign remains incomplete and unscored, while its independent
-gate verdict retains the threshold and stop proof. Completed campaigns below a
-threshold keep their final score. Profiles preserve independent family gates and
-can skip later families after an early quality failure. See
-[quality gates](quality-gates.md) for configuration and exit-code semantics.
+gate verdict retains the threshold and, for a bound-triggered stop, its proof.
+Profiles can also skip later families after a completed family's `below_threshold`
+or `not_evaluated/no_scored_mutants` verdict; these cases have no bound proof.
+If draining finishes all planned work and no family is skipped, the campaign
+remains `completed` with its final score. Completed campaigns below a threshold
+return a quality failure while keeping that score. Profiles preserve independent
+family gates. See [quality gates](quality-gates.md) for configuration and
+exit-code semantics.
 
 The Rust report collector binds the output descriptor before preparation metadata
 is written. It creates manifests, input bindings and initial summaries, appends
@@ -441,11 +448,14 @@ record identities, known outcomes, totals and completeness. It computes family
 scores from KILLED/SURVIVED only; incomplete profiles clear every family's final
 score. The collector attaches detailed attempt evidence unchanged to validated
 identities. A final journal event records the intended status before publication.
-The in-process publisher verifies output/profile bindings, stages synchronized
-files and publishes with one atomic rename. Profile child and root summaries
-switch together as one generation. No fallible publication operation follows the
-commit. Confirmed pre-commit failures can rebuild an incomplete report and table;
-failed private stages remain for inspection. If final progress is unwritable,
+The in-process publisher verifies output/profile bindings and stages synchronized
+files. On Linux and macOS, one atomic rename switches profile child and root
+summary aliases together as one generation. On Windows, regular family files are
+installed before an atomic replacement of the root summary commits the generation;
+readers combining files can observe mixed generations before that commit. No
+fallible publication operation follows the commit. Confirmed pre-commit failures
+can rebuild an incomplete report and table; failed private stages remain for
+inspection. If final progress is unwritable,
 only an incomplete report may omit that checkpoint. Atomic visibility does not
 promise power-loss durability of the last rename.
 
