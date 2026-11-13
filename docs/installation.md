@@ -6,17 +6,15 @@ native archive and its verification files from the
 or build the tagged source. Choose the listed operating system and architecture
 and review the release's exact-source checks. Developers can also produce a
 local archive with the [packaging command](packaging.md). Read the
-[support and verification scope](beta-limitations.md) before running a campaign.
+[support and verification scope](support-scope.md) before running a campaign.
 For PowerShell commands, follow the [Windows installation guide](windows.md).
-The broader Dart SDK range below was introduced in beta.3; older releases retain
-their original SDK constraints.
 
 ## Requirements
 
 | Requirement | Current support |
 | --- | --- |
 | Operating system | Linux, macOS, or Windows 10 version 1809 or newer on x64 with local NTFS. Platform support does not imply that every distribution or architecture has been tested. See the [Windows scope](windows.md#requirements). |
-| Windows archive runtime | FailForge links the Visual C++ runtime statically and needs no Redistributable. The historical published beta.4 archive requires the x64 Redistributable; see the [Windows requirements](windows.md#requirements). |
+| Windows archive runtime | FailForge links the Visual C++ runtime statically and needs no Redistributable; see the [Windows requirements](windows.md#requirements). |
 | Rust for source builds | Rust and Cargo 1.85.1 or newer, with the platform's C linker. Not required when using the Dart launcher or a prepared native archive. |
 | Dart adapter SDK | Stable Dart `>=3.13.0 <4.0.0`. A Flutter installation may supply this Dart SDK. |
 | Target package | One standalone Dart or Flutter package with a passing `test` or `flutter_test` suite and prepared dependencies. |
@@ -30,8 +28,8 @@ Local checks used Flutter 3.47.7 with Dart 3.13.5 and standalone Dart 3.13.0.
 The SDK compatibility baseline `e8b850d` passed all
 [10 CI jobs](https://github.com/AnuarAbitay/fail-forge/actions/runs/39950688183),
 including pinned Flutter, latest stable Flutter and minimum Dart 3.13.0. This
-run predates beta.3 release preparation. Review the release's verification for
-the tagged revision. The accepted SDK range does not establish compatibility
+is a historical compatibility baseline. Review the release's verification for
+the exact tagged revision. The accepted SDK range does not establish compatibility
 with every newer SDK or language feature; those need separate validation with
 the pinned analyzer.
 
@@ -228,7 +226,7 @@ The same Dart version restriction applies. Run Flutter's normal setup first if
 its bundled Dart SDK is not yet available. Do not supply both `--dart-sdk` and
 `--flutter-sdk` to a FailForge command.
 
-Starting with `0.1.0-beta.2`, FailForge can discover a prepared SDK automatically:
+FailForge can discover a prepared SDK automatically:
 
 ```sh
 export PATH="$DART_SDK/bin:$PATH"
@@ -239,8 +237,6 @@ SDK field takes priority over `PATH`. If no recognizable SDK is found, FailForge
 uses the installation's `.toolchain/flutter/bin/cache/dart-sdk` location.
 Discovery does not install an SDK, prepare Flutter or check version
 compatibility. Nonstandard SDK shims need an explicit root path.
-The published `0.1.0-beta.1` archive requires explicit SDK paths; these
-automatic defaults were added in `0.1.0-beta.2`.
 
 ## 3. Prepare the target package
 
@@ -282,8 +278,7 @@ failforge doctor --project "$FAILFORGE_PROJECT" \
 For Flutter, use `--flutter-sdk "$FLUTTER_SDK"` instead of `--dart-sdk`.
 The command reads local state and suggests manual fixes. It does not install
 dependencies or run tests. See [doctor diagnostics](doctor.md) for its scope,
-profile mode and exit codes. Historical note: the `0.1.0-beta.1` archive does not
-include this command.
+profile mode and exit codes.
 
 ## 4. Run a small campaign without YAML
 
@@ -337,10 +332,6 @@ failforge profile generate \
 The default output is `profiles/lib/src/calculator.yml`, preserving the
 source's directory structure inside the package. An explicit `--output PATH`
 selects another destination; replacing an existing file requires `--force`.
-Historical note: for the `0.1.0-beta.1` archive, add `--output
-profiles/lib/src/calculator.yml` and `--dart-sdk "$DART_SDK"` (or
-`--flutter-sdk "$FLUTTER_SDK"`). Explicit SDK options remain supported in
-the current release as well.
 
 Generation analyzes applicability and writes explicit operator switches. It
 does not run the target's tests. If no selected operator has a statically valid
@@ -482,4 +473,4 @@ files in the installation.
 | Profile flags conflict | Put campaign and SDK settings in YAML; keep `--installation` on the `mutate --config` command. |
 
 For unsupported project layouts and current release constraints, see
-[support and verification scope](beta-limitations.md).
+[support and verification scope](support-scope.md).

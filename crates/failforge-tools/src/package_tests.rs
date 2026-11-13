@@ -347,11 +347,35 @@ fn target_and_version_cannot_mislabel_an_archive() {
     ] {
         assert!(host(text, os, arch).is_err());
     }
-    assert_eq!(
-        version(b"failforge 0.1.0-beta.1\n", Some("0.1.0-beta.1")).unwrap(),
-        "0.1.0-beta.1"
-    );
-    assert!(version(b"failforge 0.1.0\n", Some("0.1.0-beta.1")).is_err());
+    for stable in ["0.0.0", "0.2.0", "2.10.3"] {
+        let stdout = format!("failforge {stable}\n");
+        assert_eq!(version(stdout.as_bytes(), Some(stable)).unwrap(), stable);
+    }
+    assert!(version(b"failforge 0.2.0\n", Some("0.2.1")).is_err());
+    for unsupported in [
+        "0.2.0-beta.0",
+        "0.2.0-beta.3",
+        "0.2.0-alpha.1",
+        "0.2.0-rc.1",
+        "0.2.0+build.1",
+        "0.2.0-beta.3+build.1",
+        "01.2.3",
+        "1.02.3",
+        "1.2.03",
+        "v0.2.0",
+        "1.2",
+        "1.2.3.4",
+        "1..3",
+        "1.2.-3",
+        "1.2.٣",
+    ] {
+        let stdout = format!("failforge {unsupported}\n");
+        assert!(version(stdout.as_bytes(), None).is_err(), "{unsupported}");
+        assert!(
+            version(stdout.as_bytes(), Some(unsupported)).is_err(),
+            "matching --expected-version cannot admit {unsupported}"
+        );
+    }
     for bad in [
         "failforge ../../escape",
         "other 0.1.0",
@@ -473,4 +497,23 @@ fn failed_packaging_preflight_leaves_existing_output_untouched() {
         "original"
     );
     assert_eq!(fs::read_dir(&root.0).unwrap().count(), 1);
+}
+
+#[test]
+fn unsupported_expected_version_fails_before_build_or_output() {
+    let root = Temporary::new("ff-package-version-preflight").unwrap();
+    let output = root.0.join("output");
+    let options = Options {
+        installation: Some(root.0.join("missing-installation")),
+        output: output.clone(),
+        expected_version: Some("0.2.0-beta.1".into()),
+    };
+    assert!(
+        run(options)
+            .unwrap_err()
+            .to_string()
+            .contains("--expected-version must be a stable X.Y.Z release")
+    );
+    assert!(!output.exists());
+    assert_eq!(fs::read_dir(&root.0).unwrap().count(), 0);
 }

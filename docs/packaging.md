@@ -69,7 +69,9 @@ test fixtures and examples are not runtime executables in the archive.
 
 The version comes from the newly built `failforge --version` output.
 `--expected-version` checks that value; it cannot rename a binary as a different
-version. The target triple comes from the build toolchain's native host.
+version. Native release tooling accepts only stable `X.Y.Z` versions with numeric
+components and no leading zeros, prerelease suffixes or build metadata.
+The target triple comes from the build toolchain's native host.
 The command checks the retained dependency notice checksums and their lockfile
 input bindings. A stale inventory must be refreshed before packaging; that
 consistency check does not replace a dependency license review.
@@ -96,8 +98,7 @@ manifest `package-manifest-<target>.json`. Its bytes match the packager's
 contains two entries: that target's archive and renamed external manifest.
 These names let users download and verify one platform's files independently.
 The local packager continues to emit `SHA256SUMS` and `package-manifest.json`.
-Each target has three release assets. Historical beta.3 assets remain
-Linux/macOS only.
+Each target has three release assets.
 
 The archive has one top-level directory:
 
@@ -234,13 +235,14 @@ not a successful regression run or a completed license review of the binary.
   smoke-test archives in its Linux/macOS Dart jobs. The SDK compatibility
   baseline `e8b850d` passed all
   [10 CI jobs](https://github.com/AnuarAbitay/fail-forge/actions/runs/39950688183),
-  including those archive checks. This run predates beta.3 release preparation;
-  inspect the release's verification for the tagged revision.
+  including those archive checks. This is a historical compatibility baseline;
+  inspect the release's verification for the exact tagged revision.
   `ci.yml` does not publish release assets. The separate manual
   `release.yml` workflow builds the exact tagged revision, verifies its native
   archive with a fresh-cache smoke check, and uploads only to a pre-created
-  draft release. Uploads require the repository's explicitly verified
-  `AnuarAbitay` personal credential; the workflow does not publish the draft.
+  stable draft release with `prerelease: false`. Uploads require the repository's
+  explicitly verified `AnuarAbitay` personal credential; the workflow does not
+  publish the draft.
   Each upload requires successful `ci.yml` (10 jobs) and `windows.yml` (4 jobs)
   runs for the exact source SHA. Windows packaging, checksum verification,
   relocation, fresh-cache smoke and credential-free uploader validation share
