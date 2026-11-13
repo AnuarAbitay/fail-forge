@@ -1,10 +1,11 @@
 # Installation and first run
 
-This guide covers FailForge `0.2.0`, including HTML report export. Use a matching
-native archive and its verification files from the
-[0.2.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0),
-or build the tagged source. Choose the listed operating system and architecture
-and review the release's exact-source checks. Developers can also produce a
+This guide targets native FailForge `0.3.0`, including quality gates and HTML
+report export. Use a matching native archive and its verification files from
+the [0.3.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.3.0)
+once published, or build its source. The versioned archive and tag examples below
+apply after publication; a release candidate is built from its reviewed checkout.
+Choose the listed operating system and architecture and review the release's exact-source checks. Developers can also produce a
 local archive with the [packaging command](packaging.md). Read the
 [support and verification scope](support-scope.md) before running a campaign.
 For PowerShell commands, follow the [Windows installation guide](windows.md).
@@ -40,10 +41,13 @@ permissions; working-copy isolation is not a security sandbox.
 
 ### Install the Pub launcher
 
-The Dart package `failforge` version `0.2.1` downloads native FailForge `0.2.0`,
-including HTML report export, and prepares its adapter automatically. Setup
+The published Dart package `failforge` version `0.2.1` downloads native FailForge
+`0.2.0`, including HTML report export, and prepares its adapter automatically. Setup
 checks pinned archive and manifest SHA-256 digests and keeps the runtime in a
-separate cache. Rust and Cargo are not required for this route.
+separate cache. Rust and Cargo are not required for this route. That pinned
+runtime predates the `0.3.0` quality-gate options. Use a native `0.3.0` archive
+or its source checkout for those options until an updated launcher with matching
+verified runtime pins is published.
 
 With a compatible Dart SDK on `PATH`, install on macOS or Linux:
 
@@ -90,7 +94,8 @@ from a checkout is covered in the [launcher README](https://github.com/AnuarAbit
 ### Install from an archive
 
 Choose one target and obtain its three matching files from the
-[release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0).
+[0.3.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.3.0)
+once published.
 
 | Platform | Target |
 | --- | --- |
@@ -98,7 +103,7 @@ Choose one target and obtain its three matching files from the
 | macOS arm64 | `aarch64-apple-darwin` |
 | Windows x64 | `x86_64-pc-windows-msvc` |
 
-- `failforge-0.2.0-<target>.tar.gz`
+- `failforge-0.3.0-<target>.tar.gz`
 - `package-manifest-<target>.json`
 - `SHA256SUMS-<target>`
 
@@ -120,9 +125,9 @@ Continue only when every checksum reports `OK`:
 
 ```sh
 mkdir /absolute/path/to/new-install-parent
-tar -xzf "failforge-0.2.0-$FAILFORGE_TARGET.tar.gz" \
+tar -xzf "failforge-0.3.0-$FAILFORGE_TARGET.tar.gz" \
   -C /absolute/path/to/new-install-parent
-export FAILFORGE_HOME="/absolute/path/to/new-install-parent/failforge-0.2.0-$FAILFORGE_TARGET"
+export FAILFORGE_HOME="/absolute/path/to/new-install-parent/failforge-0.3.0-$FAILFORGE_TARGET"
 export PATH="$FAILFORGE_HOME/bin:$PATH"
 failforge --version
 failforge --help
@@ -150,7 +155,7 @@ Obtain the versioned source from the
 [FailForge repository](https://github.com/AnuarAbitay/fail-forge):
 
 ```sh
-git clone --branch v0.2.0 --depth 1 \
+git clone --branch v0.3.0 --depth 1 \
   https://github.com/AnuarAbitay/fail-forge.git
 ```
 
@@ -386,12 +391,11 @@ Only those two outcomes enter the score denominator. Inspect `INVALID`,
 runtime, surviving mutants alone do not cause a nonzero exit code; execution and
 inconclusive-result errors can still return `125`.
 
-Unreleased native source builds additionally support `--min-score 80`,
+Native `0.3.0` additionally supports `--min-score 80`,
 optionally with `--stop-when-unreachable` to stop new work when reaching that
 threshold becomes impossible. A quality failure returns `1`; execution and
-inconclusive-result errors retain priority. These options require source that
-includes the feature; the `v0.2.0` archives, tagged source and Dart launcher's
-pinned runtime do not include them. See [quality gates](quality-gates.md).
+inconclusive-result errors retain priority. Native `0.2.0` and the runtime pinned
+by launcher `0.2.1` do not include these options. See [quality gates](quality-gates.md).
 
 Use Ctrl+C to request cancellation and allow cleanup to finish. An interrupted
 campaign has no final score and does not automatically resume on the next run.

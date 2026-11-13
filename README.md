@@ -1,7 +1,7 @@
 # FailForge
 
 [![Main CI](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.2.0-blue)](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue)](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.3.0)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **Find the bugs your Dart and Flutter tests would miss.**
@@ -11,20 +11,21 @@ When a test catches a change, the mutant is **killed**. When the tests still
 pass, the mutant **survives** and gives you a concrete place to review your
 assertions, edge cases or requirements.
 
-This documentation covers **FailForge `0.2.0`**, including offline HTML reports.
-Use a matching native archive and its verification files from the
-[0.2.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0),
-or build the tagged source. Choose the archive for your operating system and
-architecture. Read the [installation guide](docs/installation.md) and
+This documentation describes **native FailForge `0.3.0`**, including quality
+gates and offline HTML reports. Native archive links below apply after the
+[0.3.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.3.0) is
+published; until then, build the reviewed release-candidate checkout. Choose the
+archive for your operating system and architecture and review its exact-source
+verification. Read the [installation guide](docs/installation.md) and
 [support and verification scope](docs/support-scope.md) before your first run.
 
-Native `0.2.0` archives: [Linux x86_64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.2.0/failforge-0.2.0-x86_64-unknown-linux-gnu.tar.gz),
-[macOS arm64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.2.0/failforge-0.2.0-aarch64-apple-darwin.tar.gz)
-and [Windows x64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.2.0/failforge-0.2.0-x86_64-pc-windows-msvc.tar.gz).
+Native `0.3.0` archive locations: [Linux x86_64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.3.0/failforge-0.3.0-x86_64-unknown-linux-gnu.tar.gz),
+[macOS arm64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.3.0/failforge-0.3.0-aarch64-apple-darwin.tar.gz)
+and [Windows x64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.3.0/failforge-0.3.0-x86_64-pc-windows-msvc.tar.gz).
 Download the matching manifest and checksum file as described in the
 [installation guide](docs/installation.md#install-from-an-archive).
 
-[Download 0.2.0](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0) ·
+[Native 0.3.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.3.0) ·
 [Installation](docs/installation.md) ·
 [Operators](docs/mutation-operators.md) ·
 [Profiles](#yaml-profiles) ·
@@ -61,6 +62,8 @@ be equivalent to the original for your application's valid inputs.
 - Run from a saved profile or directly from command-line options.
 - Narrow mutations by file patterns, class names, method names and operator IDs.
 - Run with one to four workers and configure per-test and whole-command timeouts.
+- Require a minimum score per family and stop new work when its threshold is
+  mathematically unreachable, while already-started workers finish.
 - See live progress and a final terminal table, with JSON reports and captured
   test output for investigation.
 - Export a saved run as one offline HTML file with source context, outcome
@@ -91,7 +94,7 @@ transformation and family. Scores are reported separately for each family.
 
 ## Get started
 
-FailForge 0.2.0 targets **Linux x86_64, macOS arm64 and Windows x64**.
+Native FailForge 0.3.0 targets **Linux x86_64, macOS arm64 and Windows x64**.
 Windows requires Windows 10 version 1809 or newer and a local NTFS working
 directory; see the [Windows installation and source build guide](docs/windows.md).
 Mutation analysis accepts a stable **Dart SDK `>=3.13.0 <4.0.0`**,
@@ -116,15 +119,18 @@ dependencies. A native archive needs no Rust installation. A compatible SDK and
 prepared adapter dependencies are still required. See
 [support and verification scope](docs/support-scope.md).
 
-Install the Dart launcher **`0.2.1`** to download and prepare native FailForge
+The published Dart launcher **`0.2.1`** downloads and prepares native FailForge
 **`0.2.0`**, including HTML export. On macOS/Linux, use
 `dart pub global activate failforge 0.2.1`; on Windows, use
 `dart install failforge@0.2.1`. Then run `failforge setup`.
 See the [launcher quickstart](https://github.com/AnuarAbitay/fail-forge/blob/main/packages/failforge/README.md),
 [installation steps](docs/installation.md#install-the-pub-launcher) and
 [launcher verification guide](https://github.com/AnuarAbitay/fail-forge/blob/main/docs/pub-launcher.md).
-This route needs a compatible Dart SDK and no Rust build. The manual archive
-and source-build path setup below is unnecessary for the launcher; its setup
+Its pinned `0.2.0` runtime predates quality gates. Use the native `0.3.0` archive
+or source checkout for those options until an updated launcher with matching
+verified runtime pins is published. This launcher route needs a compatible Dart
+SDK and no Rust build. The manual archive and source-build path setup below is
+unnecessary for the launcher; its setup
 selects and prepares the installation automatically.
 
 For a manual native installation, the examples below run from the **target
@@ -335,7 +341,7 @@ failure can be `KILLED`; an externally timed-out command remains `TIMEOUT`.
 See [result interpretation](docs/mutation-cli.md#results-and-correctness)
 for details.
 
-In `0.2.0`, individual `INFRA_ERROR` results no longer
+Since `0.2.0`, individual `INFRA_ERROR` results no longer
 remove the score from an otherwise completed campaign. When every mutant has
 been processed and the original controls and final checks pass, these results
 are excluded from `KILLED + SURVIVED`; the report shows the excluded counts and
@@ -346,7 +352,7 @@ The terminal prints the report location. Use `summary.json` for final results,
 `progress.json` for live status and the retained mutant results and test captures
 to investigate failures or survivors.
 
-With the `0.2.0` CLI, export a saved run as a single offline HTML report:
+With the native `0.3.0` CLI, export a saved run as a single offline HTML report:
 
 ```sh
 failforge report .failforge/runs/RUN_ID --html .failforge/report.html
@@ -365,17 +371,17 @@ shows selected text for manual copying. No local integration is needed.
 Reports and captures can contain sensitive project data; review them before
 sharing.
 
-**Surviving mutants alone do not cause a nonzero exit code in the published
-native `0.2.0` runtime.** Execution and inconclusive-result errors can still
-return `125`, even when every mutant was processed.
+**Without a configured quality gate, surviving mutants alone do not cause a
+nonzero exit code.** Execution and inconclusive-result errors can still return
+`125`, even when every mutant was processed.
 
-Unreleased native source builds add optional quality gates: `--min-score 80`
+Native `0.3.0` adds optional quality gates: `--min-score 80`
 requires at least 80% for the selected family, and `--stop-when-unreachable`
 stops new work when reaching that threshold becomes impossible. A quality failure
 returns `1`; YAML profiles support separate thresholds per family. These options
-are absent from the published native `0.2.0` archives, its tagged source and the
-Dart launcher's pinned runtime. See [quality gates](docs/quality-gates.md) for
-configuration, early stopping, error precedence and report semantics.
+are absent from native `0.2.0` and the runtime pinned by launcher `0.2.1`.
+See [quality gates](docs/quality-gates.md) for configuration, early stopping, error
+precedence and report semantics.
 
 ## Commands
 

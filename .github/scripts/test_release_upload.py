@@ -233,7 +233,23 @@ class ReleaseTests(unittest.TestCase):
 
     def test_actual_workflow_defaults_to_stable_release(self):
         workflow = SOURCE.parent.parent / 'workflows' / 'release.yml'
-        self.assertRegex(workflow.read_text(), r"(?m)^        default: '0\.2\.0'$")
+        cargo = SOURCE.parent.parent.parent / 'Cargo.toml'
+        section = re.search(
+            r'(?ms)^\[workspace\.package\][ \t]*\n(.*?)(?=^\[|\Z)',
+            cargo.read_text())
+        self.assertIsNotNone(section, 'Missing workspace package metadata')
+        version = re.search(r'(?m)^version[ \t]*=[ \t]*"([^"\r\n]+)"[ \t]*$',
+            section.group(1))
+        self.assertIsNotNone(version, 'Missing workspace package version')
+        self.assertIsNotNone(module.VERSION.fullmatch(version.group(1)))
+        release_input = re.search(
+            r'(?ms)^      version:\n(.*?)(?=^      [A-Za-z_]+:|\Z)',
+            workflow.read_text())
+        self.assertIsNotNone(release_input, 'Missing release version input')
+        default = re.search(r"(?m)^        default: '([^'\r\n]+)'$",
+            release_input.group(1))
+        self.assertIsNotNone(default, 'Missing release version default')
+        self.assertEqual(default.group(1), version.group(1))
 
     def test_other_version_syntax_is_rejected_locally_and_by_actual_workflow(self):
         workflow = SOURCE.parent.parent / 'workflows' / 'release.yml'

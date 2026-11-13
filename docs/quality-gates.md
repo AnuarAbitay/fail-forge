@@ -1,6 +1,9 @@
 # Mutation quality gates
 
-These options are available in unreleased native source builds.
+These options are part of native FailForge `0.3.0`. Native `0.2.0` and the
+runtime pinned by the published Dart launcher `0.2.1` predate them. Use the
+matching native `0.3.0` archive or source checkout; see the
+[installation guide](installation.md) for release availability and launcher scope.
 
 A quality gate requires a minimum percentage of detected mutations in a selected
 family. Gates are opt-in. Without a threshold, survivors alone continue to allow

@@ -56,13 +56,15 @@ are reported as failures.
 
 Configuration loading needs no SDK. Profile generation is also Rust, and uses the
 Dart adapter for applicability analysis unless `--template` is selected. The
-product, installer, benchmarks and regression harness need no Python interpreter.
+native product, installer, benchmarks and built-in regression command need no
+Python interpreter. Optional source-only CI and SDK validation scripts under
+`.github/scripts` use Python.
 Standalone private diagnostic commands retain their bounded request/event
 protocols; the public campaign calls the same implementations directly.
 
 ## Prepare the installation and target
 
-For FailForge `0.2.0`, follow the [installation guide](installation.md)
+For native FailForge `0.3.0`, follow the [installation guide](installation.md)
 to install a matching native archive or build from source. For a source build,
 build the native executables and prepare the Dart adapter with a compatible SDK:
 
@@ -680,7 +682,7 @@ A/B/A confirmation; a nonzero exit alone cannot kill a mutant. Classical results
 use `mutationScore`; failure-mode results use `failureModeScore`. They are never
 combined. Failed or cancelled campaigns have no final score.
 
-In `0.2.0`, an individual mutant's `INFRA_ERROR` does not by
+Since `0.2.0`, an individual mutant's `INFRA_ERROR` does not by
 itself make the campaign incomplete. If every mutant was processed, the
 original controls passed and the final integrity and cleanup checks succeeded,
 the campaign can be `completed` with a score over `KILLED + SURVIVED` and explicit
@@ -700,7 +702,7 @@ report is marked incomplete, with no final score.
 
 ### Minimum scores and early stopping
 
-In unreleased native source builds, `--min-score 80` requires the selected
+In native `0.3.0`, `--min-score 80` requires the selected
 family's exact final score to be at least 80%. Without early stopping the campaign
 completes normally and retains its score even when the gate fails. Add
 `--stop-when-unreachable` to stop admitting new mutants once the most optimistic
@@ -718,7 +720,7 @@ exit-code semantics.
 
 ## Browse a saved run as HTML
 
-The `0.2.0` command exports a direct campaign or multi-family profile
+The native `0.3.0` command exports a direct campaign or multi-family profile
 without running tests, starting an SDK or changing retained evidence:
 
 ```sh

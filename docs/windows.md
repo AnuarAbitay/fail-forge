@@ -1,9 +1,10 @@
 # Windows installation and source build
 
-This guide covers FailForge `0.2.0` on Windows x64. Use the matching native
+This guide covers FailForge `0.3.0` on Windows x64. Use the matching native
 archives and verification files from the
-[0.2.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0),
-or build the tagged source.
+[0.3.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.3.0)
+once published, or build its source. The versioned examples below apply after
+publication; a release candidate is built from its reviewed checkout.
 
 ## Requirements
 
@@ -26,9 +27,9 @@ with spaces or Unicode in its path.
 
 ## Install from an archive
 
-Download these three matching assets from the `0.2.0` release:
+Download these three matching assets from the `0.3.0` release:
 
-- `failforge-0.2.0-x86_64-pc-windows-msvc.tar.gz`
+- `failforge-0.3.0-x86_64-pc-windows-msvc.tar.gz`
 - `package-manifest-x86_64-pc-windows-msvc.json`
 - `SHA256SUMS-x86_64-pc-windows-msvc`
 
@@ -40,7 +41,7 @@ source; checksums are not digital signatures.
 $ErrorActionPreference = 'Stop'
 Set-Location 'C:\Downloads\FailForge'
 $target = 'x86_64-pc-windows-msvc'
-$archiveRoot = "failforge-0.2.0-$target"
+$archiveRoot = "failforge-0.3.0-$target"
 $expected = @("$archiveRoot.tar.gz", "package-manifest-$target.json")
 $checked = @{}
 foreach ($line in Get-Content "SHA256SUMS-$target") {
@@ -83,7 +84,7 @@ In a Developer PowerShell where the MSVC linker is available:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-git clone --branch v0.2.0 --depth 1 https://github.com/AnuarAbitay/fail-forge.git
+git clone --branch v0.3.0 --depth 1 https://github.com/AnuarAbitay/fail-forge.git
 if ($LASTEXITCODE -ne 0) { throw 'Source download failed' }
 Set-Location fail-forge
 $env:FAILFORGE_HOME = (Get-Location).Path
@@ -162,7 +163,7 @@ publication, readers of several files can observe different generations;
 wait for final `summary.json` and check the run identifiers before combining
 files. `progress.json` remains the live checkpoint.
 
-The `0.2.0` CLI can export a retained direct or profile run with
+The `0.3.0` CLI can export a retained direct or profile run with
 `failforge report RUN --html FILE`. The HTML file opens locally without an SDK
 or server. See the [HTML report guide](html-report.md) for source context,
 outcome filters, copying locations and retained evidence limits.

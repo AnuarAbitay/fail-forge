@@ -4,13 +4,20 @@ User-visible changes are recorded by version. Check
 [GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for published
 downloads and their verification results.
 
-## Unreleased — native CLI
+## Unreleased
 
+## 0.3.0 — native CLI
+
+- Refactor native execution, reporting and platform modules while retaining
+  the existing process ownership and cleanup contracts.
 - Treat Linux procfs's transient `pgrp=-1` exit-race records as unknown group
   membership, allowing bounded cleanup checks to recover without retaining a
   spurious malformed-record error. Incomplete observations cannot prove cleanup.
 - Make the executable Runner documentation example portable to Windows by
   invoking `rustc --version` directly through `PATH`.
+- Verify real SDK gate barriers with nonce-bound observations and the intended
+  assertion failure. Windows checks read live journals with compatible shared
+  handles and include native sharing/lock regressions.
 - Add opt-in minimum mutation scores with `--min-score` and independent YAML
   thresholds per family. A completed campaign below its threshold retains its
   score and returns `1`.

@@ -6,7 +6,7 @@ be opened locally in a browser. It was added in **`0.2.0`**; the published
 
 ## Export a run
 
-With the `0.2.0` CLI, export a saved run:
+With the native `0.3.0` CLI, export a saved run:
 
 ```sh
 failforge report .failforge/runs/RUN_ID --html .failforge/report.html
@@ -75,14 +75,14 @@ The report presents the saved run as a working area:
 
 - **Family tabs** keep `classic`, `failure_mode` and `language_specific` results
   separate. There is no combined mutation score.
-- **Quality gates**, recorded by unreleased native source builds, show each
+- **Quality gates**, recorded by native `0.3.0`, show each
   family's threshold and verdict. A bound-triggered stop shows its maximum
   possible score and proof. A profile stopped after a completed family instead
   shows `below_threshold`, or `not_evaluated/no_scored_mutants`, without a bound.
   Skipped-work counts remain visible; incomplete campaigns have no final scores.
   If all admitted work finishes and no family is skipped, the completed campaign
-  keeps its final score. Export these new gate reports with the matching source
-  build; native `0.2.0` predates the gate fields and `quality_stopped` status.
+  keeps its final score. Export these gate reports with native `0.3.0`; native
+  `0.2.0` predates the gate fields and `quality_stopped` status.
   See [quality gates](quality-gates.md).
 - **Summary counts** describe the selected family's entire saved scope. Choosing
   a file or outcome does not recalculate that family's score.
@@ -176,6 +176,9 @@ Exporting a report does not establish that the saved files are authentic or
 that a mutation testing quality threshold has passed.
 
 ## Platform verification
+
+The historical checks below are not exact-source release verification for
+`0.3.0`. Consult that release's own CI, package checks and recorded source SHA.
 
 On 2026-11-11, the source before the `0.2.0` version metadata update was built
 and tested on Windows 11
