@@ -1,7 +1,7 @@
 # Dependency license review
 
-This review records the dependencies locked on **2026-10-20**, during beta
-preparation. It supports preparing a distribution; it does not certify an
+This review records the dependencies locked on **2026-10-20**.
+It supports preparing a distribution; it does not certify an
 unbuilt release archive or change the licenses of dependency code.
 
 See [Third-party notices](../THIRD_PARTY_NOTICES.md) for the package list and

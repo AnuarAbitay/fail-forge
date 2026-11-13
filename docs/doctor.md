@@ -7,10 +7,9 @@ starting a campaign:
 failforge doctor
 ```
 
-`doctor` was added in `0.1.0-beta.2` and remains available in `0.1.0`.
-The published `0.1.0-beta.1` archive predates this command.
+This guide covers FailForge `0.2.0`.
 
-It reads local files and prepared dependency metadata. It does not run SDK
+The command reads local files and prepared dependency metadata. It does not run SDK
 programs, the adapter or your tests, download dependencies, create working
 copies or change project files. A successful result means the static checks
 passed; it does not establish a passing baseline or mutation score.

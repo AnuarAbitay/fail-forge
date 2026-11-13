@@ -109,16 +109,38 @@ fn fallback_to_build_checkout_or_wrong_sdk_is_rejected() {
 
 #[test]
 fn cli_version_must_match_the_archive_manifest() {
-    let manifest = json!({"version":"0.1.0-beta.1"});
-    assert!(version("failforge 0.1.0-beta.1\n", &manifest).is_ok());
-    for text in [
-        "failforge 0.1.0",
-        "other 0.1.0-beta.1",
-        "failforge 0.1.0-beta.1\nextra",
-    ] {
+    for stable in ["0.0.0", "0.2.0", "2.10.3"] {
+        let manifest = json!({"version":stable});
+        assert!(version(&format!("failforge {stable}\n"), &manifest).is_ok());
+    }
+    let manifest = json!({"version":"0.2.0"});
+    for text in ["failforge 0.1.0", "other 0.2.0", "failforge 0.2.0\nextra"] {
         assert!(version(text, &manifest).is_err(), "{text}");
     }
-    assert!(version("failforge 0.1.0-beta.1", &json!({})).is_err());
+    assert!(version("failforge 0.2.0", &json!({})).is_err());
+    for unsupported in [
+        "0.2.0-beta.0",
+        "0.2.0-beta.3",
+        "0.2.0-alpha.1",
+        "0.2.0-rc.1",
+        "0.2.0+build.1",
+        "0.2.0-beta.3+build.1",
+        "01.2.3",
+        "1.02.3",
+        "1.2.03",
+        "v0.2.0",
+        "1.2",
+        "1.2.3.4",
+        "1..3",
+        "1.2.-3",
+        "1.2.٣",
+    ] {
+        let manifest = json!({"version":unsupported});
+        assert!(
+            version(&format!("failforge {unsupported}\n"), &manifest).is_err(),
+            "matching CLI and manifest versions cannot admit {unsupported}"
+        );
+    }
 }
 
 fn package_fixture() -> (common::Temporary, Value) {
@@ -143,8 +165,39 @@ fn package_fixture() -> (common::Temporary, Value) {
     }
     (
         temporary,
-        json!({"schemaVersion":1,"version":"0.1.0-beta.1","files":files}),
+        json!({"schemaVersion":1,"version":"0.2.0","files":files}),
     )
+}
+
+#[test]
+fn manifest_admits_only_stable_release_versions() {
+    let (temporary, manifest) = package_fixture();
+    for stable in ["0.0.0", "0.2.0", "2.10.3"] {
+        let mut changed = manifest.clone();
+        changed["version"] = json!(stable);
+        assert_eq!(payload(&temporary.0, &changed).unwrap(), 4);
+    }
+    for unsupported in [
+        json!("0.2.0-beta.1"),
+        json!("0.2.0-rc.1"),
+        json!("0.2.0+build.1"),
+        json!("01.2.3"),
+        json!("v0.2.0"),
+        json!("1.2"),
+        json!(""),
+        json!(null),
+        json!(1),
+    ] {
+        let mut changed = manifest.clone();
+        changed["version"] = unsupported.clone();
+        assert!(
+            payload(&temporary.0, &changed)
+                .unwrap_err()
+                .to_string()
+                .contains("package version must be a stable X.Y.Z release"),
+            "{unsupported}"
+        );
+    }
 }
 
 #[test]

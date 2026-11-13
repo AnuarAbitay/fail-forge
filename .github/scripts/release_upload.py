@@ -21,7 +21,7 @@ REPOSITORY = 'AnuarAbitay/fail-forge'
 API_BASE = 'https://api.github.com'
 TARGETS = {'x86_64-unknown-linux-gnu', 'aarch64-apple-darwin', 'x86_64-pc-windows-msvc'}
 NUMBER = r'(?:0|[1-9][0-9]*)'
-VERSION = re.compile(rf'{NUMBER}\.{NUMBER}\.{NUMBER}(?P<beta>-beta\.{NUMBER})?')
+VERSION = re.compile(rf'{NUMBER}\.{NUMBER}\.{NUMBER}')
 SHA = re.compile(r'[0-9a-f]{40}')
 CI_JOBS = {
     'Stable / ubuntu-latest', 'Stable / macos-latest',
@@ -143,7 +143,7 @@ class Asset:
 
 
 def local_assets(options):
-    require(VERSION.fullmatch(options.version), 'Expected an exact SemVer stable or beta version.')
+    require(VERSION.fullmatch(options.version), 'Expected an exact stable SemVer version (X.Y.Z).')
     require(SHA.fullmatch(options.source_sha), 'Expected a full immutable commit SHA.')
     require(options.target in TARGETS, 'Unsupported native release target.')
     package = options.package_dir.resolve(strict=True)
@@ -338,16 +338,16 @@ class GitHub:
 
     def validate_draft(self, release, tag, source_sha):
         version = VERSION.fullmatch(tag[1:]) if isinstance(tag, str) and tag.startswith('v') else None
-        require(version is not None, 'Expected an exact stable or beta version tag.')
+        require(version is not None, 'Expected an exact stable version tag (vX.Y.Z).')
         require(
             isinstance(release, dict)
             and release.get('draft') is True
-            and release.get('prerelease') is (version.group('beta') is not None)
+            and release.get('prerelease') is False
             and release.get('tag_name') == tag
             and release.get('target_commitish') == source_sha
             and isinstance(release.get('id'), int)
             and release['id'] > 0,
-            'Expected the pre-created draft with the matching release type and exact source SHA.',
+            'Expected the pre-created stable draft with the exact source SHA.',
         )
         endpoint = f"https://uploads.github.com/repos/{REPOSITORY}/releases/{release['id']}/assets"
         require(release.get('upload_url') == endpoint + '{?name,label}', 'Unexpected draft upload URL.')
@@ -374,6 +374,7 @@ class GitHub:
         return release, endpoint
 
     def upload(self, options, assets):
+        require(VERSION.fullmatch(options.version), 'Expected an exact stable SemVer version (X.Y.Z).')
         self.verify_account()
         self.verify_ci(options.source_sha)
         tag = f'v{options.version}'

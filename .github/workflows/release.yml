@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Exact stable or beta version already present in the source and draft release
+        description: Exact stable X.Y.Z version already present in the source and draft release
         required: true
-        default: '0.1.0'
+        default: '0.2.0'
         type: string
       source_ref:
         description: Full immutable commit SHA referenced by the version tag
@@ -49,8 +49,8 @@ jobs:
           import re
           version = os.environ['RELEASE_VERSION']
           number = r'(?:0|[1-9][0-9]*)'
-          if not re.fullmatch(rf'{number}\.{number}\.{number}(?:-beta\.{number})?', version):
-              raise SystemExit('Expected an exact SemVer stable or beta version.')
+          if not re.fullmatch(rf'{number}\.{number}\.{number}', version):
+              raise SystemExit('Expected an exact stable SemVer version (X.Y.Z).')
           if not re.fullmatch(r'[0-9a-f]{40}', os.environ['RELEASE_SOURCE_SHA']):
               raise SystemExit('Expected a full immutable commit SHA.')
           if os.environ['GITHUB_REPOSITORY'] != 'AnuarAbitay/fail-forge':

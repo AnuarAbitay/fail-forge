@@ -16,7 +16,7 @@ Use a matching native archive and its verification files from the
 [0.2.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0),
 or build the tagged source. Choose the archive for your operating system and
 architecture. Read the [installation guide](docs/installation.md) and
-[support and verification scope](docs/beta-limitations.md) before your first run.
+[support and verification scope](docs/support-scope.md) before your first run.
 
 Native `0.2.0` archives: [Linux x86_64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.2.0/failforge-0.2.0-x86_64-unknown-linux-gnu.tar.gz),
 [macOS arm64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.2.0/failforge-0.2.0-aarch64-apple-darwin.tar.gz)
@@ -98,8 +98,7 @@ Mutation analysis accepts a stable **Dart SDK `>=3.13.0 <4.0.0`**,
 or Flutter with a Dart SDK in that range. Building from source requires
 **Rust 1.85.1 or newer** and a C linker.
 
-The broader SDK range was introduced in beta.3; earlier releases retain their
-original constraints. Local verification used Flutter **3.47.7** with Dart
+Local verification used Flutter **3.47.7** with Dart
 **3.13.5**, plus standalone Dart **3.13.0**. The adapter pins `analyzer` to
 **14.5.0**; newer SDKs and language features need separate validation. `doctor`
 warns for Dart minor versions above 3.13 without failing the check solely for
@@ -107,15 +106,15 @@ that warning.
 
 The SDK compatibility baseline at `e8b850d` passed all **10 CI jobs**:
 [verification run](https://github.com/AnuarAbitay/fail-forge/actions/runs/39950688183).
-This records the historical SDK compatibility baseline. Beta.4 added native
-Windows checks. See each release's verification for its exact source SHA and
+This records the historical SDK compatibility baseline. See each release's
+verification for its exact source SHA and
 required CI results; historical runs do not establish another revision's results.
 
 Follow the [installation guide](docs/installation.md) to extract a prepared
 archive or build FailForge, prepare its adapter and prepare your target package's
 dependencies. A native archive needs no Rust installation. A compatible SDK and
 prepared adapter dependencies are still required. See
-[support and verification scope](docs/beta-limitations.md).
+[support and verification scope](docs/support-scope.md).
 
 Install the Dart launcher **`0.2.1`** to download and prepare native FailForge
 **`0.2.0`**, including HTML export. On macOS/Linux, use
@@ -127,11 +126,6 @@ See the [launcher quickstart](https://github.com/AnuarAbitay/fail-forge/blob/mai
 This route needs a compatible Dart SDK and no Rust build. The manual archive
 and source-build path setup below is unnecessary for the launcher; its setup
 selects and prepares the installation automatically.
-
-Historical note: `doctor` and automatic SDK/profile-path defaults were added
-in `0.1.0-beta.2`. The `0.1.0-beta.1` archive has no `doctor`;
-supply `--dart-sdk` or `--flutter-sdk` and `profile generate --output` explicitly
-when using that archive.
 
 For a manual native installation, the examples below run from the **target
 package root**, with these paths set. With the Pub launcher, use `failforge`
@@ -399,7 +393,7 @@ Use `failforge --help` or `<command> --help` for available options.
 - [Complete mutation operator catalogue](docs/mutation-operators.md)
 - [Mutation commands and profile reference](docs/mutation-cli.md)
 - [Browse a saved run as HTML](docs/html-report.md)
-- [Support and verification scope](docs/beta-limitations.md)
+- [Support and verification scope](docs/support-scope.md)
 - [Changelog](CHANGELOG.md)
 - [Security policy and vulnerability reporting](SECURITY.md)
 

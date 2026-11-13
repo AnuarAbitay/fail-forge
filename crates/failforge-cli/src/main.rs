@@ -2,63 +2,25 @@
 #[cfg(not(any(unix, windows)))]
 compile_error!("FailForge requires a supported native process backend");
 
-mod adapter_discovery;
 mod args;
 mod attempt;
-mod attempt_artifacts;
-mod attempt_execution;
-mod campaign_controller;
-mod campaign_display;
-mod campaign_execution;
-mod campaign_progress;
-#[cfg_attr(windows, path = "campaign_publish_windows.rs")]
-mod campaign_publish;
-#[cfg_attr(windows, path = "campaign_publish_fs_windows.rs")]
-mod campaign_publish_fs;
-mod campaign_report;
-#[cfg(unix)]
-mod campaign_report_command;
-mod campaign_report_terminal;
-mod campaign_reports;
-mod campaign_session;
-mod campaign_workspace;
-mod dart_namespace;
-mod diagnostics;
-#[cfg_attr(windows, path = "display_windows.rs")]
-mod display;
+mod campaign;
+mod console;
 mod doctor;
-mod family_execution;
-mod family_queue;
-mod family_stream;
+mod evidence;
+mod family;
 mod installation;
-mod keep_awake;
-mod mutant_confirmation;
-mod mutant_execution;
+mod mutant;
 mod mutate;
-mod namespace_planner;
+mod namespace;
 mod native;
-#[cfg(unix)]
-mod private_request;
-mod private_response;
 mod profile;
-#[cfg(unix)]
-mod readiness;
+mod replay;
 mod report_html;
-mod report_html_data;
-mod retained_replay;
-mod signals;
-mod source_context;
-mod test_context;
-mod test_evidence;
 #[cfg(test)]
 mod test_support;
-#[cfg(windows)]
-mod windows_output;
-#[cfg(unix)]
-mod workspace_handoff;
-mod workspace_inputs;
-#[cfg(unix)]
-mod workspace_lifecycle;
+mod transport;
+mod workspace;
 
 use std::io::Write;
 #[cfg(unix)]
@@ -66,14 +28,14 @@ use std::os::unix::process::ExitStatusExt;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use crate::signals::{SignalKind, signal};
+use crate::console::signals::{SignalKind, signal};
 use clap::Parser;
 use failforge_runner::{
     CancelReason, CaptureIssue, CommandResult, CompletionCause, Runner, WorkspaceLease,
 };
 
 use args::{Cli, Commands, ProfileCommands};
-use diagnostics::Diagnostics;
+use console::diagnostics::Diagnostics;
 
 #[cfg(unix)]
 type ProcessCode = u8;
@@ -110,39 +72,39 @@ fn main() -> ExitCode {
         Commands::Doctor(arguments) => return doctor::execute(*arguments, &invocation_cwd),
         Commands::Report(arguments) => return report_html::execute(arguments, &invocation_cwd),
         Commands::Mutate(arguments) => {
-            let _awake = keep_awake::KeepAwake::request();
+            let _awake = console::keep_awake::KeepAwake::request();
             return mutate::execute(*arguments, &invocation_cwd);
         }
         Commands::Replay(arguments) => {
-            let _awake = keep_awake::KeepAwake::request();
+            let _awake = console::keep_awake::KeepAwake::request();
             let (arguments, replay) = arguments.into_campaign(&invocation_cwd);
             return mutate::execute_replay(arguments, &invocation_cwd, replay);
         }
         #[cfg(unix)]
-        Commands::WorkspaceInputs => return workspace_inputs::execute(),
+        Commands::WorkspaceInputs => return workspace::inputs::execute(),
         #[cfg(unix)]
-        Commands::WorkspaceLifecycle => return workspace_lifecycle::execute(),
+        Commands::WorkspaceLifecycle => return workspace::lifecycle::execute(),
         #[cfg(unix)]
-        Commands::DartNamespace => return dart_namespace::execute(),
+        Commands::DartNamespace => return namespace::execute(),
         #[cfg(unix)]
         Commands::TestAttempt => return attempt::execute(),
         #[cfg(unix)]
-        Commands::AdapterDiscover => return adapter_discovery::execute(),
+        Commands::AdapterDiscover => return campaign::discovery::execute(),
         #[cfg(unix)]
-        Commands::MutantExecute => return mutant_execution::execute(),
+        Commands::MutantExecute => return mutant::execution::execute(),
         #[cfg(unix)]
-        Commands::FamilyExecute => return family_execution::execute(),
+        Commands::FamilyExecute => return family::execution::execute(),
         #[cfg(unix)]
-        Commands::CampaignExecute => return campaign_execution::execute(),
+        Commands::CampaignExecute => return campaign::execution::execute(),
         #[cfg(unix)]
-        Commands::CampaignRun => return campaign_session::execute(),
+        Commands::CampaignRun => return campaign::session::execute(),
         #[cfg(unix)]
-        Commands::CampaignReport => return campaign_report_command::execute(),
+        Commands::CampaignReport => return campaign::report_command::execute(),
         #[cfg(unix)]
-        Commands::CampaignPublish => return campaign_publish::execute(),
+        Commands::CampaignPublish => return campaign::publish::execute(),
         Commands::Profile(arguments) => match arguments.command {
             ProfileCommands::Generate(arguments) => {
-                let _awake = keep_awake::KeepAwake::request();
+                let _awake = console::keep_awake::KeepAwake::request();
                 return profile::execute(*arguments, &invocation_cwd);
             }
         },
@@ -160,7 +122,7 @@ fn main() -> ExitCode {
         }
     };
     #[cfg(unix)]
-    let readiness = match readiness::Readiness::from_env() {
+    let readiness = match transport::readiness::Readiness::from_env() {
         Ok(readiness) => readiness,
         Err(_) => {
             let _ = writeln!(
@@ -171,7 +133,7 @@ fn main() -> ExitCode {
         }
     };
     #[cfg(unix)]
-    let evidence = match test_evidence::EvidenceHandoff::from_env(arguments.test_reporter) {
+    let evidence = match evidence::EvidenceHandoff::from_env(arguments.test_reporter) {
         Ok(evidence) => evidence,
         Err(_) => {
             let _ = writeln!(
@@ -274,8 +236,8 @@ fn parse_error_diagnostic(error: &clap::Error) -> Option<String> {
 async fn run(
     spec: failforge_runner::CommandSpec,
     diagnostics: &Diagnostics,
-    #[cfg(unix)] readiness: Option<readiness::Readiness>,
-    #[cfg(unix)] evidence: Option<test_evidence::EvidenceHandoff>,
+    #[cfg(unix)] readiness: Option<transport::readiness::Readiness>,
+    #[cfg(unix)] evidence: Option<evidence::EvidenceHandoff>,
 ) -> ProcessCode {
     #[cfg(unix)]
     let cwd = spec.cwd.clone();
@@ -313,7 +275,7 @@ async fn run(
     };
     let display_failed = handle
         .take_stream()
-        .is_some_and(|receiver| display::spawn(receiver).is_err());
+        .is_some_and(|receiver| console::display::spawn(receiver).is_err());
     if display_failed {
         handle.force_cancel(CancelReason::User);
         diagnostics.report("failforge: cannot start stream writer\n", DIAGNOSTIC_BUDGET);

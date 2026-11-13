@@ -86,9 +86,14 @@ fn fresh_output(path: &Path, installation: &Path, sdk: &Path) -> Result<PathBuf>
 
 fn payload(root: &Path, manifest: &Value) -> Result<usize> {
     ensure(
-        manifest["schemaVersion"] == 1
-            && manifest["version"].as_str().is_some_and(|v| !v.is_empty()),
+        manifest["schemaVersion"] == 1,
         "unsupported package manifest",
+    )?;
+    ensure(
+        manifest["version"]
+            .as_str()
+            .is_some_and(crate::package::is_stable_version),
+        "package version must be a stable X.Y.Z release",
     )?;
     let files = manifest["files"]
         .as_array()
@@ -141,6 +146,10 @@ fn version(stdout: &str, manifest: &Value) -> Result<()> {
     let expected = manifest["version"]
         .as_str()
         .ok_or("missing package version")?;
+    ensure(
+        crate::package::is_stable_version(expected),
+        "package version must be a stable X.Y.Z release",
+    )?;
     ensure(
         stdout.trim() == format!("failforge {expected}"),
         "installed CLI version differs from package manifest",

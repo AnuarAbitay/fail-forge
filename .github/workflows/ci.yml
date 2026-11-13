@@ -184,28 +184,28 @@ jobs:
         shell: bash
         run: |
           target/release/failforge-tools regression --binary-dir target/release --output "$RUNNER_TEMP/native-regression" --dart-sdk "$RUNNER_TEMP/flutter/bin/cache/dart-sdk" --flutter-sdk "$RUNNER_TEMP/flutter"
-      - name: Package native beta with the matching Rust runtime notices
+      - name: Package native release with the matching Rust runtime notices
         shell: bash
         run: |
           set -euo pipefail
           rustup component add rust-docs rust-src
           target/debug/failforge-tools package \
             --installation "$GITHUB_WORKSPACE" \
-            --output "$RUNNER_TEMP/beta-package"
+            --output "$RUNNER_TEMP/release-package"
       - name: Verify and install the actual archive with a fresh dependency cache
         shell: bash
         run: |
           set -euo pipefail
-          (cd "$RUNNER_TEMP/beta-package" && shasum -a 256 -c SHA256SUMS)
-          archive=$(jq -er '.archive' "$RUNNER_TEMP/beta-package/package-manifest.json")
-          archive_root=$(jq -er '.archiveRoot' "$RUNNER_TEMP/beta-package/package-manifest.json")
-          mkdir "$RUNNER_TEMP/extracted beta"
-          tar -xzf "$RUNNER_TEMP/beta-package/$archive" -C "$RUNNER_TEMP/extracted beta"
-          mv "$RUNNER_TEMP/extracted beta/$archive_root" "$RUNNER_TEMP/moved beta installation"
+          (cd "$RUNNER_TEMP/release-package" && shasum -a 256 -c SHA256SUMS)
+          archive=$(jq -er '.archive' "$RUNNER_TEMP/release-package/package-manifest.json")
+          archive_root=$(jq -er '.archiveRoot' "$RUNNER_TEMP/release-package/package-manifest.json")
+          mkdir "$RUNNER_TEMP/extracted archive"
+          tar -xzf "$RUNNER_TEMP/release-package/$archive" -C "$RUNNER_TEMP/extracted archive"
+          mv "$RUNNER_TEMP/extracted archive/$archive_root" "$RUNNER_TEMP/moved installation"
           target/debug/failforge-tools package-smoke \
-            --installation "$RUNNER_TEMP/moved beta installation" \
+            --installation "$RUNNER_TEMP/moved installation" \
             --dart-sdk "$RUNNER_TEMP/flutter/bin/cache/dart-sdk" \
-            --output "$RUNNER_TEMP/beta-package-smoke"
+            --output "$RUNNER_TEMP/release-package-smoke"
 
   dart-minimum:
     name: Dart 3.13.0 minimum / ubuntu-latest
