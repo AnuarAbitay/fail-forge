@@ -79,6 +79,11 @@ instantaneous. A gate stop is separate from Ctrl+C. Candidates not run because
 of the gate are counted separately and are not assigned `SURVIVED` or
 `CANCELLED` outcomes.
 
+The admission stop applies to every worker in that family's shared queue.
+It does not cancel other, independently started FailForge campaigns. Existing
+tasks finish normally; a gate stop does not forcibly terminate their test
+processes.
+
 In a profile with early stopping enabled, a failing required family prevents
 later families from starting. Without early stopping, all families execute and
 the full set of thresholds is evaluated at the end.

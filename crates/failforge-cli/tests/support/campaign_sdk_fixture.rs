@@ -141,7 +141,10 @@ fn wait_for_workers(config: &Value, count: usize) {
 }
 
 fn wait_for_quality_stop(config: &Value) {
-    let journal = Path::new(config["output"].as_str().unwrap()).join("events.jsonl");
+    let journal = config["gate_stop_journal"]
+        .as_str()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(config["output"].as_str().unwrap()).join("events.jsonl"));
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let stopped = fs::read_to_string(&journal)
@@ -284,12 +287,19 @@ fn test(config: &Value) -> i32 {
         json!({"patched":patched,"source":source}),
     );
     if patched && mode == "gate_drain" {
-        wait_for_workers(config, 2);
+        wait_for_workers(
+            config,
+            config["gate_workers"].as_u64().unwrap_or(2) as usize,
+        );
         if source != "const value = 2;\n" {
             // The survivor finishes first. Its peer must be drained naturally
             // after the gate stops admission, without being cancelled.
             wait_for_quality_stop(config);
         }
+    }
+    if patched && mode == "gate_peer" {
+        wait_for_quality_stop(config);
+        mark(config, "peer_gate_observed", json!({"source":source}));
     }
     if patched && matches!(mode, "hold" | "progress_failure") {
         if source == "const value = 2;\n" {

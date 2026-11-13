@@ -111,6 +111,12 @@ impl Fixture {
         put(self.root.join("fixture.json"), json!({"mode":mode,"cases":cases,"trace":self.root.join("sdk.jsonl"),
             "original":self.project().join("lib/subject.dart"),"sdk_input":self.sdk().join("lib/core/core.dart"),"output":self.output()}).to_string());
     }
+    fn fixture_setting(&self, name: &str, value: Value) {
+        let path = self.root.join("fixture.json");
+        let mut configuration: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        configuration[name] = value;
+        put(path, configuration.to_string());
+    }
     fn direct(&self) -> Vec<OsString> {
         vec![
             "--project".into(),
@@ -982,6 +988,92 @@ fn quality_gate_drains_started_workers_and_does_not_admit_the_next_mutant() {
     );
     assert_eq!(f.rows("test_end").len(), 4);
     f.assert_clean(true);
+}
+
+#[test]
+fn quality_gate_stops_the_entire_four_worker_pool_without_cancelling_another_campaign() {
+    let mut stopped = Fixture::new();
+    stopped.configure("gate_drain", json!({"classic":["2","3","4","5","6"]}));
+    stopped.fixture_setting("gate_workers", json!(4));
+    let mut stopped_args = stopped.direct();
+    stopped_args.extend([
+        "--min-score".into(),
+        "100".into(),
+        "--stop-when-unreachable".into(),
+        "--workers".into(),
+        "4".into(),
+    ]);
+
+    // Keep a separate campaign active until the first campaign publishes its
+    // stop proof, then require it to keep admitting its remaining candidates.
+    let mut peer = Fixture::new();
+    peer.configure("gate_peer", json!({"classic":["2","3","4"]}));
+    peer.fixture_setting(
+        "gate_stop_journal",
+        json!(stopped.output().join("events.jsonl")),
+    );
+    let peer_args = peer.direct();
+    peer.spawn(&peer_args, false);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !peer
+        .rows("test_start")
+        .iter()
+        .any(|row| row["patched"] == true)
+    {
+        assert!(
+            Instant::now() < deadline,
+            "independent campaign did not become active"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    stopped.spawn(&stopped_args, false);
+    assert_exit(&stopped.finish(), 1);
+    success(&peer.finish());
+
+    let summary = stopped.summary();
+    assert_eq!(summary["status"], "quality_stopped");
+    assert_eq!(summary["completedMutants"], 4);
+    assert_eq!(summary["expectedMutants"], 5);
+    assert_eq!(summary["outcomeCounts"], json!({"KILLED":3,"SURVIVED":1}));
+    assert_eq!(summary["qualityGate"]["notRunMutants"], 1);
+    assert_eq!(summary["qualityGate"]["proof"]["killed"], 0);
+    assert_eq!(summary["qualityGate"]["proof"]["survived"], 1);
+    assert_eq!(summary["qualityGate"]["proof"]["remaining"], 4);
+    let starts = stopped.rows("test_start");
+    assert_eq!(
+        starts.iter().filter(|row| row["patched"] == true).count(),
+        4
+    );
+    assert!(
+        !starts
+            .iter()
+            .any(|row| row["source"] == "const value = 6;\n")
+    );
+    assert_eq!(stopped.rows("test_end").len(), 6);
+    assert_eq!(summary["originalControls"].as_array().unwrap().len(), 1);
+
+    let peer_summary = peer.summary();
+    assert_eq!(peer_summary["status"], "completed");
+    assert_eq!(peer_summary["complete"], true);
+    assert_eq!(peer_summary["completedMutants"], 3);
+    assert_eq!(peer_summary["outcomeCounts"], json!({"KILLED":3}));
+    let peer_trace = peer.rows("");
+    let observed = peer_trace
+        .iter()
+        .position(|row| row["kind"] == "peer_gate_observed")
+        .unwrap();
+    assert_eq!(
+        peer_trace[observed + 1..]
+            .iter()
+            .filter(|row| row["kind"] == "test_start" && row["patched"] == true)
+            .count(),
+        2
+    );
+    stopped.assert_clean(true);
+    stopped.assert_progress();
+    peer.assert_clean(true);
+    peer.assert_progress();
 }
 
 #[test]

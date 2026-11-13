@@ -174,6 +174,173 @@ fn profile(classic: Value, failure: Value) -> Value {
     }})
 }
 
+fn add_quality_gate(summary: &mut Value, threshold: &str, stop: bool, proof: Option<Value>) {
+    use failforge_config::quality_gate::{QualityGate, ScoreThreshold};
+    let gate = QualityGate {
+        min_score: Some(ScoreThreshold::parse(threshold).unwrap()),
+        stop_when_unreachable: stop,
+    };
+    let proof = proof
+        .as_ref()
+        .map(crate::campaign::quality_gate::proof)
+        .transpose()
+        .unwrap();
+    summary["qualityGate"] = crate::campaign::quality_gate::family(
+        &gate,
+        proof.as_ref(),
+        summary["status"].as_str().unwrap(),
+        "quality_stopped",
+        summary["expectedMutants"].as_u64(),
+        &count_map(&summary["outcomeCounts"]).unwrap(),
+        summary["completedMutants"].as_u64().unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+}
+
+fn quality_stopped_profile(classic: Value, failure: Value) -> Value {
+    let expected =
+        classic["expectedMutants"].as_u64().unwrap() + failure["expectedMutants"].as_u64().unwrap();
+    let mut summary = profile(classic, failure);
+    summary["status"] = "quality_stopped".into();
+    summary["complete"] = false.into();
+    summary["expectedMutants"] = expected.into();
+    summary["originalProjectFilesUnchanged"] = true.into();
+    summary["temporarySnapshotCleaned"] = true.into();
+    summary["workspaceCleanupDeferred"] = false.into();
+    let mut gates = BTreeMap::new();
+    for family in ["classic", "failure_mode"] {
+        let entry = &mut summary["families"][family];
+        entry["complete"] = entry["summary"]["complete"].clone();
+        let child = &mut entry["summary"];
+        child["profileComplete"] = false.into();
+        for score in ["mutationScore", "failureModeScore", "languageSpecificScore"] {
+            child[score] = Value::Null;
+        }
+        if let Some(gate) = child.get("qualityGate") {
+            gates.insert(family.to_owned(), gate.clone());
+        }
+    }
+    summary["qualityGate"] =
+        crate::campaign::quality_gate::profile(gates, "quality_stopped").unwrap();
+    summary
+}
+
+fn unstarted_failure_family() -> Value {
+    let mut family = direct("failure_mode", vec![]);
+    family["status"] = "not_started".into();
+    family["complete"] = false.into();
+    family["expectedMutants"] = 1.into();
+    family
+}
+
+#[test]
+fn quality_stopped_profiles_cannot_claim_every_family_completed() {
+    let fixture = Fixture::new();
+    for threshold in ["50", "50.01"] {
+        for stop in [false, true] {
+            let classic = direct("classic", vec![record("classic", "classic", "KILLED")]);
+            let mut failure = direct(
+                "failure_mode",
+                vec![
+                    record("failure_mode", "killed", "KILLED"),
+                    record("failure_mode", "survivor", "SURVIVED"),
+                ],
+            );
+            add_quality_gate(&mut failure, threshold, stop, None);
+            fixture.summary(&quality_stopped_profile(classic, failure));
+            assert!(
+                load(&fixture.0).is_err(),
+                "all families completed, threshold={threshold}, stop={stop}"
+            );
+        }
+    }
+}
+
+#[test]
+fn quality_stopped_profiles_require_an_enabled_policy_that_cannot_pass() {
+    let fixture = Fixture::new();
+    for (outcome, stop) in [("KILLED", true), ("SURVIVED", false)] {
+        let mut classic = direct("classic", vec![record("classic", "first", outcome)]);
+        add_quality_gate(&mut classic, "80", stop, None);
+        fixture.summary(&quality_stopped_profile(
+            classic,
+            unstarted_failure_family(),
+        ));
+        assert!(load(&fixture.0).is_err(), "outcome={outcome}, stop={stop}");
+    }
+}
+
+#[test]
+fn quality_stopped_reports_preserve_valid_proofs_and_require_clean_root_evidence() {
+    let fixture = Fixture::new();
+    let mut classic = direct("classic", vec![record("classic", "survivor", "SURVIVED")]);
+    classic["status"] = "quality_stopped".into();
+    classic["complete"] = false.into();
+    classic["expectedMutants"] = 2.into();
+    classic["mutationScore"] = Value::Null;
+    add_quality_gate(
+        &mut classic,
+        "80",
+        true,
+        Some(json!({"minScore":80,"maxPossiblePercent":50.0,
+            "killed":0,"survived":1,"remaining":1})),
+    );
+    fixture.summary(&classic);
+    let direct = fixture.load();
+    assert_eq!(direct["run"]["status"], "quality_stopped");
+    assert_eq!(direct["run"]["qualityGate"]["status"], "failed");
+    assert!(direct["families"][0]["score"].is_null());
+
+    let mut later = unstarted_failure_family();
+    add_quality_gate(&mut later, "80", true, None);
+    let profile = quality_stopped_profile(classic, later);
+    fixture.summary(&profile);
+    let loaded = fixture.load();
+    assert_eq!(loaded["run"]["qualityGate"]["status"], "failed");
+    assert_eq!(
+        loaded["families"][1]["qualityGate"]["reason"],
+        "skipped_due_to_gate"
+    );
+    for (field, value) in [
+        ("originalProjectFilesUnchanged", json!(false)),
+        ("temporarySnapshotCleaned", json!(false)),
+        ("workspaceCleanupDeferred", json!(true)),
+        ("error", json!("verification failed")),
+        ("expectedMutants", json!(4)),
+        ("expectedMutants", Value::Null),
+    ] {
+        let mut invalid = profile.clone();
+        invalid[field] = value;
+        fixture.summary(&invalid);
+        assert!(load(&fixture.0).is_err(), "{field}");
+    }
+    let mut unknown_plan = profile;
+    let later = &mut unknown_plan["families"]["failure_mode"];
+    later["expectedMutants"] = Value::Null;
+    later["summary"]["expectedMutants"] = Value::Null;
+    later["summary"]["qualityGate"]["notRunMutants"] = Value::Null;
+    unknown_plan["qualityGate"]["families"]["failure_mode"]["notRunMutants"] = Value::Null;
+    fixture.summary(&unknown_plan);
+    assert!(load(&fixture.0).is_err(), "unknown later family plan");
+}
+
+#[test]
+fn quality_stopped_profile_without_scored_results_remains_not_evaluated() {
+    let fixture = Fixture::new();
+    let mut classic = direct("classic", vec![record("classic", "invalid", "INVALID")]);
+    add_quality_gate(&mut classic, "0", true, None);
+    let mut later = unstarted_failure_family();
+    add_quality_gate(&mut later, "80", true, None);
+    fixture.summary(&quality_stopped_profile(classic, later));
+    let loaded = fixture.load();
+    assert_eq!(loaded["run"]["qualityGate"]["status"], "not_evaluated");
+    assert_eq!(
+        loaded["families"][0]["qualityGate"]["reason"],
+        "no_scored_mutants"
+    );
+}
+
 #[test]
 fn direct_summary_preserves_records_and_only_reads_local_captures() {
     let fixture = Fixture::new();

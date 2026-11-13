@@ -14,6 +14,8 @@ downloads and their verification results.
   cleanup still run, and partial reports retain a separate quality verdict.
 - Show saved quality gates in JSON, terminal summaries and offline HTML, with
   separate profile/family verdicts and explicit unrun counts.
+- Reject contradictory `quality_stopped` reports during HTML export, including
+  profiles with every family completed or without an enabled failing stop policy.
 
 ## 0.2.1 — Dart launcher
 

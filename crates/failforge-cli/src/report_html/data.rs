@@ -319,6 +319,50 @@ fn attachments(root: &Path, family: Option<&str>, record: &Value, budget: &mut u
     record
 }
 
+fn validate_quality_stop(summary: &Value, families: &[Value]) -> io::Result<()> {
+    if summary["status"] != "quality_stopped" {
+        return Ok(());
+    }
+    // Rebuilt family verdicts do not by themselves justify stopping a campaign.
+    // Keep the whole-run conditions aligned with the native report builder.
+    let mut expected = Some(0u64);
+    let mut unfinished = false;
+    let mut justified = false;
+    for family in families.iter().filter(|family| family["enabled"] == true) {
+        expected = match (expected, optional_count(family, "expectedMutants")?) {
+            (Some(total), Some(additional)) => Some(
+                total
+                    .checked_add(additional)
+                    .ok_or_else(|| invalid("quality stop plan count overflow"))?,
+            ),
+            _ => None,
+        };
+        unfinished |= family["complete"] != true;
+        let gate = &family["qualityGate"];
+        justified |= gate["stopWhenUnreachable"] == true
+            && (gate["proof"].is_object()
+                || family["complete"] == true
+                    && matches!(
+                        gate["reason"].as_str(),
+                        Some("below_threshold" | "no_scored_mutants")
+                    ));
+    }
+    if !unfinished
+        || !justified
+        || expected.is_none()
+        || optional_count(summary, "expectedMutants")? != expected
+        || summary["originalProjectFilesUnchanged"] != true
+        || summary["temporarySnapshotCleaned"] != true
+        || summary["workspaceCleanupDeferred"] != false
+        || !summary["error"].is_null()
+    {
+        return Err(invalid(
+            "quality-stopped campaign lacks clean stop evidence",
+        ));
+    }
+    Ok(())
+}
+
 /// Load retained evidence without requiring the original source project.
 pub(crate) fn load(input: &Path) -> io::Result<Value> {
     load_with_source(input, None)
@@ -559,6 +603,7 @@ pub(crate) fn load_with_source(input: &Path, source_root: Option<&Path>) -> io::
     if !families.iter().any(|family| family["enabled"] == true) {
         return Err(invalid("profile has no enabled mutation family"));
     }
+    validate_quality_stop(&summary, &families)?;
     if profile {
         let rebuilt =
             crate::campaign::quality_gate::profile(quality_gates, text(&summary, "status")?);
