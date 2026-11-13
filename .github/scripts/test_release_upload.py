@@ -147,7 +147,7 @@ class ReleaseTests(unittest.TestCase):
         self.manifest_hash = module.digest(self.root / 'package-manifest.json')
         (self.root / 'SHA256SUMS').write_text(
             f'{module.digest(self.root / self.archive_name)}  {self.archive_name}\n'
-            f'{self.manifest_hash}  package-manifest.json\n')
+            f'{self.manifest_hash}  package-manifest.json\n', encoding='utf-8')
         self.smoke = {'allPassed': True, 'status': 'completed', 'offline': False,
             'cacheMode': 'new-isolated-cache', 'temporaryInputsRemoved': True,
             'ownerCleanupConfirmed': True, 'error': None,
@@ -157,7 +157,7 @@ class ReleaseTests(unittest.TestCase):
         self.write_json('smoke.json', self.smoke)
 
     def write_json(self, name, value):
-        (self.root / name).write_text(json.dumps(value))
+        (self.root / name).write_text(json.dumps(value), encoding='utf-8')
 
     def use_target(self, target):
         self.options.target = target
@@ -168,7 +168,7 @@ class ReleaseTests(unittest.TestCase):
         self.manifest_hash = module.digest(self.root / 'package-manifest.json')
         (self.root / 'SHA256SUMS').write_text(
             f'{module.digest(self.root / self.archive_name)}  {self.archive_name}\n'
-            f'{self.manifest_hash}  package-manifest.json\n')
+            f'{self.manifest_hash}  package-manifest.json\n', encoding='utf-8')
         self.smoke['results']['packageManifestSha256'] = self.manifest_hash
         self.write_json('smoke.json', self.smoke)
 
@@ -271,6 +271,21 @@ class ReleaseTests(unittest.TestCase):
                 with patch.dict(os.environ, dict(environment, RELEASE_VERSION=version), clear=True):
                     with self.assertRaises(SystemExit):
                         exec(compile(validation, '<workflow-validation>', 'exec'), {})
+
+    def test_unicode_version_fixture_reaches_validation_with_legacy_windows_encoding(self):
+        original_open = Path.open
+
+        def legacy_locale_open(path, mode='r', buffering=-1, encoding=None,
+                errors=None, newline=None):
+            if 'b' not in mode and encoding in (None, 'locale'):
+                encoding = 'cp1252'
+            return original_open(path, mode, buffering, encoding, errors, newline)
+
+        with patch.object(Path, 'open', legacy_locale_open):
+            self.use_version('١.2.3')
+            with self.assertRaises(module.ReleaseError):
+                module.local_assets(self.options)
+        self.assertIn('١.2.3', (self.root / 'SHA256SUMS').read_bytes().decode('utf-8'))
 
     def test_validate_only_rejects_prerelease_versions_without_credentials(self):
         environment = {'PATH': os.defpath, 'PYTHONDONTWRITEBYTECODE': '1'}
