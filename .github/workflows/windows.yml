@@ -243,6 +243,9 @@ jobs:
           & $dart --suppress-analytics analyze
           & $dart --suppress-analytics test --concurrency 1
       - name: Build and verify the Windows release package with a fresh cache
+        # The stable matrix entry may refresh the example lockfile, while the
+        # uploader validation requires the clean revision that release.yml packages.
+        if: matrix.flutter != 'stable'
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
