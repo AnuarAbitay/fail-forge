@@ -4,6 +4,27 @@ User-visible changes are recorded by version. Check
 [GitHub Releases](https://github.com/AnuarAbitay/fail-forge/releases) for published
 downloads and their verification results.
 
+## 0.3.0
+
+Native FailForge `0.3.0` keeps the `0.2.0` command-line behaviour and report
+formats. Dart launcher `0.2.1` continues to select native `0.2.0`.
+
+### Changed
+
+- Release packaging and uploads accept only stable `X.Y.Z` versions. Pre-release
+  and build-metadata versions are rejected before any draft is used.
+- The support and verification scope replaces the former beta limitations
+  page, and the platform, installation, packaging and known-issue guides
+  describe the current release.
+- Tests run with debug assertions and overflow checks enabled.
+
+### Fixed
+
+- Release fixture tests write UTF-8 explicitly, so non-ASCII version cases
+  reach validation under legacy Windows code pages.
+- The Runner crate example runs `rustc` from `PATH` and passes on every
+  supported platform.
+
 ## 0.2.1 — Dart launcher
 
 - Add a runnable CLI example covering a boundary mutation and offline HTML export.

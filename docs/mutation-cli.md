@@ -58,7 +58,7 @@ protocols; the public campaign calls the same implementations directly.
 
 ## Prepare the installation and target
 
-For FailForge `0.2.0`, follow the [installation guide](installation.md)
+For FailForge `0.3.0`, follow the [installation guide](installation.md)
 to install a matching native archive or build from source. For a source build,
 build the native executables and prepare the Dart adapter with a compatible SDK:
 
@@ -132,9 +132,6 @@ check local prerequisites with `failforge doctor`. Use `failforge doctor
 --config PATH` to check an existing profile's environment and literal source
 selection. This reads local state without running tests or changing files;
 see the [doctor reference](doctor.md) for checks and remediation commands.
-The published beta.1 archive has no `doctor` and requires explicit SDK and
-profile output paths; PATH discovery and automatic profile paths were added
-in beta.2.
 
 `failforge profile generate` creates an explicit YAML profile for one existing
 Dart source file under `lib/`. By default it discovers mutations with the

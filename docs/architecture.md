@@ -1,10 +1,18 @@
 # Runner architecture and guarantee boundaries
 
 The first stage separates command configuration, parent-side preparation,
-Unix child ownership, byte capture, and supervision. `failforge-runner` exposes
-`Runner`, `RunHandle`, configuration types, streaming chunks, and result types.
-The CLI adds argument parsing, signal listeners, raw display, diagnostics, and
-exit-code policy. Only Linux and macOS have process backends.
+platform-specific child ownership, byte capture, and supervision.
+`failforge-runner` exposes `Runner`, `RunHandle`, configuration types, streaming
+chunks, and result types. The CLI adds argument parsing, signal listeners, raw
+display, diagnostics, and exit-code policy. Process backends are available for
+Linux, macOS, and Windows.
+
+The process-group lifecycle and Unix-specific preparation and capture details
+below describe Linux and macOS. Windows uses owned process handles and a
+kill-on-close Job Object assigned before the child starts running; cancellation
+terminates the job immediately. See the [Windows requirements](windows.md#requirements)
+and [Windows process and report behavior](windows.md#process-and-report-behavior)
+for its platform-specific guarantees.
 
 ## Preparation and executable lookup
 
@@ -313,11 +321,14 @@ The automated suite covers structural contracts, native arguments/environment,
 output boundaries, return codes, cancellation, and group-cleanup scenarios with
 the Rust fixture. Fixture control channels are independent of captured pipes;
 tests use external deadlines and control-based cleanup rather than readiness
-sleeps. Stable and MSRV jobs are configured for Linux and macOS. Configuration
-alone is not a claim that those jobs have run or passed.
+sleeps. [Linux/macOS CI](../.github/workflows/ci.yml) configures stable and MSRV
+tests. [Windows CI](../.github/workflows/windows.yml) configures native stable
+tests and an MSRV check of all targets. Configuration alone is not a claim that
+those jobs have run or passed.
 
-See [the build and verification commands](../README.md#build-and-verify),
-[the benchmark driver](../crates/failforge-tools/README.md), and [the CLI contract](cli.md)
+See the [source build instructions](installation.md#build-from-source),
+[developer regression and measurement tools](../crates/failforge-tools/README.md),
+[Windows verification commands](windows.md#verify-locally), and [CLI contract](cli.md)
 for reproducible checks, measurement tooling, and user-visible behavior. Record
 the environment, build, commands, and workload alongside results. Coverage
 numbers and benchmark results describe that recorded build/workload; no

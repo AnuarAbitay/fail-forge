@@ -101,19 +101,25 @@ fn host(verbose: &str, os: &str, arch: &str) -> Result<String> {
     Ok(target.into())
 }
 
+pub(super) fn is_stable_version(value: &str) -> bool {
+    let mut components = value.split('.');
+    (0..3).all(|_| {
+        components.next().is_some_and(|component| {
+            !component.is_empty()
+                && component.bytes().all(|byte| byte.is_ascii_digit())
+                && (component == "0" || !component.starts_with('0'))
+        })
+    }) && components.next().is_none()
+}
+
 fn version(stdout: &[u8], expected: Option<&str>) -> Result<String> {
     let text = std::str::from_utf8(stdout)?.trim();
     let value = text
         .strip_prefix("failforge ")
         .ok_or("unexpected CLI version response")?;
     ensure(
-        !value.is_empty()
-            && value.len() <= 100
-            && value.starts_with(|c: char| c.is_ascii_digit())
-            && value
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b".-+".contains(&b)),
-        "unsafe CLI version",
+        value.len() <= 100 && is_stable_version(value),
+        "CLI version must be a stable X.Y.Z release",
     )?;
     ensure(
         expected.is_none_or(|expected| expected == value),
@@ -382,6 +388,13 @@ fn fresh_output(path: &Path) -> Result<PathBuf> {
 }
 
 pub fn run(options: Options) -> Result<()> {
+    ensure(
+        options
+            .expected_version
+            .as_deref()
+            .is_none_or(is_stable_version),
+        "--expected-version must be a stable X.Y.Z release",
+    )?;
     let root = options
         .installation
         .unwrap_or_else(common::root)

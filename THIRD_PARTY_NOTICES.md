@@ -1,7 +1,7 @@
 # Third-party notices
 
-This file inventories the dependencies locked for FailForge's beta preparation on
-2026-10-20. FailForge's Apache-2.0 license applies to its original code; dependencies
+This file inventories FailForge's locked dependencies, reviewed on 2026-10-20.
+FailForge's Apache-2.0 license applies to its original code; dependencies
 retain their own terms. The linked texts preserve their published license and
 attribution notices. Alternative license texts are retained without silently
 selecting an alternative or dropping additional obligations.
