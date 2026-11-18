@@ -6,7 +6,7 @@ on:
       version:
         description: Exact stable X.Y.Z version already present in the source and draft release
         required: true
-        default: '0.2.0'
+        default: '0.3.0'
         type: string
       source_ref:
         description: Full immutable commit SHA referenced by the version tag

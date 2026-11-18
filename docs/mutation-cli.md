@@ -58,7 +58,7 @@ protocols; the public campaign calls the same implementations directly.
 
 ## Prepare the installation and target
 
-For FailForge `0.2.0`, follow the [installation guide](installation.md)
+For FailForge `0.3.0`, follow the [installation guide](installation.md)
 to install a matching native archive or build from source. For a source build,
 build the native executables and prepare the Dart adapter with a compatible SDK:
 

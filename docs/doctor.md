@@ -7,7 +7,7 @@ starting a campaign:
 failforge doctor
 ```
 
-This guide covers FailForge `0.2.0`.
+This guide covers FailForge `0.3.0`.
 
 The command reads local files and prepared dependency metadata. It does not run SDK
 programs, the adapter or your tests, download dependencies, create working

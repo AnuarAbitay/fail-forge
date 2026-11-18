@@ -233,7 +233,7 @@ class ReleaseTests(unittest.TestCase):
 
     def test_actual_workflow_defaults_to_stable_release(self):
         workflow = SOURCE.parent.parent / 'workflows' / 'release.yml'
-        self.assertRegex(workflow.read_text(), r"(?m)^        default: '0\.2\.0'$")
+        self.assertRegex(workflow.read_text(), r"(?m)^        default: '0\.3\.0'$")
 
     def test_other_version_syntax_is_rejected_locally_and_by_actual_workflow(self):
         workflow = SOURCE.parent.parent / 'workflows' / 'release.yml'

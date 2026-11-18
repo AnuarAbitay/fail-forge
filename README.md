@@ -1,7 +1,7 @@
 # FailForge
 
 [![Main CI](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AnuarAbitay/fail-forge/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.2.0-blue)](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue)](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.3.0)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **Find the bugs your Dart and Flutter tests would miss.**
@@ -11,20 +11,20 @@ When a test catches a change, the mutant is **killed**. When the tests still
 pass, the mutant **survives** and gives you a concrete place to review your
 assertions, edge cases or requirements.
 
-This documentation covers **FailForge `0.2.0`**, including offline HTML reports.
+This documentation covers **FailForge `0.3.0`**, including offline HTML reports.
 Use a matching native archive and its verification files from the
-[0.2.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0),
+[0.3.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.3.0),
 or build the tagged source. Choose the archive for your operating system and
 architecture. Read the [installation guide](docs/installation.md) and
 [support and verification scope](docs/support-scope.md) before your first run.
 
-Native `0.2.0` archives: [Linux x86_64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.2.0/failforge-0.2.0-x86_64-unknown-linux-gnu.tar.gz),
-[macOS arm64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.2.0/failforge-0.2.0-aarch64-apple-darwin.tar.gz)
-and [Windows x64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.2.0/failforge-0.2.0-x86_64-pc-windows-msvc.tar.gz).
+Native `0.3.0` archives: [Linux x86_64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.3.0/failforge-0.3.0-x86_64-unknown-linux-gnu.tar.gz),
+[macOS arm64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.3.0/failforge-0.3.0-aarch64-apple-darwin.tar.gz)
+and [Windows x64](https://github.com/AnuarAbitay/fail-forge/releases/download/v0.3.0/failforge-0.3.0-x86_64-pc-windows-msvc.tar.gz).
 Download the matching manifest and checksum file as described in the
 [installation guide](docs/installation.md#install-from-an-archive).
 
-[Download 0.2.0](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0) ·
+[Download 0.3.0](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.3.0) ·
 [Installation](docs/installation.md) ·
 [Operators](docs/mutation-operators.md) ·
 [Profiles](#yaml-profiles) ·
@@ -91,7 +91,7 @@ transformation and family. Scores are reported separately for each family.
 
 ## Get started
 
-FailForge 0.2.0 targets **Linux x86_64, macOS arm64 and Windows x64**.
+FailForge 0.3.0 targets **Linux x86_64, macOS arm64 and Windows x64**.
 Windows requires Windows 10 version 1809 or newer and a local NTFS working
 directory; see the [Windows installation and source build guide](docs/windows.md).
 Mutation analysis accepts a stable **Dart SDK `>=3.13.0 <4.0.0`**,

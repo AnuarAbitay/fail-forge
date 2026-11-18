@@ -1,8 +1,8 @@
 # Installation and first run
 
-This guide covers FailForge `0.2.0`, including HTML report export. Use a matching
+This guide covers FailForge `0.3.0`, including HTML report export. Use a matching
 native archive and its verification files from the
-[0.2.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0),
+[0.3.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.3.0),
 or build the tagged source. Choose the listed operating system and architecture
 and review the release's exact-source checks. Developers can also produce a
 local archive with the [packaging command](packaging.md). Read the
@@ -90,7 +90,7 @@ from a checkout is covered in the [launcher README](https://github.com/AnuarAbit
 ### Install from an archive
 
 Choose one target and obtain its three matching files from the
-[release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0).
+[release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.3.0).
 
 | Platform | Target |
 | --- | --- |
@@ -98,7 +98,7 @@ Choose one target and obtain its three matching files from the
 | macOS arm64 | `aarch64-apple-darwin` |
 | Windows x64 | `x86_64-pc-windows-msvc` |
 
-- `failforge-0.2.0-<target>.tar.gz`
+- `failforge-0.3.0-<target>.tar.gz`
 - `package-manifest-<target>.json`
 - `SHA256SUMS-<target>`
 
@@ -120,9 +120,9 @@ Continue only when every checksum reports `OK`:
 
 ```sh
 mkdir /absolute/path/to/new-install-parent
-tar -xzf "failforge-0.2.0-$FAILFORGE_TARGET.tar.gz" \
+tar -xzf "failforge-0.3.0-$FAILFORGE_TARGET.tar.gz" \
   -C /absolute/path/to/new-install-parent
-export FAILFORGE_HOME="/absolute/path/to/new-install-parent/failforge-0.2.0-$FAILFORGE_TARGET"
+export FAILFORGE_HOME="/absolute/path/to/new-install-parent/failforge-0.3.0-$FAILFORGE_TARGET"
 export PATH="$FAILFORGE_HOME/bin:$PATH"
 failforge --version
 failforge --help
@@ -150,7 +150,7 @@ Obtain the versioned source from the
 [FailForge repository](https://github.com/AnuarAbitay/fail-forge):
 
 ```sh
-git clone --branch v0.2.0 --depth 1 \
+git clone --branch v0.3.0 --depth 1 \
   https://github.com/AnuarAbitay/fail-forge.git
 ```
 

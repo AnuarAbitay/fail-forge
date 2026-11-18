@@ -1,6 +1,6 @@
 # Support and verification scope
 
-This document describes FailForge `0.2.0` and its verification boundaries, not
+This document describes FailForge `0.3.0` and its verification boundaries, not
 a promise of support for every Dart project. Use it with the
 [mutation command guide](mutation-cli.md). Interfaces and report formats may
 change between releases. Release verification identifies the exact source SHA
@@ -52,11 +52,11 @@ The [local packaging command](packaging.md) builds a host-specific `.tar.gz`
 with both executables, adapter sources, user documentation and license material.
 It does not publish a GitHub release. Obtain the versioned archive, checksums
 and matching package manifest from the
-[0.2.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.2.0),
+[0.3.0 release](https://github.com/AnuarAbitay/fail-forge/releases/tag/v0.3.0),
 selecting Linux x86_64, macOS arm64 or Windows x64. Each target has its own
 `SHA256SUMS-<target>` and `package-manifest-<target>.json` beside the archive.
 Archives are not universal executables, signed installers or notarized macOS
-applications. Checks of earlier releases do not establish verification of `0.2.0`.
+applications. Checks of earlier releases do not establish verification of `0.3.0`.
 
 If arranging a relocated installation, preserve these relationships:
 
