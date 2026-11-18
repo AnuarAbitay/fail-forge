@@ -4,6 +4,8 @@
 //! shell. A nonzero child exit is an ordinary result. Cancellation, timeout,
 //! real OS status, capture errors and cleanup evidence are reported separately.
 //!
+//! This example runs the Rust compiler from the inherited `PATH`.
+//!
 //! ```
 //! use failforge_runner::{CommandSpec, CompletionCause, Runner};
 //!
@@ -11,8 +13,8 @@
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let runner = Runner::new();
 //! let spec = CommandSpec {
-//!     program: "/usr/bin/printf".into(),
-//!     args: vec!["%s".into(), "hello".into()],
+//!     program: "rustc".into(),
+//!     args: vec!["--version".into()],
 //!     cwd: std::env::current_dir()?,
 //!     env: Default::default(),
 //!     timeout_policy: Default::default(),
@@ -24,7 +26,7 @@
 //! let result = outcome?;
 //! assert_eq!(result.cause, CompletionCause::ProcessCompleted);
 //! assert!(result.status.unwrap().success());
-//! assert_eq!(result.stdout.tail, b"hello");
+//! assert!(result.stdout.tail.starts_with(b"rustc "));
 //! assert!(result.cleanup.is_complete());
 //! # Ok(())
 //! # }
